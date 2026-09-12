@@ -151,6 +151,47 @@ class StudentDashboard {
     if (!container) return;
 
     const user = window.auth.getCurrentUser();
+
+    // Sync papers from backend (non-blocking, with in-flight lock)
+    if (!this._isSyncingPapers && typeof fetch !== 'undefined') {
+      this._isSyncingPapers = true;
+      const token = user ? (user.token || user.email) : '';
+      fetch('/api/papers', {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      }).then(r => r.ok ? r.json() : null).then(data => {
+        if (data && Array.isArray(data.papers)) {
+          const localAssignments = window.store.getAssignments();
+          let changed = false;
+          data.papers.forEach(bp => {
+            if (!bp.id) return;
+            const exists = localAssignments.find(a => a.id === bp.id);
+            if (!exists) {
+              localAssignments.unshift({
+                id: bp.id, title: bp.title || 'Untitled Paper', subjectId: bp.subjectId || '',
+                subject: bp.subject || '', topic: bp.topic || '', maximumMarks: bp.maximumMarks || 0,
+                durationMinutes: bp.durationMinutes || 0, description: bp.description || '',
+                status: bp.effectiveStatus || bp.status || 'Published',
+                isPublished: bp.effectiveStatus !== 'Draft' && bp.status !== 'Draft',
+                isLive: bp.isLive || false, questionPdfName: bp.questionPdfName || null,
+                questionPdfId: bp.questionPdfId || null, questionPdfData: bp.questionPdfData || null,
+                answerPdfName: bp.answerPdfName || null, answerPdfId: bp.answerPdfId || null,
+                answerPdfData: bp.answerPdfData || null,
+                scheduledPublishTime: bp.scheduledPublishTime || null,
+                liveStartTime: bp.liveStartTime || null, liveEndTime: bp.liveEndTime || null,
+                expiryTime: bp.expiryTime || null, deadline: bp.deadline || null,
+                createdAt: bp.createdAt || new Date().toISOString()
+              });
+              changed = true;
+            }
+          });
+          if (changed) {
+            window.store.saveAssignments(localAssignments);
+            this.renderPendingAssignments();
+          }
+        }
+      }).catch(() => {}).finally(() => { this._isSyncingPapers = false; });
+    }
+
     const assignments = window.store.getAssignments().filter(a => a.isPublished);
     const submissions = window.store.getSubmissionsByUser(user.id);
 

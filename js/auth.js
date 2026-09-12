@@ -400,7 +400,7 @@ class AuthManager {
       }
     }
 
-    users.push(newUser);
+    users.unshift(newUser);
     window.store.saveUsers(users);
     this.currentUser = newUser;
     window.store.setCurrentUser(newUser);
@@ -426,6 +426,9 @@ class AuthManager {
           if (data && data.token) {
             newUser.token = data.token;
             window.store.setCurrentUser(newUser);
+            if (window.store.updateUser) {
+              window.store.updateUser(newUser);
+            }
           }
         }).catch(() => {});
     }
@@ -527,6 +530,8 @@ class AuthManager {
     const navGuestActions = document.getElementById('nav-guest-actions');
     const mobileNavRegister = document.getElementById('mobile-nav-register');
     const mobileNavProfile = document.getElementById('mobile-nav-profile');
+    const mobileNavTeacher = document.getElementById('mobile-nav-teacher');
+    const mobileNavAdmin = document.getElementById('mobile-nav-admin');
 
     if (user) {
       if (userDisplay) userDisplay.textContent = user.name;
@@ -553,8 +558,14 @@ class AuthManager {
       if (adminNavTab) {
         adminNavTab.style.display = user.role === 'admin' ? 'inline-flex' : 'none';
       }
+      if (mobileNavAdmin) {
+        mobileNavAdmin.style.display = user.role === 'admin' ? 'flex' : 'none';
+      }
       if (teacherNavTab) {
         teacherNavTab.style.display = (user.role === 'teacher' || user.role === 'admin') ? 'inline-flex' : 'none';
+      }
+      if (mobileNavTeacher) {
+        mobileNavTeacher.style.display = (user.role === 'teacher' || user.role === 'admin') ? 'flex' : 'none';
       }
     } else {
       // Logged out: SHOW login & register buttons, HIDE user profile container
@@ -565,7 +576,9 @@ class AuthManager {
       if (navGuestActions) navGuestActions.style.display = 'flex';
       if (navUserContainer) navUserContainer.style.display = 'none';
       if (adminNavTab) adminNavTab.style.display = 'none';
+      if (mobileNavAdmin) mobileNavAdmin.style.display = 'none';
       if (teacherNavTab) teacherNavTab.style.display = 'none';
+      if (mobileNavTeacher) mobileNavTeacher.style.display = 'none';
     }
   }
 }

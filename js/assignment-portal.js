@@ -30,6 +30,86 @@ class AssignmentPortal {
     const serverTime = window.secureBackend ? window.secureBackend.getAuthoritativeTime() : new Date();
     const userSubmissions = user ? window.store.getSubmissionsByUser(user.id) : [];
 
+    // Synchronize papers from backend (fetches admin-uploaded papers that aren't in localStorage)
+    if (!this._isSyncingPapers && typeof fetch !== 'undefined') {
+      this._isSyncingPapers = true;
+      const token = user ? (user.token || user.email) : '';
+      fetch('/api/papers', {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      }).then(r => r.ok ? r.json() : null).then(data => {
+        if (data && Array.isArray(data.papers)) {
+          const localAssignments = window.store.getAssignments();
+          let changed = false;
+          data.papers.forEach(bp => {
+            if (!bp.id) return;
+            const existIdx = localAssignments.findIndex(a => a.id === bp.id);
+            if (existIdx === -1) {
+              // New paper from backend — add it
+              // Map backend paper fields to local assignment format
+              const paperObj = {
+                id: bp.id,
+                title: bp.title || 'Untitled Paper',
+                subjectId: bp.subjectId || '',
+                subject: bp.subject || '',
+                topic: bp.topic || '',
+                maximumMarks: bp.maximumMarks || 0,
+                durationMinutes: bp.durationMinutes || 0,
+                description: bp.description || '',
+                status: bp.effectiveStatus || bp.status || 'Published',
+                isPublished: bp.effectiveStatus !== 'Draft' && bp.status !== 'Draft',
+                isLive: bp.isLive || bp.effectiveStatus === 'Live Now',
+                questionPdfName: bp.questionPdfName || null,
+                questionPdfId: bp.questionPdfId || null,
+                questionPdfData: bp.questionPdfData || null,
+                answerPdfName: bp.answerPdfName || null,
+                answerPdfId: bp.answerPdfId || null,
+                answerPdfData: bp.answerPdfData || null,
+                scheduledPublishTime: bp.scheduledPublishTime || null,
+                liveStartTime: bp.liveStartTime || null,
+                liveEndTime: bp.liveEndTime || null,
+                expiryTime: bp.expiryTime || null,
+                deadline: bp.deadline || null,
+                createdAt: bp.createdAt || new Date().toISOString()
+              };
+              localAssignments.unshift(paperObj);
+              changed = true;
+            } else {
+              // Existing paper — update metadata (title, status, PDF info)
+              const existing = localAssignments[existIdx];
+              const updateFields = ['title', 'subject', 'subjectId', 'topic', 'maximumMarks', 'durationMinutes', 'description', 'status', 'questionPdfName', 'questionPdfId', 'answerPdfName', 'answerPdfId'];
+              updateFields.forEach(f => {
+                if (bp[f] !== undefined && bp[f] !== null && existing[f] !== bp[f]) {
+                  existing[f] = bp[f];
+                  changed = true;
+                }
+              });
+              // Update computed fields
+              if (bp.effectiveStatus) {
+                const newPublished = bp.effectiveStatus !== 'Draft';
+                if (existing.isPublished !== newPublished) {
+                  existing.isPublished = newPublished;
+                  changed = true;
+                }
+              }
+              // Sync PDF data if local is missing but backend has it
+              if (!existing.questionPdfData && bp.questionPdfData) {
+                existing.questionPdfData = bp.questionPdfData;
+                changed = true;
+              }
+              if (!existing.answerPdfData && bp.answerPdfData) {
+                existing.answerPdfData = bp.answerPdfData;
+                changed = true;
+              }
+            }
+          });
+          if (changed) {
+            window.store.saveAssignments(localAssignments);
+            this.render();
+          }
+        }
+      }).catch(() => {}).finally(() => { this._isSyncingPapers = false; });
+    }
+
     // 1. Render Subject Filter Pills with Dynamic Counts
     this.renderSubjectFilters();
 

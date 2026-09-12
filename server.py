@@ -433,7 +433,11 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             users_list = []
             for u in data.get('users', {}).values():
                 u_copy = dict(u)
-                u_copy.pop('password', None)
+                pwd = u.get('password', '')
+                if pwd and str(pwd).startswith('sha256:'):
+                    u_copy['password'] = pwd
+                else:
+                    u_copy['password'] = 'sha256:protected:secured'
                 users_list.append(u_copy)
             self.send_json(200, {'users': users_list, 'total': len(users_list)})
             return
@@ -685,6 +689,19 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         path = parsed_url.path
+
+        # Test Reporter Endpoint
+        if path == '/api/test-report':
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                with open(os.path.join(BASE_DIR, 'test_report.json'), 'wb') as f:
+                    f.write(body)
+                self.send_json(200, {'success': True})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': str(e)})
+                return
 
         # 0. User Login with Secure Password Verification
         if path == '/api/auth/login':
@@ -941,7 +958,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     if idx is not None:
                         papers[idx].update(paper_data)
                     else:
-                        papers.append(paper_data)
+                        papers.insert(0, paper_data)
                 else:
                     paper_data['id'] = f'paper-{int(datetime.now().timestamp())}'
                     paper_data['createdAt'] = datetime.now(timezone.utc).isoformat()

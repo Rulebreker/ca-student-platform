@@ -85,10 +85,53 @@ class AdminDashboard {
     if (window.lucide) window.lucide.createIcons();
   }
 
+  syncBackendUsers(callback) {
+    if (this._isSyncingUsers || typeof fetch === 'undefined') return;
+    this._isSyncingUsers = true;
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    fetch('/api/admin/users', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    }).then(r => r.ok ? r.json() : null).then(data => {
+      if (data && Array.isArray(data.users)) {
+        const currentUsers = window.store.getUsers();
+        let changed = false;
+        data.users.forEach(bu => {
+          const existIdx = currentUsers.findIndex(u => u.id === bu.id || (u.email && bu.email && u.email.toLowerCase() === bu.email.toLowerCase()));
+          if (existIdx === -1) {
+            currentUsers.unshift(bu);
+            changed = true;
+          } else {
+            const existing = currentUsers[existIdx];
+            const mergedFields = ['name', 'email', 'username', 'phone', 'caLevel', 'role', 'token', 'isActive', 'createdAt'];
+            mergedFields.forEach(f => {
+              if (bu[f] !== undefined && bu[f] !== null) {
+                if (existing[f] !== bu[f]) {
+                  existing[f] = bu[f];
+                  changed = true;
+                }
+              }
+            });
+          }
+        });
+        if (changed) {
+          window.store.saveUsers(currentUsers);
+          if (typeof callback === 'function') callback();
+        }
+      }
+    }).catch(() => {}).finally(() => {
+      this._isSyncingUsers = false;
+    });
+  }
+
   // --- 1. OVERVIEW & KPIS ---
   renderOverview() {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
+
+    this.syncBackendUsers(() => {
+      if (this.currentTab === 'overview') this.renderOverview();
+    });
 
     const allStudents = window.store.getStudents();
     const activeStudents = allStudents.filter(s => s.isActive !== false);
@@ -182,33 +225,14 @@ class AdminDashboard {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
 
-    // Synchronize newly registered backend users non-blockingly
-    if (!this._backendUsersSyncAttempted && typeof fetch !== 'undefined') {
-      this._backendUsersSyncAttempted = true;
-      const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-      const token = currentUser ? (currentUser.token || currentUser.email) : '';
-      fetch('/api/admin/users', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      }).then(r => r.ok ? r.json() : null).then(data => {
-        if (data && Array.isArray(data.users)) {
-          const currentUsers = window.store.getUsers();
-          let changed = false;
-          data.users.forEach(bu => {
-            const exists = currentUsers.find(u => u.id === bu.id || (u.email && bu.email && u.email.toLowerCase() === bu.email.toLowerCase()));
-            if (!exists) {
-              currentUsers.push(bu);
-              changed = true;
-            }
-          });
-          if (changed) {
-            window.store.saveUsers(currentUsers);
-            this.renderStudents();
-          }
-        }
-      }).catch(() => {});
-    }
+    // Synchronize backend users every time Students tab is opened
+    this.syncBackendUsers(() => {
+      if (this.currentTab === 'students') this.renderStudents();
+    });
 
     const allStudents = window.store.getStudents();
+    // Sort by newest registration first so new students appear on page 1
+    allStudents.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
     const attempts = window.store.getAttempts();
     const submissions = window.store.getSubmissions();
 
@@ -411,7 +435,7 @@ class AdminDashboard {
                   <td class="py-3 px-4">
                     <span class="font-mono text-xs font-bold bg-slate-100 px-2 py-1 rounded text-slate-800 border border-slate-200" title="${isHashed ? 'Salted SHA-256 Encrypted' : 'Legacy plain-text password'}">
                       ${this.showStudentPasswords 
-                        ? (isHashed ? '•••••••• (SHA-256 Secured)' : st.password) 
+                        ? (isHashed ? '•••••••• (SHA-256 Secured)' : (st.password || '•••••••• (SHA-256 Secured)')) 
                         : '••••••••'}
                     </span>
                   </td>
