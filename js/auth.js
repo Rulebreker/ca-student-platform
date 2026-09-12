@@ -10,9 +10,141 @@
  * - Safe logout redirecting to Homepage
  */
 
+/**
+ * Synchronous SHA-256 implementation compatible with RFC 6234 and Python hashlib.sha256
+ */
+function sha256Sync(str) {
+  var utf8 = [];
+  for (var i = 0; i < str.length; i++) {
+    var charcode = str.charCodeAt(i);
+    if (charcode < 0x80) utf8.push(charcode);
+    else if (charcode < 0x800) {
+      utf8.push(0xc0 | (charcode >> 6), 0x80 | (charcode & 0x3f));
+    } else if (charcode < 0xd800 || charcode >= 0xe000) {
+      utf8.push(0xe0 | (charcode >> 12), 0x80 | ((charcode >> 6) & 0x3f), 0x80 | (charcode & 0x3f));
+    } else {
+      i++;
+      charcode = 0x10000 + (((charcode & 0x3ff) << 10) | (str.charCodeAt(i) & 0x3ff));
+      utf8.push(0xf0 | (charcode >> 18), 0x80 | ((charcode >> 12) & 0x3f), 0x80 | ((charcode >> 6) & 0x3f), 0x80 | (charcode & 0x3f));
+    }
+  }
+
+  function rightRotate(n, count) { return (n >>> count) | (n << (32 - count)); }
+
+  var K = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+  ];
+
+  var H = [
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+  ];
+
+  var l = utf8.length;
+  utf8.push(0x80);
+  while ((utf8.length % 64) !== 56) utf8.push(0);
+  var bitLenHi = Math.floor(l / 0x20000000);
+  var bitLenLo = (l * 8) >>> 0;
+  for (var b = 24; b >= 0; b -= 8) utf8.push((bitLenHi >>> b) & 0xff);
+  for (var b = 24; b >= 0; b -= 8) utf8.push((bitLenLo >>> b) & 0xff);
+
+  var W = new Array(64);
+  for (var i = 0; i < utf8.length; i += 64) {
+    for (var t = 0; t < 16; t++) {
+      W[t] = (utf8[i + t * 4] << 24) | (utf8[i + t * 4 + 1] << 16) | (utf8[i + t * 4 + 2] << 8) | (utf8[i + t * 4 + 3]);
+    }
+    for (var t = 16; t < 64; t++) {
+      var s0 = rightRotate(W[t - 15], 7) ^ rightRotate(W[t - 15], 18) ^ (W[t - 15] >>> 3);
+      var s1 = rightRotate(W[t - 2], 17) ^ rightRotate(W[t - 2], 19) ^ (W[t - 2] >>> 10);
+      W[t] = (((W[t - 16] + s0) >>> 0) + ((W[t - 7] + s1) >>> 0)) >>> 0;
+    }
+
+    var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+
+    for (var t = 0; t < 64; t++) {
+      var S1 = rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25);
+      var ch = (e & f) ^ ((~e) & g);
+      var temp1 = (((h + S1) >>> 0) + ((ch + K[t]) >>> 0) + W[t]) >>> 0;
+      var S0 = rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22);
+      var maj = (a & b) ^ (a & c) ^ (b & c);
+      var temp2 = (S0 + maj) >>> 0;
+
+      h = g;
+      g = f;
+      f = e;
+      e = (d + temp1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) >>> 0;
+    }
+
+    H[0] = (H[0] + a) >>> 0;
+    H[1] = (H[1] + b) >>> 0;
+    H[2] = (H[2] + c) >>> 0;
+    H[3] = (H[3] + d) >>> 0;
+    H[4] = (H[4] + e) >>> 0;
+    H[5] = (H[5] + f) >>> 0;
+    H[6] = (H[6] + g) >>> 0;
+    H[7] = (H[7] + h) >>> 0;
+  }
+
+  var hex = '';
+  for (var i = 0; i < 8; i++) {
+    hex += ('00000000' + H[i].toString(16)).slice(-8);
+  }
+  return hex;
+}
+
+function generateSalt(len = 16) {
+  const chars = '0123456789abcdef';
+  let salt = '';
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const bytes = new Uint8Array(Math.ceil(len / 2));
+    crypto.getRandomValues(bytes);
+    for (let b of bytes) salt += ('0' + b.toString(16)).slice(-2);
+    return salt.slice(0, len);
+  } else {
+    for (let i = 0; i < len; i++) {
+      salt += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return salt;
+  }
+}
+
 class AuthManager {
   constructor() {
     this.currentUser = window.store ? window.store.getCurrentUser() : null;
+  }
+
+  hashPassword(plainPassword, salt = null) {
+    if (!plainPassword) return '';
+    const s = salt || generateSalt(16);
+    const hash = sha256Sync(s + ':' + plainPassword);
+    return `sha256:${s}:${hash}`;
+  }
+
+  verifyPassword(plainPassword, storedPassword) {
+    if (!plainPassword || !storedPassword) return false;
+    const stored = String(storedPassword);
+    if (stored.startsWith('sha256:')) {
+      const parts = stored.split(':');
+      if (parts.length === 3) {
+        const salt = parts[1];
+        const expectedHash = parts[2];
+        const computedHash = sha256Sync(salt + ':' + plainPassword);
+        return computedHash === expectedHash;
+      }
+    }
+    // Backward compatibility: support legacy plain-text passwords
+    return plainPassword === storedPassword;
   }
 
   getCurrentUser() {
@@ -97,32 +229,61 @@ class AuthManager {
 
   login(identifier, password) {
     if (!identifier || !password) {
-      return { success: false, error: 'Please enter your email/username and password.' };
+      return { success: false, error: 'Login Failed: Please enter your email/username and password.' };
     }
 
-    const cleanId = identifier.trim().toLowerCase();
+    const cleanId = String(identifier || '').trim().toLowerCase();
+    const rawPass = String(password || '');
     const users = window.store.getUsers();
     
-    // Match by email OR username (case-insensitive)
+    // Match by email OR username (case-insensitive & trimmed)
     const user = users.find(u => 
-      (u.email && u.email.toLowerCase() === cleanId) || 
-      (u.username && u.username.toLowerCase() === cleanId)
+      (u.email && u.email.trim().toLowerCase() === cleanId) || 
+      (u.username && u.username.trim().toLowerCase() === cleanId)
     );
     
-    if (!user || user.password !== password) {
-      return { success: false, error: 'Invalid credentials. Please check your username/email and password.' };
+    if (!user || !this.verifyPassword(rawPass, user.password)) {
+      return { success: false, error: 'Login Failed: Invalid username or password.' };
     }
 
     if (user.isActive === false) {
       return { 
         success: false, 
-        error: 'Your account has been deactivated by the Administrator. Please contact faculty support.' 
+        error: 'Login Failed: Your account has been deactivated by the Administrator. Please contact faculty support.' 
       };
+    }
+
+    // Transparently upgrade legacy plain-text password to salted SHA-256 hash
+    if (!user.password || !String(user.password).startsWith('sha256:')) {
+      user.password = this.hashPassword(rawPass);
+      window.store.updateUser(user);
+    }
+
+    // Ensure session token
+    if (!user.token) {
+      user.token = `token_${user.role || 'student'}_${Date.now()}`;
+      window.store.updateUser(user);
     }
 
     this.currentUser = user;
     window.store.setCurrentUser(user);
     this.onAuthChange();
+
+    // Asynchronously synchronize session token with backend if server is reachable
+    if (typeof fetch !== 'undefined') {
+      fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: cleanId, password: rawPass })
+      }).then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data && data.token && user) {
+            user.token = data.token;
+            window.store.setCurrentUser(user);
+          }
+        }).catch(() => {});
+    }
+
     return { success: true, user };
   }
 
@@ -183,6 +344,9 @@ class AuthManager {
       );
     }
 
+    const hashedPassword = this.hashPassword(password);
+    const userToken = `token_student_${Date.now()}`;
+
     const newUser = {
       id: 'usr-' + Date.now(),
       username: cleanUsername,
@@ -190,7 +354,8 @@ class AuthManager {
       email: email.toLowerCase().trim(),
       phone: cleanPhone,
       caLevel: normLevel.includes('INTER') ? 'CA INTER' : normLevel,
-      password: password,
+      password: hashedPassword,
+      token: userToken,
       role: role,
       state: state || 'Uttar Pradesh',
       district: district || 'Meerut',
@@ -241,6 +406,30 @@ class AuthManager {
     window.store.setCurrentUser(newUser);
     this.onAuthChange();
 
+    // Asynchronously persist student registration to backend if online
+    if (typeof fetch !== 'undefined') {
+      fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: newUser.id,
+          username: cleanUsername,
+          name: fullName.trim(),
+          email: newUser.email,
+          phone: cleanPhone,
+          caLevel: newUser.caLevel,
+          password: password,
+          role: 'student'
+        })
+      }).then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data && data.token) {
+            newUser.token = data.token;
+            window.store.setCurrentUser(newUser);
+          }
+        }).catch(() => {});
+    }
+
     return { 
       success: true, 
       user: newUser,
@@ -258,7 +447,7 @@ class AuthManager {
       return { success: false, error: 'Current password is required.' };
     }
 
-    if (user.password !== oldPassword) {
+    if (!this.verifyPassword(oldPassword, user.password)) {
       return { success: false, error: 'Incorrect current password. Please verify and try again.' };
     }
 
@@ -275,7 +464,7 @@ class AuthManager {
       return { success: false, error: pVal.error };
     }
 
-    user.password = newPassword;
+    user.password = this.hashPassword(newPassword);
     window.store.updateUser(user);
     this.currentUser = user;
 

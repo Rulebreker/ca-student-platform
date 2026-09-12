@@ -6,7 +6,9 @@
       "email": "adminrulebreker@rulebrekerdothunter.com",
       "role": "admin",
       "token": "token_admin_excellenceca_secret",
-      "isActive": true
+      "isActive": true,
+      "password": "sha256:admin_salt_2026:02a70c1f4315ebb55dfe203f4b059605c91d133c80bd664b13c607c4a7c94296",
+      "username": "adminrulebreker@rulebrekerdothunter.com"
     },
     "rohan.sharma@castudent.in": {
       "id": "usr-student-1",
@@ -14,7 +16,9 @@
       "email": "rohan.sharma@castudent.in",
       "role": "student",
       "token": "token_rohan_sharma_student",
-      "isActive": true
+      "isActive": true,
+      "password": "sha256:rohan_salt_2026:4bc09285fc316fdb16fabcc092c15d15b9b9fbb7a19e926d55796dd509278baa",
+      "username": "rohan_sharma"
     },
     "priya.patel@castudent.in": {
       "id": "usr-student-2",
@@ -22,7 +26,9 @@
       "email": "priya.patel@castudent.in",
       "role": "student",
       "token": "token_priya_patel_student",
-      "isActive": true
+      "isActive": true,
+      "password": "sha256:priya_salt_2026:d9d13c19c3b68e0af57d22a854944d6e0c3e42466e53cbae186bff1d054c43ce",
+      "username": "priya_patel"
     },
     "prof.sharma@excellenceca.com": {
       "id": "usr-teacher-1",
@@ -30,7 +36,35 @@
       "email": "prof.sharma@excellenceca.com",
       "role": "teacher",
       "token": "token_prof_sharma_teacher",
-      "isActive": true
+      "isActive": true,
+      "password": "sha256:rajesh_salt_2026:d3ac2e3fe1e52245b0f37caad135b5eb170743d2c48ab54adaebcd9e44022723",
+      "username": "prof_rajesh"
+    },
+    "sec23787@castudent.in": {
+      "id": "usr-1789236833980",
+      "name": "Security Test Student",
+      "username": "sec23787",
+      "email": "sec23787@castudent.in",
+      "phone": "+91 98888 77777",
+      "caLevel": "CA FOUNDATION",
+      "password": "sha256:da829903396e4f54:8c8f829a1904b9ef34023b7def624f8f982c700cea8363acfd1c6e15a808e72a",
+      "role": "student",
+      "token": "token_student_4ead19f5f29c4919",
+      "isActive": true,
+      "createdAt": "2026-09-12T18:13:51.734449+00:00"
+    },
+    "sec50301@castudent.in": {
+      "id": "usr-1789236890722",
+      "name": "Security Test Student",
+      "username": "sec50301",
+      "email": "sec50301@castudent.in",
+      "phone": "+91 98888 77777",
+      "caLevel": "CA FOUNDATION",
+      "password": "sha256:cab3a60f94f84617:024180c980c0b233cadaf88bf86709a9ecccafd0e3dfd556aa5344eb24c82228",
+      "role": "student",
+      "token": "token_student_fc967f16984a4d39",
+      "isActive": true,
+      "createdAt": "2026-09-12T18:14:48.466949+00:00"
     }
   },
   "papers": [
@@ -177,6 +211,31 @@
       "liveEndTime": "2026-09-12T12:00:00.000Z",
       "questionPdfId": "qp_qa_paper4.pdf",
       "questionPdfName": "QA_Live_QP.pdf"
+    },
+    {
+      "id": "asg-1789236892752",
+      "title": "Automated Verification Mock Paper 2026",
+      "subjectId": "sub-1",
+      "subject": "Accounting",
+      "topic": "Advanced Accounting Ind AS",
+      "maximumMarks": 100,
+      "durationMinutes": 180,
+      "description": "Complete syllabus test with question paper attached",
+      "status": "Published",
+      "isPublished": true,
+      "isLive": false,
+      "scheduledPublishTime": null,
+      "liveStartTime": null,
+      "liveEndTime": null,
+      "expiryTime": "2026-10-12T18:14:52.752Z",
+      "deadline": "2026-10-12T18:14:52.752Z",
+      "questionPdfName": "Automated_Test_Question_Paper.pdf",
+      "questionPdfId": "question_96fe06805b0b.pdf",
+      "questionPdfData": "data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZy9QYWdlcyAyIDAgUj4+ZW5kb2JqIDIgMCBvYmo8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PmVuZG9iaiAzIDAgb2JqPDwvVHlwZS9QYWdlL01lZGlhQm94WzAgMCA2MTIgNzkyXT4+ZW5kb2JqCnhyZWYKMCA0CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDUyIDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKdHJhaWxlcjw8L1NpemUgNC9Sb290IDEgMCBSPj4Kc3RhcnR4cmVmCjE3OAolJUVPRg==",
+      "answerPdfName": null,
+      "answerPdfId": null,
+      "answerPdfData": null,
+      "createdAt": "2026-09-12T18:14:52.752Z"
     }
   ],
   "submissions": [],

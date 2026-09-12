@@ -411,14 +411,26 @@ startxref
         };
       } else {
         const errJson = await resp.json().catch(() => ({}));
-        return { success: false, error: errJson.error || 'Upload rejected by server.' };
+        // If server returned 404 (static hosting like Vercel), 401 (auth sync), 413, or server error,
+        // safely preserve the uploaded question/answer document in client secure storage
+        if (base64Data && (resp.status === 404 || resp.status === 401 || resp.status === 413 || resp.status >= 500 || !errJson.error)) {
+          console.warn(`[SecureBackend] Server upload returned HTTP ${resp.status}; falling back to client storage.`);
+          return {
+            success: true,
+            fileId: `local_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
+            fileName: file.name,
+            fileSize: file.size,
+            fileData: base64Data
+          };
+        }
+        return { success: false, error: errJson.error || 'Upload could not be completed.' };
       }
     } catch (err) {
       // Offline fallback: Still store securely in store
       console.warn('[SecureBackend] Server upload offline; using client cryptographic store.');
       return {
         success: true,
-        fileId: `local_${Date.now()}_${file.name}`,
+        fileId: `local_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
         fileName: file.name,
         fileSize: file.size,
         fileData: base64Data
@@ -665,8 +677,37 @@ startxref
   async verifyTestAttemptAllowed(testId, isPreview = false) {
     if (isPreview) return { allowed: true, isPreview: true };
 
-    const user = window.auth.getCurrentUser();
+    const user = window.auth ? window.auth.getCurrentUser() : null;
     const token = user ? (user.token || user.email) : '';
+
+    const validateLocalStoreEligibility = () => {
+      const test = window.store ? window.store.getTestById(testId) : null;
+      if (!test) return { allowed: false, error: 'Test not found in curriculum.' };
+
+      // Ensure test is published/live
+      const isPublished = test.isPublished !== false && test.status !== 'Draft' && test.status !== 'Archived';
+      if (!isPublished) {
+        return { allowed: false, error: 'This test is currently saved as a draft and is not yet published.' };
+      }
+
+      // Check attempt limits
+      const studentId = user ? user.id : 'anon';
+      const allUserAttempts = window.store.getAttemptsByUser 
+        ? window.store.getAttemptsByUser(studentId) 
+        : (window.store.getAttempts() || []).filter(a => a.userId === studentId);
+      const testAttempts = allUserAttempts.filter(a => a.testId === testId);
+      const maxAtt = parseInt(test.maxAttempts, 10) || 3;
+      if (testAttempts.length >= maxAtt) {
+        return { allowed: false, error: `You have exhausted all ${maxAtt} allowed attempts for this test.` };
+      }
+
+      return {
+        allowed: true,
+        attemptsUsed: testAttempts.length,
+        maxAttempts: maxAtt,
+        attemptsRemaining: maxAtt - testAttempts.length
+      };
+    };
 
     try {
       const resp = await fetch('/api/tests/start', {
@@ -682,18 +723,15 @@ startxref
         return await resp.json();
       } else {
         const err = await resp.json().catch(() => ({}));
+        // If server returns 404 (test created in frontend or static host Vercel) or generic error, validate locally
+        if (resp.status === 404 || resp.status === 401 || resp.status >= 500 || !err.error || err.error === 'Test start rejected.') {
+          return validateLocalStoreEligibility();
+        }
         return { allowed: false, error: err.error || 'Test start rejected.' };
       }
     } catch (e) {
-      // Offline fallback: check local store
-      const test = window.store.getTestById(testId);
-      if (!test) return { allowed: false, error: 'Test not found.' };
-      const attempts = window.store.getAttemptsByUser(user ? user.id : 'anon').filter(a => a.testId === testId);
-      const maxAtt = test.maxAttempts || 3;
-      if (attempts.length >= maxAtt) {
-        return { allowed: false, error: `You have exhausted all ${maxAtt} allowed attempts for this test.` };
-      }
-      return { allowed: true, attemptsUsed: attempts.length, maxAttempts: maxAtt, attemptsRemaining: maxAtt - attempts.length };
+      // Offline / network fallback: perform local store validation
+      return validateLocalStoreEligibility();
     }
   }
 
