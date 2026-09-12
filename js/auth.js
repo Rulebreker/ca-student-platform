@@ -139,8 +139,9 @@ class AuthManager {
       if (parts.length === 3) {
         const salt = parts[1];
         const expectedHash = parts[2];
-        const computedHash = sha256Sync(salt + ':' + plainPassword);
-        return computedHash === expectedHash;
+        const computedHash1 = sha256Sync(salt + ':' + plainPassword);
+        const computedHash2 = sha256Sync(salt + plainPassword);
+        return computedHash1 === expectedHash || computedHash2 === expectedHash;
       }
     }
     // Backward compatibility: support legacy plain-text passwords

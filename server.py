@@ -24,7 +24,7 @@ def hash_password(plain_password, salt=None):
         return ''
     if not salt:
         salt = uuid.uuid4().hex[:16]
-    h = hashlib.sha256((salt + plain_password).encode('utf-8')).hexdigest()
+    h = hashlib.sha256((salt + ':' + plain_password).encode('utf-8')).hexdigest()
     return f"sha256:{salt}:{h}"
 
 def verify_password(plain_password, stored_password):
@@ -34,7 +34,9 @@ def verify_password(plain_password, stored_password):
         parts = stored_password.split(':')
         if len(parts) == 3:
             salt = parts[1]
-            return hash_password(plain_password, salt) == stored_password
+            h1 = hashlib.sha256((salt + plain_password).encode('utf-8')).hexdigest()
+            h2 = hashlib.sha256((salt + ':' + plain_password).encode('utf-8')).hexdigest()
+            return parts[2] in [h1, h2]
     # Legacy plain-text fallback for backward compatibility
     return plain_password == stored_password
 

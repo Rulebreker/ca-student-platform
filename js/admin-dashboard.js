@@ -45,6 +45,12 @@ class AdminDashboard {
 
   switchTab(tab) {
     this.currentTab = tab;
+    if (tab === 'students') {
+      this.studentPage = 1;
+      this.studentSearch = '';
+      this.studentStatusFilter = 'all';
+      this.studentLevelFilter = 'all';
+    }
     this.render();
   }
 
