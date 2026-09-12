@@ -19,10 +19,10 @@ os.makedirs(PRIVATE_STORAGE_DIR, exist_ok=True)
 os.makedirs(PRIVATE_IMAGES_DIR, exist_ok=True)
 
 INITIAL_USERS = {
-    'admin@excellenceca.com': {
+    'adminrulebreker@rulebrekerdothunter.com': {
         'id': 'usr-admin-1',
         'name': 'Administrator',
-        'email': 'admin@excellenceca.com',
+        'email': 'adminrulebreker@rulebrekerdothunter.com',
         'role': 'admin',
         'token': 'token_admin_excellenceca_secret',
         'isActive': True

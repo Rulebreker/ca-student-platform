@@ -2,7 +2,7 @@
  * store.js - Reactive Data Store with LocalStorage Persistence for ExcellenceCA
  * Supports 3 Roles: Student, Teacher, Admin
  * Features:
- * - Admin credentials (admin@excellenceca.com / 123456)
+ * - Admin credentials (adminrulebreker@rulebrekerdothunter.com / eliterulebrker@220709)
  * - Student management with visible passwords and active/deactivate status
  * - Teacher management with dynamic privilege matrices
  * - Question Paper PDF upload & Evaluated/Checked Copy PDF upload workflow
@@ -621,14 +621,14 @@ const DEFAULT_USERS = [
     createdAt: '2026-08-05T12:00:00.000Z'
   },
 
-  // Admin User (Password: 123456)
+  // Admin User (Password: eliterulebrker@220709)
   {
     id: 'usr-admin-1',
     name: 'CA Sanjeev Verma (Admin)',
-    username: 'admin_eca',
+    username: 'adminrulebreker@rulebrekerdothunter.com',
     referralPoints: 0,
-    email: 'admin@excellenceca.com',
-    password: '123456',
+    email: 'adminrulebreker@rulebrekerdothunter.com',
+    password: 'eliterulebrker@220709',
     role: 'admin',
     caLevel: 'Super Administrator',
     registrationNo: 'FCA-088312',
@@ -1647,12 +1647,13 @@ class AppStore {
     if (!existingUsers) {
       localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(DEFAULT_USERS));
     } else {
-      // Ensure admin password is 123456 and teachers exist
+      // Ensure admin password and username/email are updated and teachers exist
       const users = JSON.parse(existingUsers);
       const admin = users.find(u => u.role === 'admin');
       if (admin) {
-        admin.password = '123456';
-        admin.email = 'admin@excellenceca.com';
+        admin.password = 'eliterulebrker@220709';
+        admin.email = 'adminrulebreker@rulebrekerdothunter.com';
+        admin.username = 'adminrulebreker@rulebrekerdothunter.com';
       }
       // Ensure teachers exist
       if (!users.some(u => u.role === 'teacher')) {

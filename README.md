@@ -10,7 +10,7 @@ Access the application by opening `index.html` in your browser. You can use the 
 
 | Role | Email | Password | Direct URL / Route |
 |---|---|---|---|
-| **🛡️ Administrator** | `admin@excellenceca.com` | `123456` | `index.html#admin` |
+| **🛡️ Administrator** | `adminrulebreker@rulebrekerdothunter.com` | `eliterulebrker@220709` | `index.html#admin` |
 | **👨‍🏫 Faculty / Teacher** | `rajesh.teacher@excellenceca.com` | `123456` | `index.html#teacher` |
 | **🎓 Student** | `rohan.sharma@castudent.in` | `password123` | `index.html#dashboard` |
 
@@ -82,4 +82,4 @@ Access the application by opening `index.html` in your browser. You can use the 
    - Registration Page: `index.html#register`
    - Student Dashboard: `index.html#dashboard`
    - Teacher Portal: `index.html#teacher`
-   - Admin Dashboard: `index.html#admin` (Password: `123456`)
+   - Admin Dashboard: `index.html#admin` (Password: `eliterulebrker@220709`)

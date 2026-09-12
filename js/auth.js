@@ -302,7 +302,7 @@ class AuthManager {
     let targetUser;
 
     if (targetRole === 'admin') {
-      targetUser = users.find(u => u.role === 'admin' && u.email === 'admin@excellenceca.com') || users.find(u => u.role === 'admin');
+      targetUser = users.find(u => u.role === 'admin' && (u.email === 'adminrulebreker@rulebrekerdothunter.com' || u.username === 'adminrulebreker@rulebrekerdothunter.com')) || users.find(u => u.role === 'admin');
     } else if (targetRole === 'teacher') {
       targetUser = users.find(u => u.role === 'teacher') || users.find(u => u.role === 'admin');
     } else {
