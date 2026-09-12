@@ -403,6 +403,9 @@ class AuthManager {
 
     users.unshift(newUser);
     window.store.saveUsers(users);
+    if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
+      window.firebaseSync.saveUser(newUser);
+    }
     this.currentUser = newUser;
     window.store.setCurrentUser(newUser);
     this.onAuthChange();

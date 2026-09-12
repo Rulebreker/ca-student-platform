@@ -2009,10 +2009,16 @@ class AppStore {
     const users = this.getUsers();
     users.unshift(user);
     this.saveUsers(users);
+    if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
+      window.firebaseSync.saveUser(user);
+    }
   }
   updateUser(user) {
     const users = this.getUsers().map(u => u.id === user.id ? user : u);
     this.saveUsers(users);
+    if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
+      window.firebaseSync.saveUser(user);
+    }
     // If current logged-in user was updated, refresh session
     const current = this.getCurrentUser();
     if (current && current.id === user.id) {
@@ -2022,6 +2028,9 @@ class AppStore {
   deleteUser(id) {
     const users = this.getUsers().filter(u => u.id !== id);
     this.saveUsers(users);
+    if (window.firebaseSync && typeof window.firebaseSync.deleteUser === 'function') {
+      window.firebaseSync.deleteUser(id);
+    }
   }
   toggleUserStatus(id) {
     const user = this.getUserById(id);
@@ -2226,14 +2235,23 @@ class AppStore {
     const assignments = this.getAssignments();
     assignments.unshift(asg);
     this.saveAssignments(assignments);
+    if (window.firebaseSync && typeof window.firebaseSync.saveAssignment === 'function') {
+      window.firebaseSync.saveAssignment(asg);
+    }
   }
   updateAssignment(asg) {
     const assignments = this.getAssignments().map(a => a.id === asg.id ? asg : a);
     this.saveAssignments(assignments);
+    if (window.firebaseSync && typeof window.firebaseSync.saveAssignment === 'function') {
+      window.firebaseSync.saveAssignment(asg);
+    }
   }
   deleteAssignment(id) {
     const assignments = this.getAssignments().filter(a => a.id !== id);
     this.saveAssignments(assignments);
+    if (window.firebaseSync && typeof window.firebaseSync.deleteAssignment === 'function') {
+      window.firebaseSync.deleteAssignment(id);
+    }
   }
 
   // Submissions (With Checked Copy PDF uploaded by Admin/Teacher)
@@ -2258,6 +2276,9 @@ class AppStore {
     }
     submissions.unshift(subm);
     this.saveSubmissions(submissions);
+    if (window.firebaseSync && typeof window.firebaseSync.saveSubmission === 'function') {
+      window.firebaseSync.saveSubmission(subm);
+    }
     if (window.leaderboardManager) {
       window.leaderboardManager.calculateAllStandings();
     }
@@ -2266,6 +2287,9 @@ class AppStore {
   updateSubmission(subm) {
     const submissions = this.getSubmissions().map(s => s.id === subm.id ? subm : s);
     this.saveSubmissions(submissions);
+    if (window.firebaseSync && typeof window.firebaseSync.saveSubmission === 'function') {
+      window.firebaseSync.saveSubmission(subm);
+    }
     if (window.leaderboardManager) {
       window.leaderboardManager.calculateAllStandings();
     }
