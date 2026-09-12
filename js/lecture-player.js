@@ -214,13 +214,6 @@ class LecturePlayer {
                 </span>
               </div>
             </div>
-
-            <!-- AdSense Compliant Banner Slot (Below Video Player) -->
-            <div class="adsense-wrapper p-4 adsense-banner-leaderboard flex flex-col items-center justify-center">
-              <span class="adsense-tag mb-1">Sponsored Learning Resource • Ad Placement</span>
-              <div class="text-xs text-slate-400 font-medium">Google AdSense Responsive Unit (728x90)</div>
-              <div class="text-[11px] text-slate-400 italic">CA Exam Preparation Software & Books</div>
-            </div>
           </div>
 
           <!-- Sidebar Column: Related Lectures -->
@@ -249,14 +242,6 @@ class LecturePlayer {
                   `;
                 }).join('')}
               </div>
-            </div>
-
-            <!-- AdSense Sidebar Banner (300x250 Medium Rectangle) -->
-            <div class="adsense-wrapper p-6 adsense-banner-rectangle flex flex-col items-center justify-center mx-auto">
-              <span class="adsense-tag mb-2">Advertisement</span>
-              <div class="text-xs font-semibold text-slate-500">AdSense Display Unit</div>
-              <div class="text-[11px] text-slate-400 mt-1">300 x 250 Medium Rectangle</div>
-              <div class="text-[10px] text-slate-400 mt-3 border border-slate-200 px-2 py-1 rounded">CA Test Series Partner</div>
             </div>
           </div>
         </div>

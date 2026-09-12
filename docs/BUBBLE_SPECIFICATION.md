@@ -1,5 +1,5 @@
 # Bubble.io Architecture & Implementation Blueprint
-## CA Student Learning & Test Platform
+## ELITECA - CA Student Learning & Test Platform
 
 This document provides the complete, field-by-field and rule-by-rule blueprint for building and deploying the **CA Student Learning & Test Platform** directly inside [Bubble.io](https://bubble.io).
 
@@ -208,7 +208,7 @@ Bubble's Privacy Rules are paramount for compliance and security. Configure each
 In Bubble, configure a Single Page Application (SPA) layout with URL parameters (e.g. `?v=dashboard`, `?v=lectures`, `?v=tests`, `?v=test-take&id=123`, `?v=assignments`, `?v=leaderboard`, `?v=admin`):
 
 1. **Header Reusable Element (`header_nav`)**:
-   - Logo & Brand Title ("CA Excellence Academy").
+   - Logo & Brand Title ("ELITECA").
    - Navigation links with conditional active styles.
    - User Profile dropdown with Avatar, Name, Role badge, and Logout action.
 2. **Page Containers (Conditional Visibility based on `Get 'v' from page URL`)**:

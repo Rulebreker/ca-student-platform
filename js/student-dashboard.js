@@ -19,33 +19,32 @@ class StudentDashboard {
       bestScore = Math.round(Math.max(...userAttempts.map(a => a.percentage || 0)));
     }
 
-    // Calculate current leaderboard rank
-    const allUsers = window.store.getUsers().filter(u => u.role === 'student');
-    const allAttempts = window.store.getAttempts();
-    const rankedUsers = allUsers.map(u => {
-      const atts = allAttempts.filter(a => a.userId === u.id);
-      const totalPoints = atts.reduce((acc, c) => acc + (c.finalScore || 0), 0);
-      return { id: u.id, points: totalPoints };
-    }).sort((a, b) => b.points - a.points);
-
-    const userRankIndex = rankedUsers.findIndex(r => r.id === user.id);
-    const rankDisplay = userRankIndex >= 0 ? `#${userRankIndex + 1}` : '--';
+    // Calculate current leaderboard rank from XP standings
+    let rankDisplay = '--';
+    if (window.leaderboardManager) {
+      const currentRank = window.leaderboardManager.getStudentRank(user.id);
+      if (currentRank) rankDisplay = `#${currentRank}`;
+    }
 
     // Update Metrics in DOM
     const welcomeEl = document.getElementById('dashboard-welcome-name');
     if (welcomeEl) welcomeEl.textContent = user.name;
 
     const welcomeLevelEl = document.getElementById('dashboard-welcome-level');
-    if (welcomeLevelEl) welcomeLevelEl.textContent = `${user.caLevel || 'CA Student'} • Reg No: ${user.registrationNo || 'N/A'}`;
+    if (welcomeLevelEl) welcomeLevelEl.textContent = user.caLevel || 'CA Student';
 
-    document.getElementById('metric-tests-attempted').textContent = totalTests;
-    document.getElementById('metric-avg-score').textContent = totalTests > 0 ? `${avgScore}%` : '0%';
-    document.getElementById('metric-best-score').textContent = totalTests > 0 ? `${bestScore}%` : '0%';
-    document.getElementById('metric-current-rank').textContent = rankDisplay;
+    const metricTests = document.getElementById('metric-tests-attempted');
+    if (metricTests) metricTests.textContent = totalTests;
+    const metricAvg = document.getElementById('metric-avg-score');
+    if (metricAvg) metricAvg.textContent = totalTests > 0 ? `${avgScore}%` : '0%';
+    const metricBest = document.getElementById('metric-best-score');
+    if (metricBest) metricBest.textContent = totalTests > 0 ? `${bestScore}%` : '0%';
+    const metricRank = document.getElementById('metric-current-rank');
+    if (metricRank) metricRank.textContent = rankDisplay;
 
     // Render Sub-sections
     this.renderAvailableTests();
-    this.renderAvailableLectures();
+    // Video lectures hidden from student dashboard
     this.renderPendingAssignments();
     this.renderRecentAttempts(userAttempts);
   }
@@ -166,6 +165,10 @@ class StudentDashboard {
       const deadlineDate = new Date(asg.deadline).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 
       let statusBadge = `<span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-amber-50 text-amber-700 border border-amber-200">Pending</span>`;
+      if (window.secureBackend) {
+        const evalStatus = window.secureBackend.computePaperStatus(asg);
+        statusBadge = `<span class="px-2 py-0.5 text-xs font-bold rounded-full ${evalStatus.badgeClass}">${evalStatus.badgeText}</span>`;
+      }
       if (submission) {
         if (submission.status === 'Evaluated') {
           statusBadge = `<span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Evaluated (${submission.marksObtained}/${asg.maximumMarks})</span>`;

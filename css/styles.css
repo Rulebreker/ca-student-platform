@@ -17,11 +17,19 @@
   --brand-purple-light: #f5f3ff;
 }
 
+html, body {
+  overflow-x: hidden;
+  width: 100%;
+  min-height: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   background-color: #f8fafc;
   color: #1e293b;
   -webkit-font-smoothing: antialiased;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* Custom Scrollbars */
@@ -69,39 +77,6 @@ body {
 .btn-palette.unanswered:hover {
   background-color: #e2e8f0;
   color: #1e293b;
-}
-
-/* AdSense Container Placeholders (Compliant & Non-Intrusive) */
-.adsense-wrapper {
-  background: linear-gradient(135deg, #fbfcfe 0%, #f1f5f9 100%);
-  border: 1px dashed #cbd5e1;
-  border-radius: 0.75rem;
-  overflow: hidden;
-  position: relative;
-  text-align: center;
-  transition: all 0.2s ease;
-}
-.adsense-wrapper:hover {
-  border-color: #94a3b8;
-}
-.adsense-tag {
-  font-size: 0.65rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #94a3b8;
-  font-weight: 600;
-}
-.adsense-banner-leaderboard {
-  min-height: 90px;
-  max-width: 728px;
-  margin: 0 auto;
-}
-.adsense-banner-inline {
-  min-height: 60px;
-}
-.adsense-banner-rectangle {
-  min-height: 250px;
-  max-width: 300px;
 }
 
 /* Aspect ratio for video responsive embed */
@@ -170,3 +145,57 @@ body {
     display: none !important;
   }
 }
+
+/* Mobile & Touch Responsive Enhancements */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Prevent iOS/Safari and Android browser auto-zooming on form input focus */
+@media screen and (max-width: 768px) {
+  input[type="text"],
+  input[type="password"],
+  input[type="email"],
+  input[type="number"],
+  input[type="search"],
+  input[type="tel"],
+  input[type="url"],
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Touch targets min-height 44px */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Responsive Table Scroll Container */
+.table-responsive-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Word break helper to prevent horizontal overflow */
+.break-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Responsive toast positioning on narrow screens */
+@media (max-width: 640px) {
+  #toast-container {
+    bottom: 1rem;
+    left: 1rem;
+    right: 1rem;
+    align-items: center;
+  }
+  .toast-msg {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+

@@ -3,7 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CA Excellence Academy - Chartered Accountancy Learning & Test Platform</title>
+  <title>ExcellenceCA - Chartered Accountancy Learning & Test Platform</title>
+  
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="apple-touch-icon" href="assets/favicon.png">
   
   <!-- Google Fonts: Inter -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -46,14 +50,8 @@
       <div class="flex items-center justify-between h-16">
         
         <!-- Left: Brand Logo & Title -->
-        <div class="flex items-center gap-3 cursor-pointer" onclick="window.app.navigate('dashboard')">
-          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-700 to-indigo-600 text-white flex items-center justify-center font-black text-lg shadow-md">
-            CA
-          </div>
-          <div>
-            <span class="text-base font-bold text-slate-900 tracking-tight block">CA Excellence Academy</span>
-            <span class="text-[10px] text-slate-500 font-semibold uppercase tracking-wider block">ICAI Examination Portal</span>
-          </div>
+        <div id="nav-brand" class="flex items-center cursor-pointer py-1" onclick="window.auth && window.auth.isLoggedIn() ? window.app.navigate('dashboard') : window.app.navigate('home')" title="ExcellenceCA">
+          <img src="assets/brandlogo.png" alt="ExcellenceCA - Learn Today • Lead Tomorrow" class="h-9 sm:h-12 max-h-12 w-auto object-contain max-w-[155px] sm:max-w-none">
         </div>
 
         <!-- Center: Primary Navigation Links (Desktop) -->
@@ -61,65 +59,63 @@
           <button data-nav="dashboard" class="px-3 py-2 text-xs font-semibold rounded-lg text-blue-600 bg-blue-50 transition-colors flex items-center gap-1.5">
             <i data-lucide="layout-dashboard" class="w-4 h-4"></i> Dashboard
           </button>
-          <button data-nav="lectures" class="px-3 py-2 text-xs font-semibold rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors flex items-center gap-1.5">
-            <i data-lucide="video" class="w-4 h-4"></i> Lectures
-          </button>
           <button data-nav="tests" class="px-3 py-2 text-xs font-semibold rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors flex items-center gap-1.5">
             <i data-lucide="check-square" class="w-4 h-4"></i> MCQ Tests
           </button>
           <button data-nav="assignments" class="px-3 py-2 text-xs font-semibold rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors flex items-center gap-1.5">
-            <i data-lucide="file-text" class="w-4 h-4"></i> Assignments
+            <i data-lucide="file-text" class="w-4 h-4"></i> Test Papers
           </button>
           <button data-nav="leaderboard" class="px-3 py-2 text-xs font-semibold rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors flex items-center gap-1.5">
             <i data-lucide="award" class="w-4 h-4"></i> Leaderboard
           </button>
-          <button id="nav-admin" data-nav="admin" class="px-3 py-2 text-xs font-semibold rounded-lg text-amber-800 bg-amber-50 hover:bg-amber-100 transition-colors flex items-center gap-1.5" style="display: none;">
-            <i data-lucide="shield-check" class="w-4 h-4 text-amber-700"></i> Faculty Admin
+          <button id="nav-teacher" data-nav="teacher" class="px-3 py-2 text-xs font-semibold rounded-lg text-amber-800 bg-amber-50 hover:bg-amber-100 transition-colors flex items-center gap-1.5" style="display: none;">
+            <i data-lucide="user-check" class="w-4 h-4 text-amber-700"></i> Teacher Portal
           </button>
+          <button id="nav-admin" data-nav="admin" class="px-3 py-2 text-xs font-semibold rounded-lg text-rose-800 bg-rose-50 hover:bg-rose-100 transition-colors flex items-center gap-1.5" style="display: none;">
+            <i data-lucide="shield-check" class="w-4 h-4 text-rose-700"></i> Admin Portal
+          </button>
+
         </nav>
 
-        <!-- Right: Role Switcher & User Profile -->
-        <div class="flex items-center gap-3">
+        <!-- Right: User Profile & Actions -->
+        <div class="flex items-center gap-2 sm:gap-3">
           
-          <!-- Instant Quick Role Switcher Pill -->
-          <div class="hidden lg:flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
+          <!-- Guest Actions (Sign In & Register) -->
+          <div id="nav-guest-actions" class="flex items-center gap-1.5 sm:gap-2">
             <button 
-              onclick="window.auth.switchRole('student')" 
-              class="px-2.5 py-1 rounded-lg font-bold text-slate-700 hover:bg-white hover:shadow-xs transition-all flex items-center gap-1"
-              title="Test as CA Student Rohan Sharma"
+              id="nav-login"
+              onclick="window.app.showAuthModal('login')"
+              class="px-2.5 sm:px-3.5 py-1.5 min-h-[38px] text-xs font-bold rounded-lg text-blue-600 hover:text-blue-800 hover:bg-blue-50 transition-colors flex items-center gap-1.5 cursor-pointer"
             >
-              🎓 Student
+              <i data-lucide="log-in" class="w-3.5 h-3.5"></i> <span>Sign In</span>
             </button>
             <button 
-              onclick="window.auth.switchRole('admin')" 
-              class="px-2.5 py-1 rounded-lg font-bold text-slate-700 hover:bg-white hover:shadow-xs transition-all flex items-center gap-1"
-              title="Test as CA Faculty Admin"
+              id="nav-guest-register"
+              onclick="window.app.navigate('register')"
+              class="px-2.5 sm:px-3.5 py-1.5 min-h-[38px] text-xs font-bold rounded-lg text-white bg-blue-600 hover:bg-blue-700 shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
             >
-              🛡️ Admin
+              <i data-lucide="user-plus" class="w-3.5 h-3.5"></i> <span>Register</span>
             </button>
           </div>
 
-          <!-- User Profile Info -->
-          <div class="flex items-center gap-2.5 pl-2 border-l border-slate-200">
+          <!-- Logged-in User Container: Clicking opens Student Profile Modal. No standalone logout in navbar! -->
+          <div 
+            id="nav-user-container"
+            onclick="window.app.navigate('profile')"
+            class="hidden items-center gap-2 sm:gap-2.5 cursor-pointer hover:bg-slate-100/80 px-2 sm:px-2.5 py-1 min-h-[38px] rounded-xl transition-colors border border-transparent hover:border-slate-200"
+            title="Open Student Profile & Settings"
+          >
             <img id="user-avatar" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120" alt="Avatar" class="w-8 h-8 rounded-full object-cover border border-slate-300 shadow-xs">
             <div class="hidden sm:block text-left">
-              <span id="user-display-name" class="text-xs font-bold text-slate-900 block leading-tight">Rohan Sharma</span>
+              <span id="user-display-name" class="text-xs font-bold text-slate-900 block leading-tight">Student</span>
               <span id="user-role-badge" class="px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-blue-100 text-blue-800 uppercase">STUDENT</span>
             </div>
-            
-            <!-- Auth Actions -->
-            <button 
-              onclick="window.auth.isLoggedIn() ? window.auth.logout() : window.app.showAuthModal('login')"
-              class="text-xs font-semibold text-slate-500 hover:text-slate-800 p-1.5 rounded-lg hover:bg-slate-100"
-              title="Logout / Sign In"
-            >
-              <i data-lucide="log-out" class="w-4 h-4"></i>
-            </button>
+            <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-slate-400"></i>
           </div>
 
           <!-- Mobile Hamburger Toggle -->
           <div class="flex md:hidden">
-            <button onclick="window.app.toggleMobileMenu()" class="p-2 rounded-lg text-slate-600 hover:bg-slate-100">
+            <button onclick="window.app.toggleMobileMenu()" class="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer" aria-label="Toggle Navigation Menu">
               <i data-lucide="menu" class="w-5 h-5"></i>
             </button>
           </div>
@@ -129,45 +125,188 @@
     </div>
 
     <!-- Mobile Navigation Drawer -->
-    <div id="mobile-menu" class="hidden md:hidden border-t border-slate-200 bg-white px-4 pt-2 pb-4 space-y-1">
-      <button data-nav="dashboard" class="w-full text-left px-3 py-2 text-xs font-semibold rounded-lg text-blue-600 bg-blue-50 flex items-center gap-2">
-        <i data-lucide="layout-dashboard" class="w-4 h-4"></i> Dashboard
+    <div id="mobile-menu" class="hidden md:hidden border-t border-slate-200 bg-white px-4 pt-2 pb-4 space-y-1 shadow-lg animate-in slide-in-from-top-2 duration-150">
+      <button data-nav="home" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+        <i data-lucide="home" class="w-4 h-4 text-slate-500"></i> Home
       </button>
-      <button data-nav="lectures" class="w-full text-left px-3 py-2 text-xs font-semibold rounded-lg text-slate-700 hover:bg-slate-50 flex items-center gap-2">
-        <i data-lucide="video" class="w-4 h-4"></i> Lectures
+      <button id="mobile-nav-dashboard" data-nav="dashboard" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-blue-600 bg-blue-50 flex items-center gap-2.5 transition-colors">
+        <i data-lucide="layout-dashboard" class="w-4 h-4 text-blue-600"></i> Dashboard
       </button>
-      <button data-nav="tests" class="w-full text-left px-3 py-2 text-xs font-semibold rounded-lg text-slate-700 hover:bg-slate-50 flex items-center gap-2">
-        <i data-lucide="check-square" class="w-4 h-4"></i> MCQ Tests
+      <button id="mobile-nav-profile" data-nav="profile" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+        <i data-lucide="user" class="w-4 h-4 text-slate-500"></i> My Profile
       </button>
-      <button data-nav="assignments" class="w-full text-left px-3 py-2 text-xs font-semibold rounded-lg text-slate-700 hover:bg-slate-50 flex items-center gap-2">
-        <i data-lucide="file-text" class="w-4 h-4"></i> Assignments
+      <button id="mobile-nav-register" data-nav="register" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-emerald-700 bg-emerald-50 flex items-center gap-2.5 transition-colors">
+        <i data-lucide="user-plus" class="w-4 h-4 text-emerald-600"></i> Student Registration
       </button>
-      <button data-nav="leaderboard" class="w-full text-left px-3 py-2 text-xs font-semibold rounded-lg text-slate-700 hover:bg-slate-50 flex items-center gap-2">
-        <i data-lucide="award" class="w-4 h-4"></i> Leaderboard
+      <button data-nav="tests" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+        <i data-lucide="check-square" class="w-4 h-4 text-slate-500"></i> MCQ Tests
       </button>
-      <button data-nav="admin" class="w-full text-left px-3 py-2 text-xs font-semibold rounded-lg text-amber-800 bg-amber-50 flex items-center gap-2">
-        <i data-lucide="shield-check" class="w-4 h-4"></i> Faculty Admin Panel
+      <button data-nav="assignments" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+        <i data-lucide="file-text" class="w-4 h-4 text-slate-500"></i> Test Papers
       </button>
-      <div class="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
-        <span class="font-bold text-slate-500">Fast Demo Switch:</span>
-        <div class="space-x-1">
-          <button onclick="window.auth.switchRole('student')" class="px-2.5 py-1 bg-blue-100 text-blue-800 rounded font-bold">Student</button>
-          <button onclick="window.auth.switchRole('admin')" class="px-2.5 py-1 bg-amber-100 text-amber-800 rounded font-bold">Admin</button>
-        </div>
-      </div>
+      <button data-nav="leaderboard" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
+        <i data-lucide="award" class="w-4 h-4 text-slate-500"></i> Leaderboard
+      </button>
+      <button data-nav="teacher" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-amber-800 bg-amber-50 flex items-center gap-2.5 transition-colors">
+        <i data-lucide="user-check" class="w-4 h-4 text-amber-700"></i> Teacher Portal
+      </button>
+      <button data-nav="admin" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-rose-800 bg-rose-50 flex items-center gap-2.5 transition-colors">
+        <i data-lucide="shield-check" class="w-4 h-4 text-rose-700"></i> Admin Portal
+      </button>
     </div>
   </header>
 
-  <!-- TOP HEADER AD PLACEMENT (Compliant AdSense Slot) -->
+  <!-- CENTRALIZED WEBSITE UPDATES BANNER / SLIDER -->
   <div class="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-4">
-    <div class="adsense-wrapper p-3 adsense-banner-leaderboard flex flex-col items-center justify-center">
-      <span class="adsense-tag mb-1">Sponsored Learning Partner • Google AdSense 728x90 Unit</span>
-      <div class="text-xs text-slate-400 font-medium">ICAI Approved Books & Practice Material Series</div>
-    </div>
+    <div id="website-updates-banner-container"></div>
   </div>
 
   <!-- MAIN APPLICATION CONTENT AREA -->
   <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
+
+    <!-- VIEW 0: CLEAN MODERN HOMEPAGE / ENTRY PAGE -->
+    <section id="view-home" class="space-y-12 py-4">
+      <!-- Hero Section -->
+      <div class="bg-gradient-to-br from-slate-950 via-blue-950 to-indigo-950 rounded-3xl p-8 sm:p-14 text-white shadow-2xl relative overflow-hidden border border-blue-900/40">
+        <div class="relative z-10 max-w-3xl">
+          <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-400/30 mb-6 backdrop-blur-md">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400"></i>
+            India's Premier CA Mentorship & Examination Platform
+          </div>
+          <h1 class="text-3xl sm:text-5xl font-black tracking-tight leading-tight">
+            Master Chartered Accountancy with <span class="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-300 to-amber-300">Precision & Mentorship</span>
+          </h1>
+          <p class="text-sm sm:text-base text-slate-300 mt-4 leading-relaxed max-w-2xl font-normal">
+            Take timed MCQ mock tests with authentic negative marking, download official case question papers, receive individual red-ink evaluated PDF copies, and rise on the state-wide gamified leaderboard.
+          </p>
+
+          <!-- PROMINENT CALL TO ACTIONS: Sign In & Register -->
+          <div class="flex flex-wrap items-center gap-4 mt-8">
+            <button 
+              id="hero-signin-btn"
+              onclick="window.app.showAuthModal('login')" 
+              class="px-6 py-3.5 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-sm rounded-xl shadow-lg shadow-blue-600/30 transition-all flex items-center gap-2 hover:-translate-y-0.5 active:translate-y-0"
+            >
+              <i data-lucide="log-in" class="w-4 h-4"></i> Sign In to Account
+            </button>
+            <button 
+              id="hero-register-btn"
+              onclick="window.app.navigate('register')" 
+              class="px-6 py-3.5 bg-white hover:bg-slate-100 text-slate-900 font-extrabold text-sm rounded-xl shadow-md transition-all flex items-center gap-2 hover:-translate-y-0.5 active:translate-y-0"
+            >
+              <i data-lucide="user-plus" class="w-4 h-4 text-blue-600"></i> Register as Student
+            </button>
+            <button 
+              onclick="window.app.navigate('tests')" 
+              class="px-5 py-3.5 bg-white/10 hover:bg-white/20 text-white font-semibold text-sm rounded-xl backdrop-blur-md border border-white/10 transition-colors flex items-center gap-2"
+            >
+              <i data-lucide="eye" class="w-4 h-4 text-slate-300"></i> Explore MCQ Tests
+            </button>
+          </div>
+        </div>
+
+        <!-- Watermark -->
+        <div class="absolute -right-16 -bottom-16 opacity-10 pointer-events-none text-white font-black text-[240px] select-none">
+          CA
+        </div>
+        <div class="absolute right-10 top-10 w-80 h-80 bg-blue-600/15 rounded-full blur-3xl pointer-events-none"></div>
+      </div>
+
+      <!-- Core Platform Pillars (4 Cards) -->
+      <div>
+        <div class="text-center max-w-2xl mx-auto mb-8">
+          <h2 class="text-2xl font-black text-slate-900 tracking-tight">Everything You Need for Single-Attempt Success</h2>
+          <p class="text-xs text-slate-500 mt-1.5">Comprehensive examination toolkit built specifically for CA Foundation, CA Intermediate, and CA Final aspirants.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div class="bg-white border border-slate-200 hover:border-blue-300 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all group">
+            <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+              <i data-lucide="check-square" class="w-6 h-6"></i>
+            </div>
+            <h3 class="text-base font-bold text-slate-900 mb-2">Timed MCQ Mock Tests</h3>
+            <p class="text-xs text-slate-500 leading-relaxed">
+              Experience authentic exam conditions with countdown timers, negative marking, subject palettes, and instant solution analytics.
+            </p>
+          </div>
+
+          <div class="bg-white border border-slate-200 hover:border-emerald-300 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all group">
+            <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+              <i data-lucide="file-check-2" class="w-6 h-6"></i>
+            </div>
+            <h3 class="text-base font-bold text-slate-900 mb-2">Evaluated Answer Copies</h3>
+            <p class="text-xs text-slate-500 leading-relaxed">
+              Upload handwritten solutions. Verified faculty grade your copies with red-ink annotations, step-by-step marks, and actionable feedback.
+            </p>
+          </div>
+
+          <div class="bg-white border border-slate-200 hover:border-purple-300 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all group">
+            <div class="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+              <i data-lucide="award" class="w-6 h-6"></i>
+            </div>
+            <h3 class="text-base font-bold text-slate-900 mb-2">Gamified Leaderboard</h3>
+            <p class="text-xs text-slate-500 leading-relaxed">
+              Earn XP for every test taken and copy submitted. Advance through tiers from Bronze Novice to Sovereign Vanguard with state and district filters.
+            </p>
+          </div>
+
+          <div class="bg-white border border-slate-200 hover:border-amber-300 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all group">
+            <div class="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+              <i data-lucide="share-2" class="w-6 h-6"></i>
+            </div>
+            <h3 class="text-base font-bold text-slate-900 mb-2">Student Referral Program</h3>
+            <p class="text-xs text-slate-500 leading-relaxed">
+              Share your personal referral URL with peers. Earn 100 points for every registered student to unlock premium test series and rank badges.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Examination Levels Section -->
+      <div class="bg-white border border-slate-200 rounded-3xl p-8 sm:p-10 shadow-sm">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+          <div>
+            <h2 class="text-xl font-black text-slate-900 tracking-tight">Select Your Chartered Accountancy Level</h2>
+            <p class="text-xs text-slate-500 mt-1">Curated test schedules, syllabus coverage, and model question papers for every stage.</p>
+          </div>
+          <button onclick="window.app.navigate('register')" class="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
+            Enroll now for free <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div class="border border-slate-200 rounded-2xl p-6 hover:border-blue-500 transition-colors bg-slate-50/50">
+            <span class="px-2.5 py-1 text-[10px] font-extrabold uppercase rounded-full bg-blue-100 text-blue-800 tracking-wider">Level 1</span>
+            <h3 class="text-lg font-black text-slate-900 mt-3">CA Foundation</h3>
+            <p class="text-xs text-slate-500 mt-1">Accounting, Business Law, Quantitative Aptitude & Business Economics.</p>
+            <div class="mt-4 pt-4 border-t border-slate-200/80 flex items-center justify-between">
+              <span class="text-[11px] font-bold text-slate-700">4 Subjects • 24 Papers</span>
+              <button onclick="window.app.navigate('tests')" class="text-xs font-bold text-blue-600 hover:underline">View Tests →</button>
+            </div>
+          </div>
+
+          <div class="border border-slate-200 rounded-2xl p-6 hover:border-indigo-500 transition-colors bg-slate-50/50">
+            <span class="px-2.5 py-1 text-[10px] font-extrabold uppercase rounded-full bg-indigo-100 text-indigo-800 tracking-wider">Level 2</span>
+            <h3 class="text-lg font-black text-slate-900 mt-3">CA Intermediate</h3>
+            <p class="text-xs text-slate-500 mt-1">Advanced Accounting, Corporate Laws, Taxation, Costing, Auditing & FM-SM.</p>
+            <div class="mt-4 pt-4 border-t border-slate-200/80 flex items-center justify-between">
+              <span class="text-[11px] font-bold text-slate-700">Group I & II • Case Mocks</span>
+              <button onclick="window.app.navigate('tests')" class="text-xs font-bold text-indigo-600 hover:underline">View Tests →</button>
+            </div>
+          </div>
+
+          <div class="border border-slate-200 rounded-2xl p-6 hover:border-purple-500 transition-colors bg-slate-50/50">
+            <span class="px-2.5 py-1 text-[10px] font-extrabold uppercase rounded-full bg-purple-100 text-purple-800 tracking-wider">Level 3</span>
+            <h3 class="text-lg font-black text-slate-900 mt-3">CA Final</h3>
+            <p class="text-xs text-slate-500 mt-1">Financial Reporting, AFM, Advanced Auditing, Direct & Indirect Tax Laws.</p>
+            <div class="mt-4 pt-4 border-t border-slate-200/80 flex items-center justify-between">
+              <span class="text-[11px] font-bold text-slate-700">Advanced Cases • Mentorship</span>
+              <button onclick="window.app.navigate('tests')" class="text-xs font-bold text-purple-600 hover:underline">View Tests →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- VIEW 1: STUDENT DASHBOARD -->
     <section id="view-dashboard" class="space-y-8">
@@ -180,16 +319,16 @@
           <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">
             Welcome back, <span id="dashboard-welcome-name">Student</span>!
           </h1>
-          <p id="dashboard-welcome-level" class="text-xs text-blue-200 mt-1.5 font-medium">CA Inter • Reg No: NRO-0459201</p>
+          <p id="dashboard-welcome-level" class="text-xs text-blue-200 mt-1.5 font-medium">CA Inter</p>
           <p class="text-xs text-slate-300 mt-3 leading-relaxed">
-            Stay consistent with your daily revision schedules. Take timed MCQ tests to build exam speed, watch standard accounting lectures, and submit practical case computations.
+            Stay consistent with your daily revision schedules. Take timed MCQ tests to build exam speed, download official question papers, and submit practical case computations for faculty review.
           </p>
           <div class="flex flex-wrap gap-3 mt-6">
             <button onclick="window.app.navigate('tests')" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-sm transition-colors flex items-center gap-1.5">
               <i data-lucide="play-circle" class="w-4 h-4"></i> Take a Mock Test
             </button>
-            <button onclick="window.app.navigate('lectures')" class="px-4 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-lg backdrop-blur-xs transition-colors flex items-center gap-1.5">
-              <i data-lucide="video" class="w-4 h-4"></i> Browse Lectures
+            <button onclick="window.app.navigate('assignments')" class="px-4 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-lg backdrop-blur-xs transition-colors flex items-center gap-1.5">
+              <i data-lucide="file-text" class="w-4 h-4"></i> Question Papers (PDF)
             </button>
           </div>
         </div>
@@ -200,8 +339,8 @@
       </div>
 
       <!-- Key Performance Metrics (4 Cards) -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex items-center gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
+        <div class="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs flex items-center gap-4">
           <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
             <i data-lucide="check-circle-2" class="w-6 h-6"></i>
           </div>
@@ -212,7 +351,7 @@
           </div>
         </div>
 
-        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex items-center gap-4">
+        <div class="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs flex items-center gap-4">
           <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
             <i data-lucide="trending-up" class="w-6 h-6"></i>
           </div>
@@ -223,7 +362,7 @@
           </div>
         </div>
 
-        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex items-center gap-4">
+        <div class="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs flex items-center gap-4">
           <div class="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
             <i data-lucide="star" class="w-6 h-6"></i>
           </div>
@@ -234,14 +373,14 @@
           </div>
         </div>
 
-        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex items-center gap-4">
+        <div class="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs flex items-center gap-4">
           <div class="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center flex-shrink-0">
             <i data-lucide="award" class="w-6 h-6"></i>
           </div>
           <div>
             <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Leaderboard Rank</span>
             <span id="metric-current-rank" class="text-2xl font-black text-purple-700">#--</span>
-            <button onclick="window.app.navigate('leaderboard')" class="text-[11px] text-purple-600 font-semibold hover:underline block">View rankings →</button>
+            <button onclick="window.app.navigate('leaderboard')" class="text-[11px] text-purple-600 font-semibold hover:underline block cursor-pointer">View rankings →</button>
           </div>
         </div>
       </div>
@@ -262,27 +401,6 @@
         </div>
       </div>
 
-      <!-- INLINE AD PLACEMENT (Non-intrusive) -->
-      <div class="adsense-wrapper p-3 adsense-banner-inline flex items-center justify-center gap-3">
-        <span class="adsense-tag">Advertisement</span>
-        <span class="text-xs text-slate-500 font-medium">CA Final / Inter Quick Reference Formulas Guide</span>
-      </div>
-
-      <!-- SECTION: AVAILABLE LECTURES -->
-      <div class="space-y-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <h3 class="text-base font-bold text-slate-900">Recommended Video Lectures</h3>
-            <p class="text-xs text-slate-500">High-yield conceptual sessions covering Accounting Standards, Law, and Tax</p>
-          </div>
-          <button onclick="window.app.navigate('lectures')" class="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1">
-            View Lecture Catalog →
-          </button>
-        </div>
-        <div id="dashboard-available-lectures" class="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <!-- Populated by student-dashboard.js -->
-        </div>
-      </div>
 
       <!-- SECTION: PENDING ASSIGNMENTS -->
       <div class="space-y-4">
@@ -356,20 +474,56 @@
         <p class="text-xs text-slate-500 mt-1">Practice under authentic timed conditions with negative marking and question palette</p>
       </div>
 
-      <!-- Subject Filters -->
-      <div id="test-subject-filters" class="flex flex-wrap items-center gap-2">
-        <!-- Filter pills -->
+      <!-- Subject Filters (Horizontally scrollable on mobile/tablet) -->
+      <div class="overflow-x-auto pb-1 -mb-1 scrollbar-none">
+        <div id="test-subject-filters" class="flex items-center gap-2 min-w-max">
+          <!-- Populated by test-engine.js -->
+        </div>
+      </div>
+
+      <!-- Search Bar & Sort/Filter Controls -->
+      <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
+        <!-- Search Bar -->
+        <div class="relative flex-1">
+          <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+          <input 
+            type="text" 
+            id="test-search-input" 
+            placeholder="Search MCQ papers..." 
+            oninput="window.testEngine.handleSearch(this.value)"
+            class="w-full pl-9 pr-8 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50/60 hover:bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 placeholder-slate-400 transition-all"
+          >
+          <button 
+            type="button" 
+            id="test-search-clear-btn" 
+            onclick="window.testEngine.clearSearch()" 
+            class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+            title="Clear search"
+          >
+            <i data-lucide="x" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+
+        <!-- Sort Option -->
+        <div class="flex items-center gap-2 self-end sm:self-auto flex-shrink-0">
+          <label for="test-sort-select" class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 whitespace-nowrap">
+            <i data-lucide="arrow-up-down" class="w-3.5 h-3.5 text-slate-400"></i> Sort:
+          </label>
+          <select 
+            id="test-sort-select" 
+            onchange="window.testEngine.handleSort(this.value)"
+            class="px-3 py-2 text-xs font-semibold border border-slate-200 rounded-lg bg-white text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer"
+          >
+            <option value="new">New</option>
+            <option value="old">Old</option>
+            <option value="popular">Popular</option>
+          </select>
+        </div>
       </div>
 
       <!-- Tests Grid -->
       <div id="tests-grid" class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <!-- Populated by test-engine.js -->
-      </div>
-
-      <!-- AdSense Banner below tests -->
-      <div class="adsense-wrapper p-3 adsense-banner-leaderboard flex flex-col items-center justify-center">
-        <span class="adsense-tag mb-1">Sponsored • Ad Placement</span>
-        <div class="text-xs text-slate-400 font-medium">CA Inter & Final Revision Audio Flashcards</div>
       </div>
     </section>
 
@@ -388,8 +542,69 @@
         <p class="text-xs text-slate-500 mt-1">Download case problems, prepare your solution, and submit as a PDF for grading</p>
       </div>
 
+      <!-- Subject Filters (Horizontally scrollable on mobile/tablet) -->
+      <div class="overflow-x-auto pb-1 -mb-1 scrollbar-none">
+        <div id="assignment-subject-filters" class="flex items-center gap-2 min-w-max">
+          <!-- Populated by assignment-portal.js -->
+        </div>
+      </div>
+
+      <!-- Search Bar & Sort/Filter Controls -->
+      <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
+        <!-- Search Bar -->
+        <div class="relative flex-1">
+          <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+          <input 
+            type="text" 
+            id="assignment-search-input" 
+            placeholder="Search test papers by title, topic, subject..." 
+            oninput="window.assignmentPortal.handleSearch(this.value)"
+            class="w-full pl-9 pr-8 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50/60 hover:bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 placeholder-slate-400 transition-all"
+          >
+          <button 
+            type="button" 
+            id="assignment-search-clear-btn" 
+            onclick="window.assignmentPortal.clearSearch()" 
+            class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+            title="Clear search"
+          >
+            <i data-lucide="x" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+
+        <!-- Filter and Sort Controls -->
+        <div class="flex flex-wrap items-center gap-2 self-end sm:self-auto flex-shrink-0">
+          <label for="assignment-status-select" class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 whitespace-nowrap">
+            <i data-lucide="filter" class="w-3.5 h-3.5 text-slate-400"></i> Status:
+          </label>
+          <select 
+            id="assignment-status-select" 
+            onchange="window.assignmentPortal.handleStatusFilter(this.value)"
+            class="px-3 py-2 text-xs font-semibold border border-slate-200 rounded-lg bg-white text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer"
+          >
+            <option value="all">All Status</option>
+            <option value="pending">Pending Attempt</option>
+            <option value="submitted">Submitted</option>
+            <option value="evaluated">Checked / Evaluated</option>
+          </select>
+
+          <label for="assignment-sort-select" class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 whitespace-nowrap ml-1">
+            <i data-lucide="arrow-up-down" class="w-3.5 h-3.5 text-slate-400"></i> Sort:
+          </label>
+          <select 
+            id="assignment-sort-select" 
+            onchange="window.assignmentPortal.handleSort(this.value)"
+            class="px-3 py-2 text-xs font-semibold border border-slate-200 rounded-lg bg-white text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer"
+          >
+            <option value="new">Newest First</option>
+            <option value="old">Oldest First</option>
+            <option value="marks">Highest Marks</option>
+          </select>
+        </div>
+      </div>
+
       <!-- Available Assignments -->
-      <div id="assignment-list" class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div id="assignment-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
         <!-- Populated by assignment-portal.js -->
       </div>
 
@@ -409,34 +624,492 @@
 
     <!-- VIEW 6: LEADERBOARDS & RANKINGS -->
     <section id="view-leaderboard" class="hidden space-y-6">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 class="text-xl font-bold text-slate-900">Student Leaderboards & Ranks</h2>
-          <p class="text-xs text-slate-500 mt-1">Merit-based rankings calculated across mock tests and practice assessments</p>
-        </div>
-
-        <!-- Filter Dropdown -->
-        <div class="w-full sm:w-72">
-          <label class="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Select Leaderboard View</label>
-          <select 
-            id="leaderboard-test-select" 
-            onchange="window.leaderboardManager.handleSelectChange(this.value)"
-            class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <!-- Populated by leaderboard.js -->
-          </select>
-        </div>
-      </div>
-
-      <!-- Leaderboard Content -->
+      <!-- Dynamic Modern Gamified Leaderboard Content -->
       <div id="leaderboard-content">
         <!-- Populated by leaderboard.js -->
       </div>
+    </section>
 
-      <!-- AdSense Bottom Placement -->
-      <div class="adsense-wrapper p-3 adsense-banner-leaderboard flex flex-col items-center justify-center">
-        <span class="adsense-tag mb-1">Sponsored • Google AdSense 728x90</span>
-        <div class="text-xs text-slate-400 font-medium">CA Articleship & Job Placement Network</div>
+    <!-- VIEW: REGISTRATION PAGE -->
+    <section id="view-register" class="hidden py-4">
+      <div class="max-w-2xl mx-auto">
+        
+        <!-- Registration Card Container -->
+        <div class="bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
+          
+          <!-- Top Card Banner -->
+          <div class="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-6 sm:p-8 relative overflow-hidden">
+            <div class="relative z-10">
+              <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-white/15 text-blue-200 mb-3 backdrop-blur-xs">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400"></i> ExcellenceCA • Academic Term 2026
+              </div>
+              <h2 class="text-2xl sm:text-3xl font-black tracking-tight">Student Registration</h2>
+              <p class="text-xs text-blue-200 mt-1.5 leading-relaxed max-w-lg">
+                Create your student account to access full syllabus video lectures, take timed MCQ mock tests, download subject question papers, and receive evaluated PDF answer copies.
+              </p>
+            </div>
+            <div class="absolute -right-10 -bottom-10 w-48 h-48 rounded-full bg-blue-500/10 blur-2xl pointer-events-none"></div>
+          </div>
+
+          <!-- Registration Form Body -->
+          <div class="p-6 sm:p-8">
+                        <form id="page-registration-form" onsubmit="window.app.handlePageSignupSubmit(event)" class="space-y-4 text-xs">
+              
+              <!-- Username & Full Name Grid -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="block font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                    <i data-lucide="at-sign" class="w-3.5 h-3.5 text-blue-600"></i> Unique Username <span class="text-rose-500">*</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    id="page-reg-username" 
+                    required 
+                    placeholder="e.g. ram123" 
+                    class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-slate-800"
+                  >
+                  <span class="text-[10px] text-slate-400 mt-1 block">Alphanumeric only (letters & numbers), maximum 10 characters. Must be unique.</span>
+                </div>
+
+                <div>
+                  <label class="block font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                    <i data-lucide="user" class="w-3.5 h-3.5 text-blue-600"></i> Full Name <span class="text-rose-500">*</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    id="page-reg-name" 
+                    required 
+                    placeholder="e.g. Rohan Sharma" 
+                    class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium text-slate-800"
+                  >
+                </div>
+              </div>
+
+              <!-- Email & Phone Grid -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="block font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                    <i data-lucide="mail" class="w-3.5 h-3.5 text-blue-600"></i> Email Address <span class="text-rose-500">*</span>
+                  </label>
+                  <input 
+                    type="email" 
+                    id="page-reg-email" 
+                    required 
+                    placeholder="student@example.com" 
+                    class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium text-slate-800"
+                  >
+                </div>
+
+                <div>
+                  <label class="block font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                    <i data-lucide="phone" class="w-3.5 h-3.5 text-blue-600"></i> Mobile / Phone Number <span class="text-rose-500">*</span>
+                  </label>
+                  <input 
+                    type="tel" 
+                    id="page-reg-phone" 
+                    required 
+                    placeholder="+91 98765 43210 or 10-digit number" 
+                    class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium text-slate-800"
+                  >
+                </div>
+              </div>
+
+              <!-- CA Level Selection -->
+              <div>
+                <label class="block font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                  <i data-lucide="graduation-cap" class="w-3.5 h-3.5 text-blue-600"></i> CA Exam Level <span class="text-rose-500">*</span>
+                </label>
+                <div class="relative">
+                  <select 
+                    id="page-reg-level" 
+                    required 
+                    class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-bold text-slate-800 bg-white"
+                  >
+                    <option value="" disabled selected>-- Select your CA Course Level --</option>
+                    <option value="CA FOUNDATION">CA FOUNDATION</option>
+                    <option value="CA INTERMEDIATE">CA INTERMEDIATE</option>
+                    <option value="CA FINAL">CA FINAL</option>
+                  </select>
+                </div>
+                <span class="text-[11px] text-slate-400 mt-1 block">Course level determines your mock papers, question difficulty, and syllabus lectures.</span>
+              </div>
+
+              <!-- Referral Code / Link (Optional) -->
+              <div>
+                <label class="block font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                  <span class="flex items-center gap-1.5">
+                    <i data-lucide="gift" class="w-3.5 h-3.5 text-blue-600"></i> Referral Code (Optional)
+                  </span>
+                  <span class="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-md">100 Pts to Referrer</span>
+                </label>
+                <input 
+                  type="text" 
+                  id="page-reg-ref" 
+                  placeholder="e.g. ram123 or @ram123" 
+                  class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-slate-800"
+                >
+                <span class="text-[10px] text-slate-400 mt-1 block">If a friend referred you, enter their username to grant them 100 points.</span>
+              </div>
+
+              <!-- Password & Confirm Password Grid with Strong Password Enforcement & Eye Toggles -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="block font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                    <i data-lucide="lock" class="w-3.5 h-3.5 text-blue-600"></i> Create Password <span class="text-rose-500">*</span>
+                  </label>
+                  <div class="relative">
+                    <input 
+                      type="password" 
+                      id="page-reg-pass" 
+                      required 
+                      placeholder="Min 8 chars, letter + number/symbol" 
+                      class="w-full pl-3.5 pr-10 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-slate-800"
+                    >
+                    <button type="button" onclick="window.app.togglePasswordVisibility('page-reg-pass', this)" class="absolute right-3 top-3 text-slate-400 hover:text-slate-600">
+                      <i data-lucide="eye" class="w-4 h-4"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                    <i data-lucide="check-circle" class="w-3.5 h-3.5 text-blue-600"></i> Confirm Password <span class="text-rose-500">*</span>
+                  </label>
+                  <div class="relative">
+                    <input 
+                      type="password" 
+                      id="page-reg-confirm" 
+                      required 
+                      placeholder="Re-enter password" 
+                      class="w-full pl-3.5 pr-10 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-slate-800"
+                    >
+                    <button type="button" onclick="window.app.togglePasswordVisibility('page-reg-confirm', this)" class="absolute right-3 top-3 text-slate-400 hover:text-slate-600">
+                      <i data-lucide="eye" class="w-4 h-4"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="text-[11px] text-slate-500 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                <span class="font-bold text-slate-700">Password Requirements:</span> Minimum 8 characters. Must contain at least one letter and one number or special character. Simple passwords like "12345678" are disallowed.
+              </div>
+
+              <!-- Benefits Badge Strip -->
+              <div class="bg-blue-50/60 border border-blue-100 rounded-xl p-3.5 my-2">
+                <span class="font-bold text-blue-900 block mb-1 text-[11px] uppercase tracking-wider">What you get after registration:</span>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] text-slate-600">
+                  <div class="flex items-center gap-1.5">
+                    <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 flex-shrink-0"></i> Timed MCQ Mock Tests
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 flex-shrink-0"></i> Question Papers (PDF)
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 flex-shrink-0"></i> Evaluated Checked Copies
+                  </div>
+                </div>
+              </div>
+
+              <!-- Submit Button -->
+              <button 
+                type="submit" 
+                class="w-full py-3 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 text-sm mt-3"
+              >
+                <i data-lucide="user-plus" class="w-4 h-4"></i> Complete Student Registration
+              </button>
+
+            </form>
+
+            <!-- Login Prompt Link -->
+            <div class="text-center mt-6 pt-5 border-t border-slate-100 text-xs text-slate-600 flex items-center justify-center gap-1.5">
+              <span>Already have an account?</span>
+              <button onclick="window.app.showAuthModal('login')" class="font-bold text-blue-600 hover:text-blue-700 hover:underline">
+                Sign In to ExcellenceCA
+              </button>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+
+    <!-- VIEW: DEDICATED STUDENT PROFILE PAGE -->
+    <section id="view-profile" class="hidden space-y-8 py-4">
+      <!-- Back navigation & Title Header -->
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <button onclick="window.app.navigate('dashboard')" class="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1.5 mb-1 cursor-pointer">
+            <i data-lucide="arrow-left" class="w-4 h-4"></i> Back to Dashboard
+          </button>
+          <h2 class="text-2xl font-black text-slate-900 tracking-tight">Student Profile & Settings</h2>
+          <p class="text-xs text-slate-500 mt-0.5">Manage your personal credentials, study preferences, private rank standing, and referral rewards</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="window.auth.logout()" class="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shadow-xs">
+            <i data-lucide="log-out" class="w-4 h-4"></i> Sign Out
+          </button>
+        </div>
+      </div>
+
+      <!-- Profile Hero Card -->
+      <div class="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden">
+        <div class="relative z-10 flex flex-col sm:flex-row items-center sm:items-start gap-6">
+          <div class="relative group">
+            <img id="profile-page-avatar" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120" alt="Avatar" class="w-20 h-20 rounded-2xl object-cover border-2 border-white/80 shadow-lg">
+            <label for="profile-page-avatar-input" class="absolute inset-0 bg-black/60 rounded-2xl flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer transition-opacity text-white text-[11px] font-bold">
+              Change Photo
+            </label>
+            <input type="file" id="profile-page-avatar-input" accept="image/*" class="hidden" onchange="window.app.handleProfileAvatarChange(event)">
+          </div>
+          
+          <div class="text-center sm:text-left flex-1">
+            <div class="flex flex-wrap items-center justify-center sm:justify-start gap-2 mb-1.5">
+              <span id="profile-page-role-badge" class="px-2.5 py-0.5 text-[10px] font-black rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/30 uppercase tracking-wider">
+                STUDENT
+              </span>
+              <span id="profile-page-level-badge" class="px-2.5 py-0.5 text-[10px] font-black rounded-full bg-amber-500/30 text-amber-200 border border-amber-400/30 uppercase tracking-wider">
+                CA INTERMEDIATE
+              </span>
+            </div>
+            <h1 id="profile-page-name" class="text-2xl sm:text-3xl font-black tracking-tight text-white">Student Name</h1>
+            <span id="profile-page-username" class="text-xs text-blue-300 font-mono font-bold block mt-0.5">@username</span>
+            <p class="text-xs text-slate-300 mt-2 max-w-xl">
+              Account actively enrolled in ICAI curriculum mock series. All evaluated submissions and private rankings are strictly confidential.
+            </p>
+          </div>
+        </div>
+
+        <div class="absolute -right-10 -bottom-10 opacity-10 pointer-events-none text-white font-black text-9xl">
+          ECA
+        </div>
+      </div>
+
+      <!-- Main Profile Grid -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Left Column: Academic Standing & Personal Details -->
+        <div class="lg:col-span-2 space-y-6">
+
+          <!-- 1. ACADEMIC STANDING & PRIVATE RANK -->
+          <div class="bg-gradient-to-br from-indigo-50 via-purple-50 to-blue-50 border border-indigo-200 rounded-2xl p-6 shadow-sm">
+            <div class="flex items-center justify-between mb-4">
+              <div class="flex items-center gap-2">
+                <span class="px-3 py-1 text-[11px] font-extrabold rounded-full bg-purple-100 text-purple-800 border border-purple-200 flex items-center gap-1.5">
+                  <i data-lucide="lock" class="w-3.5 h-3.5 text-purple-700"></i> 🔒 Private — Visible only to you
+                </span>
+              </div>
+              <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Current Standing</span>
+            </div>
+
+            <div class="flex items-center justify-between gap-4 bg-white/80 backdrop-blur-xs p-5 rounded-xl border border-indigo-100 shadow-xs">
+              <div class="flex items-center gap-4">
+                <div id="profile-page-tier-icon-container" class="w-14 h-14 rounded-2xl bg-white border border-indigo-200 flex items-center justify-center shadow-xs flex-shrink-0">
+                  <!-- Injected Vector Rank Badge SVG -->
+                </div>
+                <div>
+                  <span id="profile-page-tier-name" class="font-black text-base text-slate-900 block">Rookie I</span>
+                  <span id="profile-page-xp-display" class="text-xs text-indigo-700 font-bold block mt-0.5">1,250 Total XP</span>
+                  <span class="text-[11px] text-slate-400 block mt-0.5">Progress earned from tests & evaluations</span>
+                </div>
+              </div>
+              <div class="text-right">
+                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Your Rank</span>
+                <span id="profile-page-rank-number" class="text-3xl font-black text-purple-700 block">#4</span>
+              </div>
+            </div>
+
+            <p class="text-[11px] text-slate-500 mt-3 pt-3 border-t border-indigo-100/80 leading-relaxed">
+              Your platform rank and performance standings are private and never shown to other students on the public leaderboard.
+            </p>
+          </div>
+
+          <!-- 2. EDIT PROFILE FORM -->
+          <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+            <h3 class="text-base font-bold text-slate-900 mb-1 flex items-center gap-2">
+              <i data-lucide="user-pen" class="w-4 h-4 text-blue-600"></i> Edit Profile Information
+            </h3>
+            <p class="text-xs text-slate-500 mb-5">Update your display name, course level, and state location for regional study insights</p>
+
+            <form onsubmit="window.app.handleProfilePageUpdate(event)" class="space-y-4 text-xs">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="block font-bold text-slate-700 mb-1.5">Full Name <span class="text-rose-500">*</span></label>
+                  <input type="text" id="profile-page-edit-name" required class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl font-medium text-slate-800 focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div>
+                  <label class="block font-bold text-slate-700 mb-1.5">CA Course Level <span class="text-rose-500">*</span></label>
+                  <select id="profile-page-edit-level" required class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl font-bold text-slate-800 bg-white focus:ring-2 focus:ring-blue-500">
+                    <option value="CA FOUNDATION">CA FOUNDATION</option>
+                    <option value="CA INTERMEDIATE">CA INTERMEDIATE</option>
+                    <option value="CA FINAL">CA FINAL</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="block font-bold text-slate-700 mb-1.5">State / Union Territory</label>
+                  <select id="profile-page-edit-state" onchange="window.app.handleProfilePageStateChange(this.value)" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl font-medium text-slate-800 bg-white focus:ring-2 focus:ring-blue-500">
+                    <!-- Populated dynamically -->
+                  </select>
+                </div>
+
+                <div>
+                  <label class="block font-bold text-slate-700 mb-1.5">District</label>
+                  <select id="profile-page-edit-district" class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl font-medium text-slate-800 bg-white focus:ring-2 focus:ring-blue-500">
+                    <!-- Populated dynamically -->
+                  </select>
+                </div>
+              </div>
+
+              <div class="flex justify-end pt-2">
+                <button type="submit" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5">
+                  <i data-lucide="save" class="w-4 h-4"></i> Save Profile Details
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- 3. CHANGE PASSWORD FORM -->
+          <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+            <h3 class="text-base font-bold text-slate-900 mb-1 flex items-center gap-2">
+              <i data-lucide="key" class="w-4 h-4 text-blue-600"></i> Account Security & Password
+            </h3>
+            <p class="text-xs text-slate-500 mb-5">Keep your account secure with a strong password of at least 8 characters</p>
+
+            <form onsubmit="window.app.handleProfilePagePasswordChange(event)" class="space-y-4 text-xs">
+              <div>
+                <label class="block font-bold text-slate-700 mb-1.5">Current Password</label>
+                <div class="relative max-w-md">
+                  <input type="password" id="profile-page-old-pass" required placeholder="Enter existing password" class="w-full pl-3.5 pr-10 py-2.5 border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-blue-500">
+                  <button type="button" onclick="window.app.togglePasswordVisibility('profile-page-old-pass', this)" class="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">
+                    <i data-lucide="eye" class="w-4 h-4"></i>
+                  </button>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="block font-bold text-slate-700 mb-1.5">New Password (8+ chars)</label>
+                  <div class="relative">
+                    <input type="password" id="profile-page-new-pass" required placeholder="Letters & numbers/symbols" class="w-full pl-3.5 pr-10 py-2.5 border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-blue-500">
+                    <button type="button" onclick="window.app.togglePasswordVisibility('profile-page-new-pass', this)" class="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">
+                      <i data-lucide="eye" class="w-4 h-4"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block font-bold text-slate-700 mb-1.5">Confirm New Password</label>
+                  <div class="relative">
+                    <input type="password" id="profile-page-confirm-pass" required placeholder="Re-enter new password" class="w-full pl-3.5 pr-10 py-2.5 border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-blue-500">
+                    <button type="button" onclick="window.app.togglePasswordVisibility('profile-page-confirm-pass', this)" class="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">
+                      <i data-lucide="eye" class="w-4 h-4"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between pt-2">
+                <span class="text-[11px] text-slate-400">Must include letters and numbers or symbols.</span>
+                <button type="submit" class="px-5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5">
+                  <i data-lucide="lock" class="w-4 h-4"></i> Update Password
+                </button>
+              </div>
+            </form>
+          </div>
+
+        </div>
+
+        <!-- Right Column: Dedicated Referral Section -->
+        <div class="space-y-6">
+
+          <!-- REFERRAL CODE CARD -->
+          <div class="bg-gradient-to-br from-blue-50 via-indigo-50 to-amber-50 border border-blue-200 rounded-2xl p-6 shadow-sm space-y-4">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <div class="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold">
+                  <i data-lucide="gift" class="w-4 h-4"></i>
+                </div>
+                <div>
+                  <span class="text-[10px] font-extrabold uppercase tracking-wider text-blue-600 block">Student Rewards</span>
+                  <h3 class="text-sm font-bold text-slate-900">Your Referral Code</h3>
+                </div>
+              </div>
+              <span class="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                100 Pts / Student
+              </span>
+            </div>
+
+            <!-- Prominent Referral Code Box -->
+            <div class="bg-white border-2 border-dashed border-blue-300 rounded-2xl p-4 text-center space-y-2">
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Share Code with Friends</span>
+              <div id="profile-page-referral-code" class="text-2xl font-black text-blue-700 tracking-wider font-mono select-all">
+                @username
+              </div>
+              <button 
+                type="button" 
+                onclick="window.app.copyReferralCode()" 
+                class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5"
+              >
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i> Copy Referral Code
+              </button>
+            </div>
+
+            <p class="text-[11px] text-slate-500 leading-relaxed">
+              When fellow CA students enter your referral code during account creation, you automatically earn <strong>100 referral points</strong> once their registration is verified.
+            </p>
+
+            <!-- Referral Stats Row -->
+            <div class="grid grid-cols-2 gap-3 pt-2 border-t border-blue-200/60">
+              <div class="bg-white/80 p-3 rounded-xl border border-blue-100">
+                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Referred</span>
+                <span id="profile-page-referral-count" class="text-xl font-black text-slate-900 mt-0.5 block">0</span>
+                <span class="text-[10px] text-slate-500">Students</span>
+              </div>
+              <div class="bg-white/80 p-3 rounded-xl border border-blue-100">
+                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Bonus Points</span>
+                <span id="profile-page-referral-points" class="text-xl font-black text-emerald-700 mt-0.5 block">0</span>
+                <span class="text-[10px] text-emerald-600 font-semibold">Points Earned</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- REFERRED STUDENTS TABLE CARD -->
+          <div class="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+            <div class="p-4 border-b border-slate-100 flex items-center justify-between">
+              <h4 class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                <i data-lucide="users" class="w-4 h-4 text-blue-600"></i> Successfully Referred Students
+              </h4>
+            </div>
+
+            <div class="overflow-x-auto max-h-72 overflow-y-auto">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 text-slate-500 uppercase tracking-wider text-[10px] sticky top-0">
+                  <tr>
+                    <th class="px-3 py-2">Student</th>
+                    <th class="px-3 py-2">Course</th>
+                    <th class="px-3 py-2">Reward</th>
+                  </tr>
+                </thead>
+                <tbody id="profile-page-referred-tbody" class="divide-y divide-slate-100 text-slate-700">
+                  <!-- Populated dynamically by app.js -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- VIEW: TEACHER PORTAL -->
+    <section id="view-teacher" class="hidden space-y-6">
+      <div id="teacher-content-area">
+        <!-- Rendered by teacher-portal.js -->
       </div>
     </section>
 
@@ -463,62 +1136,330 @@
       </div>
     </section>
 
+    <!-- VIEW: 403 FORBIDDEN ERROR -->
+    <section id="view-403" class="hidden py-12">
+      <div class="max-w-xl mx-auto bg-white border border-rose-200 rounded-2xl shadow-xl p-8 text-center">
+        <div class="w-16 h-16 rounded-2xl bg-rose-50 text-rose-600 mx-auto flex items-center justify-center mb-4 border border-rose-100 shadow-sm">
+          <i data-lucide="shield-alert" class="w-8 h-8"></i>
+        </div>
+        <span class="px-3 py-1 text-xs font-black uppercase tracking-wider bg-rose-100 text-rose-800 rounded-full border border-rose-200 inline-block mb-3">
+          HTTP 403 • Access Forbidden
+        </span>
+        <h2 class="text-2xl font-black text-slate-900 tracking-tight">403 - Access Denied</h2>
+        <p class="text-xs text-slate-600 mt-2 max-w-md mx-auto leading-relaxed">
+          The <strong>Video Lectures Portal</strong> is restricted by the Administrator. Students and Teachers do not have permission to view or browse video lectures.
+        </p>
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 my-6 text-left text-xs text-slate-600 space-y-1.5">
+          <div class="flex items-center gap-2 font-bold text-slate-800">
+            <i data-lucide="lock" class="w-3.5 h-3.5 text-rose-600"></i> Policy Restriction Notice
+          </div>
+          <p class="text-[11px] text-slate-500">
+            Lecture materials are currently disabled for student and faculty access. You can continue taking MCQ mock tests, solving PDF question papers, and viewing evaluated answer sheets.
+          </p>
+        </div>
+        <div class="flex items-center justify-center gap-3">
+          <button onclick="window.app.navigate('dashboard')" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center gap-1.5">
+            <i data-lucide="layout-dashboard" class="w-4 h-4"></i> Back to Dashboard
+          </button>
+          <button onclick="window.app.navigate('tests')" class="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors flex items-center gap-1.5">
+            <i data-lucide="check-square" class="w-4 h-4"></i> Take MCQ Test
+          </button>
+        </div>
+      </div>
+    </section>
+
   </main>
 
-  <!-- FOOTER -->
-  <footer class="bg-white border-t border-slate-200 mt-12 py-8 text-xs text-slate-500">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-      <div class="flex items-center gap-2">
-        <div class="w-6 h-6 rounded-md bg-blue-600 text-white flex items-center justify-center font-bold text-xs">CA</div>
-        <span class="font-bold text-slate-800">CA Excellence Academy</span>
-        <span>• Modern Learning & Examination Platform</span>
+  <!-- COMMON GLOBAL FOOTER -->
+  <footer class="bg-white border-t border-slate-200 mt-12 py-6 text-xs text-slate-500">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-5">
+      <!-- Brand & Dynamic Copyright -->
+      <div class="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 text-center sm:text-left">
+        <div class="flex items-center gap-2">
+          <img src="assets/brandlogo.png" alt="ExcellenceCA" class="h-8 w-auto object-contain">
+        </div>
+        <span class="hidden sm:inline text-slate-300">•</span>
+        <span class="text-slate-500 font-medium">© <span id="footer-current-year">2026</span> ExcellenceCA. All rights reserved.</span>
       </div>
-      <div class="flex items-center gap-6">
-        <a href="#" onclick="window.app.navigate('dashboard')" class="hover:text-blue-600">Student Dashboard</a>
-        <a href="#" onclick="window.app.navigate('tests')" class="hover:text-blue-600">Tests</a>
-        <a href="#" onclick="window.app.navigate('lectures')" class="hover:text-blue-600">Lectures</a>
-        <a href="#" onclick="window.auth.switchRole('admin')" class="hover:text-blue-600 font-bold text-amber-700">Admin Portal</a>
+
+      <!-- Functional Links (Modals) -->
+      <div class="flex flex-wrap items-center justify-center gap-5 sm:gap-6 font-semibold text-slate-600">
+        <button type="button" onclick="window.app.showFooterModal('partnership')" class="hover:text-blue-600 transition-colors cursor-pointer">Partnership / Sponsor</button>
+        <button type="button" onclick="window.app.showFooterModal('privacy')" class="hover:text-blue-600 transition-colors cursor-pointer">Privacy Policy</button>
+        <button type="button" onclick="window.app.showFooterModal('support')" class="hover:text-blue-600 transition-colors cursor-pointer">Support</button>
       </div>
-      <div>
-        <span>Built with responsive education standards. Zero exam ads guaranteed.</span>
+
+      <!-- Social Media Icons (Clickable) -->
+      <div class="flex items-center gap-3 text-slate-500">
+        <a href="https://youtube.com" target="_blank" rel="noopener noreferrer" class="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:text-red-600 hover:border-red-200 hover:bg-red-50/50 transition-colors" title="YouTube" aria-label="YouTube">
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+          </svg>
+        </a>
+        <a href="https://instagram.com" target="_blank" rel="noopener noreferrer" class="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:text-pink-600 hover:border-pink-200 hover:bg-pink-50/50 transition-colors" title="Instagram" aria-label="Instagram">
+          <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect width="20" height="20" x="2" y="2" rx="5" ry="5"/>
+            <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
+            <line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/>
+          </svg>
+        </a>
+        <a href="https://x.com" target="_blank" rel="noopener noreferrer" class="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:text-slate-900 hover:border-slate-400 hover:bg-slate-100 transition-colors" title="X (Twitter)" aria-label="X (Twitter)">
+          <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+          </svg>
+        </a>
       </div>
     </div>
   </footer>
 
   <!-- MODALS CONTAINER -->
 
+  <!-- Modal: Student Profile & Settings Modal -->
+  <div id="profile-modal" class="modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
+    <div id="profile-modal-content" class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col">
+      <!-- Header -->
+      <div class="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-6 relative flex items-center justify-between flex-shrink-0">
+        <div class="flex items-center gap-4">
+          <div class="relative group">
+            <img id="profile-avatar-preview" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120" alt="Avatar" class="w-14 h-14 rounded-full object-cover border-2 border-white/80 shadow-md">
+            <label for="profile-avatar-input" class="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer transition-opacity text-white text-[10px] font-bold">
+              Change
+            </label>
+            <input type="file" id="profile-avatar-input" accept="image/*" class="hidden" onchange="window.app.handleProfileAvatarChange(event)">
+          </div>
+          <div>
+            <h3 id="profile-display-name" class="text-lg font-black tracking-tight text-white leading-tight">Student Name</h3>
+            <span id="profile-username-tag" class="text-xs text-blue-300 font-mono">@username</span>
+            <div class="flex items-center gap-2 mt-1">
+              <span id="profile-role-badge" class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/30 uppercase">STUDENT</span>
+              
+            </div>
+          </div>
+        </div>
+        <button onclick="window.app.closeModal('profile-modal')" class="text-white/70 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Scrollable Modal Body -->
+      <div class="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
+        
+        <!-- 1. PRIVATE STUDENT RANK CARD -->
+        <div class="bg-gradient-to-br from-indigo-50 via-purple-50 to-blue-50 border border-indigo-200 rounded-2xl p-4 sm:p-5 shadow-xs">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <span class="px-2.5 py-1 text-[10px] font-extrabold rounded-full bg-purple-100 text-purple-800 border border-purple-200 flex items-center gap-1">
+                <i data-lucide="lock" class="w-3 h-3"></i> 🔒 Private — Visible only to you
+              </span>
+            </div>
+            <span class="text-[11px] font-semibold text-slate-500">Student Standing</span>
+          </div>
+
+          <div class="flex items-center justify-between gap-4">
+            <div class="flex items-center gap-3.5">
+              <div id="profile-tier-icon-container" class="w-12 h-12 rounded-xl bg-white border border-indigo-100 flex items-center justify-center shadow-xs">
+                <!-- Injected Tier emblem -->
+              </div>
+              <div>
+                <span id="profile-tier-name" class="font-extrabold text-sm text-slate-900 block">Bronze Novice</span>
+                <span id="profile-xp-display" class="text-xs text-indigo-700 font-bold block">1,250 Total XP</span>
+              </div>
+            </div>
+            <div class="text-right">
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Your Rank</span>
+              <span id="profile-rank-number" class="text-2xl font-black text-purple-700 block">#4</span>
+            </div>
+          </div>
+          <p class="text-[11px] text-slate-500 mt-2.5 pt-2.5 border-t border-indigo-100/80">
+            Platform-wide rankings are kept private to protect student academic confidentiality.
+          </p>
+        </div>
+
+        <!-- 2. UNIQUE REFERRAL URL & POINTS -->
+        <div class="bg-blue-50/60 border border-blue-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold">
+                <i data-lucide="share-2" class="w-3.5 h-3.5"></i>
+              </div>
+              <span class="font-bold text-slate-900 text-xs">Your Unique Referral Link</span>
+            </div>
+            <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+              100 Pts / Referral
+            </span>
+          </div>
+
+          <!-- Referral URL Input + Copy Button -->
+          <div class="flex items-center gap-2">
+            <input 
+              type="text" 
+              id="profile-referral-url" 
+              readonly 
+              class="w-full px-3 py-2 bg-white border border-blue-200 rounded-xl font-mono text-[11px] text-slate-700 select-all"
+            >
+            <button 
+              type="button" 
+              onclick="window.app.copyReferralLink()" 
+              class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 flex-shrink-0"
+            >
+              <i data-lucide="copy" class="w-3.5 h-3.5"></i> Copy Link
+            </button>
+          </div>
+
+          <!-- Referral Points Display directly below Referral URL -->
+          <div class="pt-2 border-t border-blue-100 flex items-center justify-between">
+            <div class="flex items-center gap-1.5">
+              <i data-lucide="gift" class="w-4 h-4 text-blue-600"></i>
+              <span class="font-bold text-slate-800">Referral Points:</span>
+              <span id="profile-referral-points" class="font-black text-blue-600 text-sm">0</span>
+              <span class="text-slate-500 font-medium">Points</span>
+            </div>
+            <span class="text-[10px] text-slate-500">Points award automatically on sign-up</span>
+          </div>
+        </div>
+
+        <!-- 3. PROFILE DETAILS EDIT FORM (Name, State, District, Exam Level) -->
+        <form onsubmit="window.app.handleProfileUpdate(event)" class="space-y-4 pt-2 border-t border-slate-100">
+          <h4 class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+            <i data-lucide="user-pen" class="w-4 h-4 text-blue-600"></i> Edit Student Information
+          </h4>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Full Name</label>
+              <input type="text" id="profile-edit-name" required class="w-full px-3 py-2 border border-slate-300 rounded-xl font-medium text-slate-800">
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">CA Exam Level</label>
+              <select id="profile-edit-level" required class="w-full px-3 py-2 border border-slate-300 rounded-xl font-bold text-slate-800 bg-white">
+                <option value="CA FOUNDATION">CA FOUNDATION</option>
+                <option value="CA INTERMEDIATE">CA INTERMEDIATE</option>
+                <option value="CA FINAL">CA FINAL</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">State / UT</label>
+              <select id="profile-edit-state" onchange="window.app.handleProfileStateChange(this.value)" class="w-full px-3 py-2 border border-slate-300 rounded-xl font-medium text-slate-800 bg-white">
+                <!-- Populated dynamically -->
+              </select>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">District</label>
+              <select id="profile-edit-district" class="w-full px-3 py-2 border border-slate-300 rounded-xl font-medium text-slate-800 bg-white">
+                <!-- Populated dynamically based on state -->
+              </select>
+            </div>
+          </div>
+
+          <button type="submit" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5">
+            <i data-lucide="save" class="w-4 h-4"></i> Save Profile Changes
+          </button>
+        </form>
+
+        <!-- 4. PROFILE PASSWORD CHANGE FORM -->
+        <form onsubmit="window.app.handleProfilePasswordChange(event)" class="space-y-3 pt-4 border-t border-slate-100">
+          <h4 class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+            <i data-lucide="key" class="w-4 h-4 text-blue-600"></i> Change Account Password
+          </h4>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Current / Old Password</label>
+            <div class="relative">
+              <input type="password" id="profile-old-pass" required placeholder="Enter existing password" class="w-full pl-3 pr-10 py-2 border border-slate-300 rounded-xl font-mono text-xs">
+              <button type="button" onclick="window.app.togglePasswordVisibility('profile-old-pass', this)" class="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">
+                <i data-lucide="eye" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">New Password (8+ chars)</label>
+              <div class="relative">
+                <input type="password" id="profile-new-pass" required placeholder="Letters & numbers/symbols" class="w-full pl-3 pr-10 py-2 border border-slate-300 rounded-xl font-mono text-xs">
+                <button type="button" onclick="window.app.togglePasswordVisibility('profile-new-pass', this)" class="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">
+                  <i data-lucide="eye" class="w-4 h-4"></i>
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Confirm New Password</label>
+              <div class="relative">
+                <input type="password" id="profile-confirm-pass" required placeholder="Re-enter new password" class="w-full pl-3 pr-10 py-2 border border-slate-300 rounded-xl font-mono text-xs">
+                <button type="button" onclick="window.app.togglePasswordVisibility('profile-confirm-pass', this)" class="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">
+                  <i data-lucide="eye" class="w-4 h-4"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <span class="text-[11px] text-slate-400 block">Password must be at least 8 characters long and contain letters and numbers/symbols.</span>
+
+          <button type="submit" class="w-full py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5">
+            <i data-lucide="lock" class="w-4 h-4"></i> Update Password
+          </button>
+        </form>
+
+        <!-- 5. PROMINENT LOGOUT BUTTON (Inside profile modal) -->
+        <div class="pt-4 border-t border-slate-100">
+          <button 
+            type="button" 
+            onclick="window.app.closeModal('profile-modal'); window.auth.logout();" 
+            class="w-full py-2.5 px-4 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold border border-rose-200 transition-colors flex items-center justify-center gap-2 text-xs"
+          >
+            <i data-lucide="log-out" class="w-4 h-4"></i> Sign Out of ExcellenceCA
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
   <!-- Modal 1: Auth Modal (Login, Signup, Forgot) -->
-  <div id="auth-modal" class="modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
-    <div id="auth-modal-content" class="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+  <div id="auth-modal" class="modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-3 sm:p-4">
+    <div id="auth-modal-content" class="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150 relative">
       <!-- Populated by app.js -->
     </div>
   </div>
 
   <!-- Modal 2: Test Instructions Modal -->
-  <div id="instructions-modal" class="modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
-    <div id="instructions-modal-content" class="bg-white rounded-2xl max-w-xl w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+  <div id="instructions-modal" class="modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-3 sm:p-4">
+    <div id="instructions-modal-content" class="bg-white rounded-2xl max-w-xl w-full shadow-2xl overflow-hidden max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150 relative">
       <!-- Populated by test-engine.js -->
     </div>
   </div>
 
   <!-- Modal 3: Test Result & Solutions Modal -->
-  <div id="result-modal" class="modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
-    <div id="result-modal-content" class="bg-white rounded-2xl max-w-3xl w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+  <div id="result-modal" class="modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-3 sm:p-4">
+    <div id="result-modal-content" class="bg-white rounded-2xl max-w-3xl w-full shadow-2xl overflow-hidden max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150 relative">
       <!-- Populated by test-engine.js -->
     </div>
   </div>
 
   <!-- Modal 4: Assignment Upload Modal -->
-  <div id="assignment-modal" class="modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
-    <div id="assignment-modal-content" class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+  <div id="assignment-modal" class="modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-3 sm:p-4">
+    <div id="assignment-modal-content" class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150 relative">
       <!-- Populated by assignment-portal.js -->
     </div>
   </div>
 
-  <!-- Modal 5: Admin Generic Modal (CRUD Lectures, Tests, Questions, PDF Grading) -->
-  <div id="admin-generic-modal" class="modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
-    <div id="admin-generic-modal-content" class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+  <!-- Modal 5: Admin Generic Modal (CRUD Lectures, Tests, Questions, PDF Grading, Banners) -->
+  <div id="admin-generic-modal" class="modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-3 sm:p-4">
+    <div id="admin-generic-modal-content" class="bg-white rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150 relative">
       <!-- Populated by admin-dashboard.js -->
+    </div>
+  </div>
+
+  <!-- Modal 6: Footer Info Modal (Partnership, Privacy Policy, Support) -->
+  <div id="footer-info-modal" class="modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-3 sm:p-4">
+    <div id="footer-info-modal-content" class="bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150 relative">
+      <!-- Populated by app.js showFooterModal() -->
     </div>
   </div>
 
@@ -528,12 +1469,15 @@
   <!-- JAVASCRIPT MODULES -->
   <script src="js/store.js"></script>
   <script src="js/auth.js"></script>
+  <script src="js/secure-backend.js"></script>
   <script src="js/student-dashboard.js"></script>
   <script src="js/lecture-player.js"></script>
   <script src="js/test-engine.js"></script>
   <script src="js/leaderboard.js"></script>
   <script src="js/assignment-portal.js"></script>
+  <script src="js/teacher-portal.js"></script>
   <script src="js/admin-dashboard.js"></script>
+  <script src="js/banner-manager.js"></script>
   <script src="js/app.js"></script>
 
 </body>

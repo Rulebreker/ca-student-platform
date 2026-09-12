@@ -21,61 +21,192 @@ class TestEngine {
     this.totalDurationSeconds = 0;
     this.currentAttemptId = null;
     this.selectedSubject = 'all';
+    this.searchQuery = '';
+    this.sortBy = 'new'; // 'new' | 'old' | 'popular'
+    this.isPreview = false;
   }
 
   renderCatalog() {
-    const tests = window.store.getTests().filter(t => t.isPublished);
-    const subjects = window.store.getSubjects();
-    const user = window.auth.getCurrentUser();
-    const userAttempts = user ? window.store.getAttemptsByUser(user.id) : [];
+    // 1. Render Subject Filters with dynamic counts
+    this.renderSubjectFilters();
 
-    // Render Subject Filters
+    // 2. Synchronize search input and sort select if present in DOM
+    const searchInput = document.getElementById('test-search-input');
+    if (searchInput && searchInput.value !== this.searchQuery) {
+      searchInput.value = this.searchQuery;
+    }
+    const clearBtn = document.getElementById('test-search-clear-btn');
+    if (clearBtn) {
+      if (this.searchQuery.trim()) clearBtn.classList.remove('hidden');
+      else clearBtn.classList.add('hidden');
+    }
+    const sortSelect = document.getElementById('test-sort-select');
+    if (sortSelect && sortSelect.value !== this.sortBy) {
+      sortSelect.value = this.sortBy;
+    }
+
+    // 3. Render filtered and sorted cards
+    this.renderCards();
+  }
+
+  renderSubjectFilters() {
     const filterContainer = document.getElementById('test-subject-filters');
-    if (filterContainer) {
-      filterContainer.innerHTML = `
-        <button 
-          onclick="window.testEngine.filterSubject('all')"
-          class="px-4 py-2 text-xs font-semibold rounded-lg transition-all ${
-            this.selectedSubject === 'all' 
-              ? 'bg-blue-600 text-white shadow-sm' 
-              : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
-          }"
-        >
-          All Tests (${tests.length})
-        </button>
-        ${subjects.map(s => {
-          const count = tests.filter(t => t.subjectId === s.id).length;
-          const isActive = this.selectedSubject === s.id;
-          return `
-            <button 
-              onclick="window.testEngine.filterSubject('${s.id}')"
-              class="px-4 py-2 text-xs font-semibold rounded-lg transition-all ${
-                isActive 
-                  ? 'bg-blue-600 text-white shadow-sm' 
-                  : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
-              }"
-            >
-              ${s.name} (${count})
-            </button>
-          `;
-        }).join('')}
-      `;
-    }
+    if (!filterContainer) return;
 
-    let filtered = tests;
+    const allPublishedTests = window.store.getTests().filter(t => t.isPublished);
+    const subjects = window.store.getSubjects();
+
+    filterContainer.innerHTML = `
+      <button 
+        type="button"
+        onclick="window.testEngine.filterSubject('all')"
+        class="px-4 py-2 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+          this.selectedSubject === 'all' 
+            ? 'bg-blue-600 text-white shadow-sm font-bold' 
+            : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+        }"
+      >
+        All Tests (${allPublishedTests.length})
+      </button>
+      ${subjects.map(s => {
+        const count = allPublishedTests.filter(t => t.subjectId === s.id).length;
+        const isActive = this.selectedSubject === s.id;
+        return `
+          <button 
+            type="button"
+            onclick="window.testEngine.filterSubject('${s.id}')"
+            class="px-4 py-2 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+              isActive 
+                ? 'bg-blue-600 text-white shadow-sm font-bold' 
+                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+            }"
+          >
+            ${s.name} (${count})
+          </button>
+        `;
+      }).join('')}
+    `;
+  }
+
+  filterSubject(subjectId) {
+    this.selectedSubject = subjectId;
+    this.renderSubjectFilters();
+    this.renderCards();
+  }
+
+  handleSearch(query) {
+    this.searchQuery = query || '';
+    const clearBtn = document.getElementById('test-search-clear-btn');
+    if (clearBtn) {
+      if (this.searchQuery.trim()) clearBtn.classList.remove('hidden');
+      else clearBtn.classList.add('hidden');
+    }
+    this.renderCards();
+  }
+
+  clearSearch() {
+    this.searchQuery = '';
+    const searchInput = document.getElementById('test-search-input');
+    if (searchInput) searchInput.value = '';
+    const clearBtn = document.getElementById('test-search-clear-btn');
+    if (clearBtn) clearBtn.classList.add('hidden');
+    this.renderCards();
+  }
+
+  handleSort(sortBy) {
+    this.sortBy = sortBy || 'new';
+    this.renderCards();
+  }
+
+  resetFilters() {
+    this.selectedSubject = 'all';
+    this.searchQuery = '';
+    this.sortBy = 'new';
+    const searchInput = document.getElementById('test-search-input');
+    if (searchInput) searchInput.value = '';
+    const sortSelect = document.getElementById('test-sort-select');
+    if (sortSelect) sortSelect.value = 'new';
+    const clearBtn = document.getElementById('test-search-clear-btn');
+    if (clearBtn) clearBtn.classList.add('hidden');
+    this.renderSubjectFilters();
+    this.renderCards();
+  }
+
+  getFilteredAndSortedTests() {
+    let list = window.store.getTests().filter(t => t.isPublished);
+
+    // 1. Subject filter
     if (this.selectedSubject !== 'all') {
-      filtered = filtered.filter(t => t.subjectId === this.selectedSubject);
+      list = list.filter(t => t.subjectId === this.selectedSubject);
     }
 
+    // 2. Search filter (Test title, subject, description, topic/chapter, tags)
+    const q = this.searchQuery.trim().toLowerCase();
+    if (q) {
+      list = list.filter(test => {
+        const subject = window.store.getSubjectById(test.subjectId);
+        const subjectName = (subject ? subject.name : '').toLowerCase();
+        const title = (test.title || '').toLowerCase();
+        const desc = (test.description || '').toLowerCase();
+        const topic = (test.chapter || test.topic || '').toLowerCase();
+        const tags = Array.isArray(test.tags) ? test.tags.join(' ').toLowerCase() : (test.tags || '').toLowerCase();
+
+        return title.includes(q) || 
+               subjectName.includes(q) || 
+               desc.includes(q) || 
+               topic.includes(q) || 
+               tags.includes(q);
+      });
+    }
+
+    // 3. Sort (New, Old, Popular)
+    if (this.sortBy === 'new') {
+      list.sort((a, b) => {
+        const dateA = new Date(a.createdAt || a.startDate || 0).getTime();
+        const dateB = new Date(b.createdAt || b.startDate || 0).getTime();
+        return dateB - dateA;
+      });
+    } else if (this.sortBy === 'old') {
+      list.sort((a, b) => {
+        const dateA = new Date(a.createdAt || a.startDate || 0).getTime();
+        const dateB = new Date(b.createdAt || b.startDate || 0).getTime();
+        return dateA - dateB;
+      });
+    } else if (this.sortBy === 'popular') {
+      const getPopularity = (t) => {
+        const recordedAttempts = window.store.getAttempts().filter(a => a.testId === t.id).length;
+        const basePopularity = typeof t.attemptsCount === 'number' ? t.attemptsCount : 0;
+        return basePopularity + recordedAttempts;
+      };
+      list.sort((a, b) => getPopularity(b) - getPopularity(a));
+    }
+
+    return list;
+  }
+
+  renderCards() {
     const grid = document.getElementById('tests-grid');
     if (!grid) return;
+
+    const filtered = this.getFilteredAndSortedTests();
+    const user = window.auth.getCurrentUser();
+    const userAttempts = user ? window.store.getAttemptsByUser(user.id) : [];
 
     if (filtered.length === 0) {
       grid.innerHTML = `
         <div class="col-span-full text-center py-16 bg-white rounded-xl border border-dashed border-slate-200 p-8">
-          <i data-lucide="file-question" class="w-10 h-10 text-slate-400 mx-auto mb-3"></i>
-          <h4 class="text-base font-bold text-slate-800">No mock tests found</h4>
-          <p class="text-xs text-slate-500 mt-1">Please select another subject or check back later.</p>
+          <i data-lucide="search-x" class="w-10 h-10 text-slate-400 mx-auto mb-3"></i>
+          <h4 class="text-base font-bold text-slate-800">No MCQ papers found.</h4>
+          <p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+            No mock tests match your current search query or subject filter.
+          </p>
+          <button 
+            type="button"
+            onclick="window.testEngine.resetFilters()"
+            class="mt-4 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-lg transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+          >
+            <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> Clear Search & Filters
+          </button>
         </div>
       `;
       if (window.lucide) window.lucide.createIcons();
@@ -121,11 +252,13 @@ class TestEngine {
           </div>
 
           <div>
-            <div class="flex items-center justify-between text-xs py-2 border-t border-slate-100 mb-3">
-              <span class="text-slate-500">
-                Attempts: <strong class="${canTake ? 'text-slate-800' : 'text-rose-600'}">${attemptsUsed}/${maxAttempts}</strong>
-              </span>
-              ${bestAttempt !== null ? `<span class="text-emerald-700 font-semibold">Best: ${Math.round(bestAttempt)}%</span>` : ''}
+            <div class="text-xs py-2 border-t border-slate-100 mb-3 space-y-1">
+              <div class="flex items-center justify-between">
+                <span class="${canTake ? 'text-slate-600' : 'text-rose-600 font-semibold'}">
+                  ${canTake ? `You have <strong>${attemptsRemaining} of ${maxAttempts}</strong> attempt(s) remaining.` : '<strong class="text-rose-600">You have no attempts remaining.</strong>'}
+                </span>
+                ${bestAttempt !== null ? `<span class="text-emerald-700 font-semibold text-[11px]">Best: ${Math.round(bestAttempt)}%</span>` : ''}
+              </div>
             </div>
 
             <div class="flex items-center gap-2">
@@ -147,11 +280,6 @@ class TestEngine {
     }).join('');
 
     if (window.lucide) window.lucide.createIcons();
-  }
-
-  filterSubject(subjectId) {
-    this.selectedSubject = subjectId;
-    this.renderCatalog();
   }
 
   showInstructionsModal(testId) {
@@ -261,17 +389,39 @@ class TestEngine {
     window.app.openModal('instructions-modal');
   }
 
-  startTest(testId) {
-    const agreeCheckbox = document.getElementById('agree-test-rules');
-    if (agreeCheckbox && !agreeCheckbox.checked) {
-      window.app.showToast('Please confirm that you have read the instructions.', 'warning');
-      return;
+  async startTest(testId, options = {}) {
+    this.isPreview = !!options.isPreview;
+
+    if (!this.isPreview) {
+      const agreeCheckbox = document.getElementById('agree-test-rules');
+      if (agreeCheckbox && !agreeCheckbox.checked) {
+        window.app.showToast('Please confirm that you have read the instructions.', 'warning');
+        return;
+      }
     }
 
     const test = window.store.getTestById(testId);
     if (!test) return;
 
-    const questions = window.store.getQuestionsByTestId(test.id);
+    // Check attempt limits with backend if not preview
+    if (!this.isPreview) {
+      const user = window.auth.getCurrentUser();
+      if (!user) {
+        window.app.showAuthModal('login');
+        return;
+      }
+      const attemptCheck = await window.secureBackend.verifyTestAttemptAllowed(testId, false);
+      if (attemptCheck && !attemptCheck.allowed) {
+        window.app.showToast(attemptCheck.error || 'You have no attempts remaining.', 'error');
+        return;
+      }
+    }
+
+    // Question delivery: For students, deliver sanitized questions (NO answer keys or explanations in memory)
+    const questions = this.isPreview 
+      ? window.store.getQuestionsByTestId(test.id) 
+      : window.store.getSanitizedQuestions(test.id);
+
     if (questions.length === 0) {
       window.app.showToast('No questions available in this test yet.', 'error');
       return;
@@ -286,12 +436,20 @@ class TestEngine {
     this.markedForReview = {};
     this.totalDurationSeconds = test.durationMinutes * 60;
     this.secondsRemaining = this.totalDurationSeconds;
-    this.currentAttemptId = 'att-' + Date.now();
+    this.currentAttemptId = this.isPreview ? 'preview-' + Date.now() : 'att-' + Date.now();
 
     // Switch view to exam interface
     window.app.navigate('test-taking');
     this.renderExamInterface();
     this.startTimer();
+  }
+
+  exitPreview() {
+    clearInterval(this.timerInterval);
+    this.activeTest = null;
+    this.isPreview = false;
+    window.app.navigate('admin');
+    window.adminDashboard.renderMCQTests();
   }
 
   startTimer() {
@@ -331,52 +489,70 @@ class TestEngine {
 
     const currentQ = this.questions[this.currentIndex];
     const totalQ = this.questions.length;
+    const hasQImage = !!currentQ.questionImage;
 
-    // Strict requirement: No ads in active test mode
     container.innerHTML = `
+      <!-- PREVIEW MODE BANNER (If Admin Preview) -->
+      ${this.isPreview ? `
+        <div class="bg-amber-500 text-slate-900 px-4 sm:px-8 py-2.5 text-xs font-black uppercase tracking-wider flex items-center justify-between shadow-md sticky top-0 z-40 border-b border-amber-600">
+          <div class="flex items-center gap-2">
+            <i data-lucide="shield-alert" class="w-4 h-4 text-slate-950"></i>
+            <span>ADMIN PREVIEW — THIS IS NOT A REAL ATTEMPT (Zero student attempts consumed)</span>
+          </div>
+          <button 
+            onclick="window.testEngine.exitPreview()" 
+            class="px-3.5 py-1 bg-slate-900 text-white rounded-lg text-xs font-bold hover:bg-slate-800 transition-colors shadow-sm cursor-pointer"
+          >
+            Exit Preview ✕
+          </button>
+        </div>
+      ` : ''}
+
       <!-- Exam Header Bar -->
-      <div class="bg-white border-b border-slate-200 sticky top-0 z-30 px-4 sm:px-8 py-3.5 shadow-sm">
-        <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
-          <div class="flex items-center gap-3">
-            <div class="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-sm">
-              CA
-            </div>
-            <div>
-              <h2 class="text-sm font-bold text-slate-900 line-clamp-1">${this.activeTest.title}</h2>
-              <span class="text-xs text-slate-500 font-medium">Question ${this.currentIndex + 1} of ${totalQ}</span>
+      <div class="bg-white border-b border-slate-200 sticky ${this.isPreview ? 'top-10' : 'top-0'} z-30 px-3 sm:px-8 py-2.5 sm:py-3.5 shadow-sm">
+        <div class="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
+          <div class="flex items-center justify-between sm:justify-start gap-3 w-full sm:w-auto">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
+                CA
+              </div>
+              <div class="min-w-0">
+                <h2 class="text-xs sm:text-sm font-bold text-slate-900 truncate">${this.activeTest.title}</h2>
+                <span class="text-[11px] sm:text-xs text-slate-500 font-medium">Question ${this.currentIndex + 1} of ${totalQ}</span>
+              </div>
             </div>
           </div>
 
-          <!-- Live Timer Display -->
-          <div class="flex items-center gap-3">
-            <div class="bg-slate-100 border border-slate-200 px-4 py-1.5 rounded-lg flex items-center gap-2">
-              <i data-lucide="timer" class="w-4 h-4 text-blue-600"></i>
+          <!-- Live Timer & Submit Buttons -->
+          <div class="flex items-center justify-between sm:justify-end gap-2.5 w-full sm:w-auto">
+            <div class="bg-slate-100 border border-slate-200 px-3 py-1 sm:px-4 sm:py-1.5 rounded-lg flex items-center gap-2">
+              <i data-lucide="timer" class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600"></i>
               <div class="flex flex-col text-right">
-                <span class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Time Left</span>
-                <span id="exam-timer" class="text-base font-mono font-bold text-slate-900">00:00</span>
+                <span class="text-[9px] sm:text-[10px] uppercase tracking-wider text-slate-400 font-bold">Time Left</span>
+                <span id="exam-timer" class="text-sm sm:text-base font-mono font-bold text-slate-900">00:00</span>
               </div>
             </div>
 
             <button 
               onclick="window.testEngine.confirmSubmit()"
-              class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+              class="px-3.5 py-2 sm:px-4 sm:py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer flex-shrink-0"
             >
-              <i data-lucide="check-square" class="w-4 h-4"></i>
-              Submit Test
+              <i data-lucide="check-square" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
+              ${this.isPreview ? 'Finish Preview' : 'Submit Test'}
             </button>
           </div>
         </div>
       </div>
 
       <!-- Exam Workspace: Question Area + Palette -->
-      <div class="max-w-7xl mx-auto px-4 sm:px-8 py-6">
-        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <div class="max-w-7xl mx-auto px-3 sm:px-8 py-4 sm:py-6">
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 sm:gap-6">
           
           <!-- Left Main: Active Question (3 Cols) -->
           <div class="lg:col-span-3 space-y-6">
-            <div class="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 shadow-sm">
+            <div class="bg-white border border-slate-200 rounded-xl p-4 sm:p-8 shadow-sm">
               <!-- Question Header Meta -->
-              <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
+              <div class="flex items-center justify-between border-b border-slate-100 pb-3 sm:pb-4 mb-4 sm:mb-6">
                 <span class="text-xs font-bold px-3 py-1 bg-blue-50 text-blue-700 rounded-full">
                   Question ${this.currentIndex + 1}
                 </span>
@@ -387,26 +563,36 @@ class TestEngine {
                 </div>
               </div>
 
-              <!-- Question Prompt -->
-              <h3 class="text-base sm:text-lg font-medium text-slate-900 leading-relaxed mb-6">
-                ${currentQ.text}
-              </h3>
+              <!-- Question Prompt (Text & Optional Image) -->
+              <div class="space-y-4 mb-6">
+                <div class="text-base sm:text-lg font-medium text-slate-900 leading-relaxed">
+                  ${currentQ.text}
+                </div>
+                ${hasQImage ? `
+                  <div class="max-w-md mx-auto rounded-xl overflow-hidden border border-slate-200 bg-slate-50 p-2 text-center">
+                    <img src="${currentQ.questionImage}" alt="Question Diagram" class="w-full h-auto object-contain max-h-64 rounded-lg mx-auto">
+                  </div>
+                ` : ''}
+              </div>
 
-              <!-- Options A, B, C, D -->
+              <!-- Options A, B, C, D (Supporting Text & Mixed Images) -->
               <div class="space-y-3">
                 ${['A', 'B', 'C', 'D'].map(optKey => {
                   const optText = currentQ['option' + optKey];
+                  const optImg = currentQ.optionImages ? currentQ.optionImages[optKey] : null;
                   const isSelected = this.userAnswers[currentQ.id] === optKey;
+
                   return `
                     <div 
                       onclick="window.testEngine.selectOption('${currentQ.id}', '${optKey}')"
-                      class="option-card p-4 rounded-xl border ${isSelected ? 'border-blue-600 bg-blue-50/70 ring-1 ring-blue-500' : 'border-slate-200 bg-white'} flex items-center gap-4 transition-all"
+                      class="option-card p-3 sm:p-4 rounded-xl border ${isSelected ? 'border-blue-600 bg-blue-50/70 ring-1 ring-blue-500' : 'border-slate-200 bg-white hover:border-slate-300'} flex items-start sm:items-center gap-3 sm:gap-4 transition-all cursor-pointer"
                     >
-                      <div class="w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs ${isSelected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 border border-slate-300'}">
+                      <div class="w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0 ${isSelected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 border border-slate-300'}">
                         ${optKey}
                       </div>
-                      <div class="text-sm font-medium text-slate-800 flex-1">
-                        ${optText}
+                      <div class="text-xs sm:text-sm font-medium text-slate-800 flex-1 space-y-2">
+                        ${optText ? `<div>${optText}</div>` : ''}
+                        ${optImg ? `<div><img src="${optImg}" class="max-h-20 sm:max-h-24 rounded border border-slate-200 object-contain"></div>` : ''}
                       </div>
                     </div>
                   `;
@@ -414,39 +600,39 @@ class TestEngine {
               </div>
 
               <!-- Question Action Bar -->
-              <div class="flex flex-wrap items-center justify-between gap-3 mt-8 pt-6 border-t border-slate-100">
-                <div class="flex items-center gap-2">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-6 sm:mt-8 pt-5 sm:pt-6 border-t border-slate-100">
+                <div class="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto">
                   <button 
                     onclick="window.testEngine.clearAnswer('${currentQ.id}')"
-                    class="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-slate-200"
+                    class="w-full sm:w-auto px-3 py-2 min-h-[40px] text-xs font-semibold text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-slate-200 cursor-pointer text-center"
                   >
                     Clear Choice
                   </button>
                   <button 
                     onclick="window.testEngine.toggleReview('${currentQ.id}')"
-                    class="px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors border ${
+                    class="w-full sm:w-auto px-3 py-2 min-h-[40px] text-xs font-semibold rounded-lg transition-colors border ${
                       this.markedForReview[currentQ.id] 
                         ? 'bg-purple-100 text-purple-800 border-purple-300' 
                         : 'text-slate-600 hover:bg-slate-100 border-slate-200'
-                    }"
+                    } cursor-pointer text-center"
                   >
                     <i data-lucide="bookmark" class="w-3.5 h-3.5 inline mr-1"></i>
-                    ${this.markedForReview[currentQ.id] ? 'Marked for Review' : 'Mark for Review'}
+                    ${this.markedForReview[currentQ.id] ? 'Marked' : 'Mark Review'}
                   </button>
                 </div>
 
-                <div class="flex items-center gap-2">
+                <div class="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto">
                   <button 
                     onclick="window.testEngine.previousQuestion()"
                     ${this.currentIndex === 0 ? 'disabled' : ''}
-                    class="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    class="w-full sm:w-auto px-4 py-2 min-h-[40px] text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer text-center"
                   >
                     ← Previous
                   </button>
                   <button 
                     onclick="window.testEngine.nextQuestion()"
                     ${this.currentIndex === totalQ - 1 ? 'disabled' : ''}
-                    class="px-5 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    class="w-full sm:w-auto px-5 py-2 min-h-[40px] text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer text-center"
                   >
                     Next →
                   </button>
@@ -484,18 +670,14 @@ class TestEngine {
                   const isReview = !!this.markedForReview[q.id];
 
                   let colorClass = 'btn-palette unanswered';
-                  if (isCurrent) {
-                    colorClass = 'btn-palette current';
-                  } else if (isReview) {
-                    colorClass = 'btn-palette marked';
-                  } else if (isAnswered) {
-                    colorClass = 'btn-palette answered';
-                  }
+                  if (isCurrent) colorClass = 'btn-palette current';
+                  else if (isReview) colorClass = 'btn-palette marked';
+                  else if (isAnswered) colorClass = 'btn-palette answered';
 
                   return `
                     <button 
                       onclick="window.testEngine.jumpToQuestion(${idx})"
-                      class="h-9 w-full rounded-lg text-xs font-bold border ${colorClass} flex items-center justify-center transition-transform hover:scale-105"
+                      class="h-9 w-full rounded-lg text-xs font-bold border ${colorClass} flex items-center justify-center transition-transform hover:scale-105 cursor-pointer"
                     >
                       ${idx + 1}
                     </button>
@@ -575,20 +757,22 @@ class TestEngine {
     }
   }
 
-  submitTest(isTimeout = false) {
+  async submitTest(isTimeout = false) {
     clearInterval(this.timerInterval);
 
     const user = window.auth.getCurrentUser();
     const test = this.activeTest;
-    const questions = this.questions;
     const timeTakenSeconds = Math.max(1, this.totalDurationSeconds - this.secondsRemaining);
+
+    // Retrieve questions with answer keys (unlocked upon submission)
+    const questionsWithKeys = window.store.getQuestionsByTestId(test.id);
 
     // Evaluate answers
     let correctCount = 0;
     let wrongCount = 0;
     let unattemptedCount = 0;
 
-    questions.forEach(q => {
+    questionsWithKeys.forEach(q => {
       const chosen = this.userAnswers[q.id];
       if (!chosen) {
         unattemptedCount++;
@@ -599,16 +783,54 @@ class TestEngine {
       }
     });
 
-    const grossMarks = correctCount * test.marksPerCorrect;
-    const negativePenalty = wrongCount * test.negativeMarksPerWrong;
+    const pos = typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0;
+    const neg = typeof test.negativeMarksPerWrong === 'number' ? test.negativeMarksPerWrong : 0.5;
+    const grossMarks = correctCount * pos;
+    const negativePenalty = wrongCount * neg;
     const finalScore = Math.max(0, grossMarks - negativePenalty);
-    const totalPossibleMarks = questions.length * test.marksPerCorrect;
+    const totalPossibleMarks = questionsWithKeys.length * pos;
     const percentage = totalPossibleMarks > 0 ? (finalScore / totalPossibleMarks) * 100 : 0;
 
-    // Previous user attempts count
+    if (this.isPreview) {
+      // PREVIEW MODE: ZERO ATTEMPTS CONSUMED
+      const previewRecord = {
+        id: 'preview-' + Date.now(),
+        testId: test.id,
+        userId: user ? user.id : 'admin',
+        userName: 'Admin Preview',
+        attemptNumber: 1,
+        status: 'Preview Completed',
+        startedAt: new Date(Date.now() - (timeTakenSeconds * 1000)).toISOString(),
+        submittedAt: new Date().toISOString(),
+        timeTakenSeconds: timeTakenSeconds,
+        correctCount: correctCount,
+        wrongCount: wrongCount,
+        unattemptedCount: unattemptedCount,
+        grossMarks: grossMarks,
+        negativePenalty: negativePenalty,
+        finalScore: finalScore,
+        percentage: percentage,
+        userAnswers: { ...this.userAnswers }
+      };
+
+      this.showResultModal(null, previewRecord, questionsWithKeys);
+      return;
+    }
+
+    // Normal student submission: call backend if possible
+    let backendAttempt = null;
+    let backendQuestions = null;
+    try {
+      const resp = await window.secureBackend.submitTestAnswers(test.id, this.userAnswers, timeTakenSeconds, false);
+      if (resp && resp.success && resp.attempt) {
+        backendAttempt = resp.attempt;
+        backendQuestions = resp.questions;
+      }
+    } catch (e) {}
+
     const existingUserAttempts = window.store.getAttemptsByUser(user ? user.id : 'anon').filter(a => a.testId === test.id);
 
-    const attemptRecord = {
+    const attemptRecord = backendAttempt || {
       id: this.currentAttemptId || 'att-' + Date.now(),
       testId: test.id,
       userId: user ? user.id : 'anon',
@@ -629,17 +851,19 @@ class TestEngine {
     };
 
     window.store.recordAttempt(attemptRecord);
-    this.showResultModal(attemptRecord.id);
+    if (window.leaderboardManager) {
+      window.leaderboardManager.calculateAllStandings();
+    }
+    this.showResultModal(attemptRecord.id, null, backendQuestions || questionsWithKeys);
   }
 
-  showResultModal(attemptId) {
-    const attempt = window.store.getAttempts().find(a => a.id === attemptId);
+  showResultModal(attemptId, previewRecord = null, unlockedQuestions = null) {
+    const attempt = previewRecord || window.store.getAttempts().find(a => a.id === attemptId);
     if (!attempt) return;
 
     const test = window.store.getTestById(attempt.testId);
-    const questions = window.store.getQuestionsByTestId(attempt.testId);
+    const questions = unlockedQuestions || window.store.getQuestionsByTestId(attempt.testId);
 
-    // Calculate rank for this test
     const allAttemptsForTest = window.store.getAttemptsByTest(attempt.testId)
       .sort((a, b) => b.finalScore - a.finalScore || a.timeTakenSeconds - b.timeTakenSeconds);
     const rankIndex = allAttemptsForTest.findIndex(a => a.id === attempt.id);
@@ -648,61 +872,72 @@ class TestEngine {
     const minutes = Math.floor(attempt.timeTakenSeconds / 60);
     const seconds = attempt.timeTakenSeconds % 60;
     const timeFormatted = `${minutes}m ${seconds}s`;
-    const totalMarks = test ? test.totalQuestions * test.marksPerCorrect : (questions.length * 2);
+    const pos = test ? (test.marksPerCorrect || 2.0) : 2.0;
+    const neg = test ? (test.negativeMarksPerWrong || 0.5) : 0.5;
+    const totalMarks = test ? (questions.length * pos) : (questions.length * 2);
 
     const modalContent = document.getElementById('result-modal-content');
     if (!modalContent) return;
 
     modalContent.innerHTML = `
-      <div class="p-6 sm:p-8 max-h-[90vh] overflow-y-auto">
+      <div class="p-4 sm:p-8 max-h-[90vh] overflow-y-auto">
         <!-- Header Banner -->
+        ${previewRecord ? `
+          <div class="bg-amber-100 border border-amber-300 text-amber-950 p-3 rounded-xl mb-4 text-center font-bold text-xs uppercase tracking-wider">
+            ADMIN PREVIEW ASSESSMENT REPORT (No attempt record was saved)
+          </div>
+        ` : ''}
+
         <div class="text-center pb-6 border-b border-slate-100">
           <div class="w-16 h-16 rounded-full ${attempt.percentage >= 60 ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'} mx-auto flex items-center justify-center mb-3">
             <i data-lucide="${attempt.percentage >= 60 ? 'trophy' : 'award'}" class="w-8 h-8"></i>
           </div>
-          <h3 class="text-xl font-bold text-slate-900">${test ? test.title : 'Test Assessment Report'}</h3>
-          <p class="text-xs text-slate-500 mt-1">Attempt #${attempt.attemptNumber} • Submitted on ${new Date(attempt.submittedAt).toLocaleString()}</p>
+          <h3 class="text-lg sm:text-xl font-bold text-slate-900">${test ? test.title : 'Assessment Report'}</h3>
+          <p class="text-xs text-slate-500 mt-1">
+            ${previewRecord ? 'Admin Test Preview Mode' : `Attempt #${attempt.attemptNumber} • Submitted on ${new Date(attempt.submittedAt).toLocaleString()}`}
+          </p>
         </div>
 
         <!-- 4 Score Cards -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 my-6">
-          <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
-            <span class="text-[11px] font-bold text-blue-700 uppercase tracking-wider block">Score Obtained</span>
-            <span class="text-2xl font-black text-blue-900">${attempt.finalScore.toFixed(1)}</span>
-            <span class="text-xs text-blue-600 block">/ ${totalMarks} Marks</span>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4 my-4 sm:my-6">
+          <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 sm:p-4 text-center">
+            <span class="text-[10px] sm:text-[11px] font-bold text-blue-700 uppercase tracking-wider block">Score Obtained</span>
+            <span class="text-xl sm:text-2xl font-black text-blue-900">${attempt.finalScore.toFixed(1)}</span>
+            <span class="text-[11px] sm:text-xs text-blue-600 block">/ ${totalMarks} Marks</span>
           </div>
-          <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
-            <span class="text-[11px] font-bold text-emerald-700 uppercase tracking-wider block">Percentage</span>
-            <span class="text-2xl font-black text-emerald-900">${Math.round(attempt.percentage)}%</span>
-            <span class="text-xs text-emerald-600 block">${attempt.percentage >= 50 ? 'Passed' : 'Needs Practice'}</span>
+          <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 sm:p-4 text-center">
+            <span class="text-[10px] sm:text-[11px] font-bold text-emerald-700 uppercase tracking-wider block">Percentage</span>
+            <span class="text-xl sm:text-2xl font-black text-emerald-900">${Math.round(attempt.percentage)}%</span>
+            <span class="text-[11px] sm:text-xs text-emerald-600 block">${attempt.percentage >= 50 ? 'Passed' : 'Needs Practice'}</span>
           </div>
-          <div class="bg-purple-50 border border-purple-200 rounded-xl p-4 text-center">
-            <span class="text-[11px] font-bold text-purple-700 uppercase tracking-wider block">Test Rank</span>
-            <span class="text-2xl font-black text-purple-900">#${testRank}</span>
-            <span class="text-xs text-purple-600 block">of ${allAttemptsForTest.length} candidates</span>
+          <div class="bg-purple-50 border border-purple-200 rounded-xl p-3 sm:p-4 text-center">
+            <span class="text-[10px] sm:text-[11px] font-bold text-purple-700 uppercase tracking-wider block">Test Rank</span>
+            <span class="text-xl sm:text-2xl font-black text-purple-900">#${testRank}</span>
+            <span class="text-[11px] sm:text-xs text-purple-600 block">of ${Math.max(1, allAttemptsForTest.length)} candidate(s)</span>
           </div>
-          <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 text-center">
-            <span class="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">Time Taken</span>
-            <span class="text-2xl font-black text-slate-900">${timeFormatted}</span>
-            <span class="text-xs text-slate-500 block">Duration</span>
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 sm:p-4 text-center">
+            <span class="text-[10px] sm:text-[11px] font-bold text-slate-700 uppercase tracking-wider block">Time Taken</span>
+            <span class="text-xl sm:text-2xl font-black text-slate-900">${timeFormatted}</span>
+            <span class="text-[11px] sm:text-xs text-slate-500 block">Duration</span>
           </div>
         </div>
 
-        <!-- Detailed Breakdown Pills -->
-        <div class="grid grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl text-center mb-8 border border-slate-200">
-          <div>
+        <!-- Detailed Breakdown Pills (Dynamic Marking) -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 bg-slate-50 p-3 sm:p-4 rounded-xl text-center mb-6 sm:mb-8 border border-slate-200">
+          <div class="p-2 sm:p-0">
             <span class="text-xs text-slate-500 block">Correct Answers</span>
-            <span class="text-lg font-bold text-emerald-600">${attempt.correctCount} (+${attempt.grossMarks.toFixed(1)})</span>
+            <span class="text-base sm:text-lg font-bold text-emerald-600">${attempt.correctCount} (+${attempt.grossMarks.toFixed(1)})</span>
           </div>
-          <div>
+          <div class="p-2 sm:p-0 border-t sm:border-t-0 sm:border-l sm:border-r border-slate-200">
             <span class="text-xs text-slate-500 block">Incorrect Answers</span>
-            <span class="text-lg font-bold text-rose-600">${attempt.wrongCount} (-${attempt.negativePenalty.toFixed(1)})</span>
+            <span class="text-base sm:text-lg font-bold text-rose-600">${attempt.wrongCount} (-${attempt.negativePenalty.toFixed(1)})</span>
           </div>
-          <div>
+          <div class="p-2 sm:p-0 border-t sm:border-t-0 border-slate-200">
             <span class="text-xs text-slate-500 block">Unattempted</span>
-            <span class="text-lg font-bold text-slate-500">${attempt.unattemptedCount}</span>
+            <span class="text-base sm:text-lg font-bold text-slate-500">${attempt.unattemptedCount}</span>
           </div>
         </div>
+
 
         <!-- Solutions & Explanations Header -->
         <div class="border-t border-slate-200 pt-6">
@@ -721,9 +956,9 @@ class TestEngine {
               if (isSkipped) {
                 statusBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200">Unattempted (0 Marks)</span>';
               } else if (isCorrect) {
-                statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">Correct (+${test ? test.marksPerCorrect : 2})</span>`;
+                statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">Correct (+${pos})</span>`;
               } else {
-                statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 border border-rose-200">Incorrect (-${test ? test.negativeMarksPerWrong : 0.5})</span>`;
+                statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 border border-rose-200">Incorrect (-${neg})</span>`;
               }
 
               return `
@@ -733,12 +968,18 @@ class TestEngine {
                     ${statusBadge}
                   </div>
 
-                  <p class="text-sm font-semibold text-slate-900 leading-relaxed">${q.text}</p>
+                  <div class="text-sm font-semibold text-slate-900 leading-relaxed">${q.text}</div>
+                  ${q.questionImage ? `
+                    <div class="max-w-sm rounded-lg overflow-hidden border border-slate-200 my-2">
+                      <img src="${q.questionImage}" class="max-h-36 object-contain">
+                    </div>
+                  ` : ''}
 
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                     ${['A', 'B', 'C', 'D'].map(optKey => {
                       const isStudentSelected = studentChoice === optKey;
                       const isCorrectAnswer = q.correctOption === optKey;
+                      const optImg = q.optionImages ? q.optionImages[optKey] : null;
                       
                       let cardStyle = 'border-slate-200 bg-slate-50 text-slate-700';
                       if (isCorrectAnswer) {
@@ -748,14 +989,17 @@ class TestEngine {
                       }
 
                       return `
-                        <div class="p-2.5 rounded-lg border ${cardStyle} flex items-center justify-between">
-                          <div class="flex items-center gap-2">
-                            <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${isCorrectAnswer ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-700'}">
+                        <div class="p-2.5 rounded-lg border ${cardStyle} flex items-start sm:items-center justify-between gap-2">
+                          <div class="flex items-start sm:items-center gap-2">
+                            <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] flex-shrink-0 ${isCorrectAnswer ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-700'}">
                               ${optKey}
                             </span>
-                            <span>${q['option' + optKey]}</span>
+                            <div class="space-y-1">
+                              <span>${q['option' + optKey]}</span>
+                              ${optImg ? `<img src="${optImg}" class="max-h-16 rounded border border-slate-200 object-contain">` : ''}
+                            </div>
                           </div>
-                          ${isStudentSelected ? '<span class="text-[10px] font-bold uppercase ml-2 text-blue-600">Your Choice</span>' : ''}
+                          ${isStudentSelected ? '<span class="text-[10px] font-bold uppercase ml-2 text-blue-600 flex-shrink-0">Your Choice</span>' : ''}
                         </div>
                       `;
                     }).join('')}
@@ -777,19 +1021,28 @@ class TestEngine {
 
         <!-- Footer Actions -->
         <div class="mt-8 pt-4 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
-          <button 
-            onclick="window.app.closeModal('result-modal'); window.app.navigate('leaderboard');"
-            class="px-4 py-2 text-xs font-semibold text-blue-600 hover:bg-blue-50 border border-blue-200 rounded-lg transition-colors flex items-center gap-1.5"
-          >
-            <i data-lucide="bar-chart-2" class="w-4 h-4"></i> View Test Leaderboard
-          </button>
-          
-          <button 
-            onclick="window.app.closeModal('result-modal'); window.app.navigate('dashboard');"
-            class="px-6 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors"
-          >
-            Return to Dashboard
-          </button>
+          ${previewRecord ? `
+            <button 
+              onclick="window.app.closeModal('result-modal'); window.testEngine.exitPreview();"
+              class="px-5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors ml-auto cursor-pointer"
+            >
+              ← Return to Admin Portal
+            </button>
+          ` : `
+            <button 
+              onclick="window.app.closeModal('result-modal'); window.app.navigate('leaderboard');"
+              class="px-4 py-2 text-xs font-semibold text-blue-600 hover:bg-blue-50 border border-blue-200 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <i data-lucide="bar-chart-2" class="w-4 h-4"></i> View Test Leaderboard
+            </button>
+            
+            <button 
+              onclick="window.app.closeModal('result-modal'); window.app.navigate('dashboard');"
+              class="px-6 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+            >
+              Return to Dashboard
+            </button>
+          `}
         </div>
       </div>
     `;

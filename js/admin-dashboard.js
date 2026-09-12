@@ -1,11 +1,12 @@
 /**
- * admin-dashboard.js - Comprehensive Administration & Faculty Management Suite
- * Modules:
- * - Overview Statistics & KPIs
- * - Lecture Management (CRUD + Publish toggle)
- * - Test & MCQ Management (CRUD + Questions Builder)
- * - Assignment Management & PDF Grading Center
- * - Student Directory & Audit Log
+ * admin-dashboard.js - Comprehensive Administration & Faculty Management Suite for ExcellenceCA
+ * Features:
+ * - Total students counter (Active vs Deactivated)
+ * - Complete Student Management: Passwords visible, Add, Delete, Activate, Deactivate
+ * - Test Question Paper PDF Upload (select subject, title, marks, upload question PDF)
+ * - Teacher / Faculty Management & Privilege Editor (Can upload tests, Can grade copies, etc.)
+ * - Checked Copy PDF evaluation & return
+ * - Lecture and MCQ management
  */
 
 class AdminDashboard {
@@ -16,10 +17,12 @@ class AdminDashboard {
     this.activeTestQuestionsId = null;
     this.activeEditingAssignmentId = null;
     this.activeGradingSubmissionId = null;
+    this.selectedCheckedPdfFile = null;
+    this.selectedQuestionPdfFile = null;
+    this.showStudentPasswords = true;
   }
 
   render() {
-    // Role guard
     if (!window.auth.isAdmin()) {
       window.app.navigate('dashboard');
       window.app.showToast('Access restricted: Administrators only.', 'error');
@@ -29,10 +32,15 @@ class AdminDashboard {
     this.renderTabs();
 
     if (this.currentTab === 'overview') this.renderOverview();
-    else if (this.currentTab === 'lectures') this.renderLectures();
-    else if (this.currentTab === 'tests') this.renderTests();
-    else if (this.currentTab === 'assignments') this.renderAssignments();
+    else if (this.currentTab === 'banners') this.renderBanners();
     else if (this.currentTab === 'students') this.renderStudents();
+    else if (this.currentTab === 'teachers') this.renderTeachers();
+    else if (this.currentTab === 'papers') this.renderTestPapers();
+    else if (this.currentTab === 'grading') this.renderGradingCenter();
+    else if (this.currentTab === 'referrals') this.renderReferrals();
+    else if (this.currentTab === 'mcq-tests') this.renderMCQTests();
+    else if (this.currentTab === 'ranks-config') this.renderRanksConfig();
+    else if (this.currentTab === 'lectures') this.renderLectures();
   }
 
   switchTab(tab) {
@@ -45,11 +53,16 @@ class AdminDashboard {
     if (!nav) return;
 
     const tabs = [
-      { id: 'overview', name: 'Overview & Analytics', icon: 'layout-dashboard' },
-      { id: 'lectures', name: 'Lectures', icon: 'video' },
-      { id: 'tests', name: 'Tests & MCQs', icon: 'check-square' },
-      { id: 'assignments', name: 'Assignments & Grading', icon: 'file-text' },
-      { id: 'students', name: 'Student Directory', icon: 'users' }
+      { id: 'overview', name: 'Overview & KPIs', icon: 'layout-dashboard' },
+      { id: 'banners', name: 'Website Updates Banner', icon: 'image' },
+      { id: 'students', name: 'Students & Passwords', icon: 'users' },
+      { id: 'teachers', name: 'Teachers & Privileges', icon: 'user-check' },
+      { id: 'papers', name: 'Question Papers (PDF)', icon: 'file-up' },
+      { id: 'grading', name: 'Checked Copy Grading', icon: 'file-check-2' },
+      { id: 'referrals', name: 'Referral Management', icon: 'share-2' },
+      { id: 'mcq-tests', name: 'MCQ Tests Builder', icon: 'check-square' },
+      { id: 'ranks-config', name: 'XP & Rank Tiers', icon: 'award' },
+      { id: 'lectures', name: 'Video Lectures', icon: 'video' }
     ];
 
     nav.innerHTML = tabs.map(t => {
@@ -57,9 +70,9 @@ class AdminDashboard {
       return `
         <button 
           onclick="window.adminDashboard.switchTab('${t.id}')"
-          class="flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-lg transition-all ${
+          class="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg transition-all ${
             isActive 
-              ? 'bg-blue-600 text-white shadow-sm' 
+              ? 'bg-rose-700 text-white shadow-sm' 
               : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }"
         >
@@ -72,99 +85,2890 @@ class AdminDashboard {
     if (window.lucide) window.lucide.createIcons();
   }
 
-  // --- OVERVIEW TAB ---
+  // --- 1. OVERVIEW & KPIS ---
   renderOverview() {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
 
-    const students = window.store.getUsers().filter(u => u.role === 'student');
-    const lectures = window.store.getLectures();
-    const tests = window.store.getTests();
-    const attempts = window.store.getAttempts();
+    const allStudents = window.store.getStudents();
+    const activeStudents = allStudents.filter(s => s.isActive !== false);
+    const deactivatedStudents = allStudents.filter(s => s.isActive === false);
+    const teachers = window.store.getTeachers();
+    const papers = window.store.getAssignments();
     const submissions = window.store.getSubmissions();
-    const pendingGrading = submissions.filter(s => s.status !== 'Evaluated').length;
+    const pendingGrading = submissions.filter(s => s.status !== 'Evaluated');
+    const checkedCopiesCount = submissions.filter(s => !!s.checkedCopyPdfData);
 
     container.innerHTML = `
-      <!-- Stats KPI Cards -->
       <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
         <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
           <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Total Students</span>
-          <span class="text-2xl font-black text-slate-900 mt-1 block">${students.length}</span>
-          <span class="text-[11px] text-emerald-600 font-semibold mt-1 block">Active Learners</span>
+          <span class="text-3xl font-black text-slate-900 mt-1 block">${allStudents.length}</span>
+          <div class="flex items-center gap-2 mt-1 text-[11px]">
+            <span class="text-emerald-700 font-bold">${activeStudents.length} Active</span>
+            <span class="text-slate-300">•</span>
+            <span class="text-rose-600 font-bold">${deactivatedStudents.length} Deactivated</span>
+          </div>
         </div>
+
         <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-          <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Total Lectures</span>
-          <span class="text-2xl font-black text-slate-900 mt-1 block">${lectures.length}</span>
-          <span class="text-[11px] text-blue-600 font-semibold mt-1 block">${lectures.filter(l => l.isPublished).length} Published</span>
+          <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Faculty / Teachers</span>
+          <span class="text-3xl font-black text-slate-900 mt-1 block">${teachers.length}</span>
+          <button onclick="window.adminDashboard.switchTab('teachers')" class="text-[11px] text-blue-600 font-bold hover:underline block mt-1">
+            Manage Privileges →
+          </button>
         </div>
+
         <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-          <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Active Mock Tests</span>
-          <span class="text-2xl font-black text-slate-900 mt-1 block">${tests.length}</span>
-          <span class="text-[11px] text-purple-600 font-semibold mt-1 block">${tests.filter(t => t.isPublished).length} Published</span>
+          <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Question Papers</span>
+          <span class="text-3xl font-black text-slate-900 mt-1 block">${papers.length}</span>
+          <span class="text-[11px] text-purple-600 font-semibold mt-1 block">Active Tests & Cases</span>
         </div>
-        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-          <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Test Attempts</span>
-          <span class="text-2xl font-black text-slate-900 mt-1 block">${attempts.length}</span>
-          <span class="text-[11px] text-slate-500 font-semibold mt-1 block">All Time</span>
-        </div>
-        <div class="bg-amber-50 border border-amber-200 rounded-xl p-5 shadow-sm col-span-2 lg:col-span-1">
+
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-5 shadow-sm">
           <span class="text-xs font-bold text-amber-800 uppercase tracking-wider block">Pending Grading</span>
-          <span class="text-2xl font-black text-amber-900 mt-1 block">${pendingGrading}</span>
-          <button onclick="window.adminDashboard.switchTab('assignments')" class="text-[11px] text-amber-700 font-bold hover:underline mt-1 block">
-            Review Submissions →
+          <span class="text-3xl font-black text-amber-900 mt-1 block">${pendingGrading.length}</span>
+          <button onclick="window.adminDashboard.switchTab('grading')" class="text-[11px] text-amber-800 font-bold hover:underline mt-1 block">
+            Check Copies →
+          </button>
+        </div>
+
+        <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-5 shadow-sm">
+          <span class="text-xs font-bold text-emerald-800 uppercase tracking-wider block">Checked Copies</span>
+          <span class="text-3xl font-black text-emerald-900 mt-1 block">${checkedCopiesCount.length}</span>
+          <span class="text-[11px] text-emerald-700 font-semibold block mt-1">Returned to Students</span>
+        </div>
+      </div>
+
+      <!-- Quick Shortcuts -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div class="p-5 bg-white border border-slate-200 rounded-xl flex items-center justify-between">
+          <div>
+            <h4 class="font-bold text-slate-900 text-sm">Add New Student</h4>
+            <p class="text-xs text-slate-500 mt-0.5">Register student with custom password</p>
+          </div>
+          <button onclick="window.adminDashboard.openAddStudentModal()" class="px-3.5 py-2 bg-blue-600 text-white font-bold text-xs rounded-lg hover:bg-blue-700">
+            + Add Student
+          </button>
+        </div>
+
+        <div class="p-5 bg-white border border-slate-200 rounded-xl flex items-center justify-between">
+          <div>
+            <h4 class="font-bold text-slate-900 text-sm">Invite / Add Teacher</h4>
+            <p class="text-xs text-slate-500 mt-0.5">Configure teacher privileges</p>
+          </div>
+          <button onclick="window.adminDashboard.openAddTeacherModal()" class="px-3.5 py-2 bg-amber-600 text-white font-bold text-xs rounded-lg hover:bg-amber-700">
+            + Add Teacher
+          </button>
+        </div>
+
+        <div class="p-5 bg-white border border-slate-200 rounded-xl flex items-center justify-between">
+          <div>
+            <h4 class="font-bold text-slate-900 text-sm">Upload Question Paper</h4>
+            <p class="text-xs text-slate-500 mt-0.5">Post test PDF for specific subject</p>
+          </div>
+          <button onclick="window.adminDashboard.openUploadPaperModal()" class="px-3.5 py-2 bg-rose-600 text-white font-bold text-xs rounded-lg hover:bg-rose-700">
+            + Upload PDF
+          </button>
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  // --- 2. STUDENT MANAGEMENT WITH PASSWORDS & ACTIVATION ---
+  renderStudents() {
+    const container = document.getElementById('admin-content-area');
+    if (!container) return;
+
+    const students = window.store.getStudents();
+    const attempts = window.store.getAttempts();
+    const submissions = window.store.getSubmissions();
+
+    container.innerHTML = `
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h3 class="text-base font-bold text-slate-900">Student Directory & Account Security</h3>
+          <p class="text-xs text-slate-500 mt-0.5">Manage students, view and reset passwords, and toggle account activation</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button 
+            onclick="window.adminDashboard.togglePasswordVisibility()"
+            class="px-3 py-2 text-xs font-semibold rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-1.5"
+          >
+            <i data-lucide="${this.showStudentPasswords ? 'eye-off' : 'eye'}" class="w-4 h-4"></i>
+            ${this.showStudentPasswords ? 'Hide Passwords' : 'Show Passwords'}
+          </button>
+          <button 
+            onclick="window.adminDashboard.openAddStudentModal()"
+            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+          >
+            <i data-lucide="user-plus" class="w-4 h-4"></i> Add New Student
           </button>
         </div>
       </div>
 
-      <!-- Recent Platform Activity Feed -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
-          <h3 class="text-sm font-bold text-slate-900 mb-4 flex items-center justify-between">
-            <span>Recent Test Submissions</span>
-            <span class="text-xs text-blue-600 font-semibold">${attempts.length} Total</span>
-          </h3>
-          <div class="space-y-3">
-            ${attempts.slice(0, 5).map(att => {
-              const test = window.store.getTestById(att.testId);
+      <div class="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
+        <table class="w-full text-left text-sm">
+          <thead>
+            <tr class="border-b border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-500 uppercase tracking-wider">
+              <th class="py-3 px-4">Student</th>
+              <th class="py-3 px-4">Password</th>
+              <th class="py-3 px-4">CA Level & Reg No</th>
+              <th class="py-3 px-4">Activity</th>
+              <th class="py-3 px-4">Account Status</th>
+              <th class="py-3 px-4 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            ${students.length === 0 ? `
+              <tr><td colspan="6" class="py-8 text-center text-xs text-slate-400">No students registered yet.</td></tr>
+            ` : students.map(st => {
+              const studentAttempts = attempts.filter(a => a.userId === st.id).length;
+              const studentSubs = submissions.filter(s => s.studentId === st.id).length;
+              const isActive = st.isActive !== false;
+
               return `
-                <div class="flex items-center justify-between p-3 rounded-lg bg-slate-50 border border-slate-100 text-xs">
-                  <div>
-                    <span class="font-bold text-slate-900">${att.userName}</span>
-                    <span class="text-slate-500 block truncate max-w-xs">${test ? test.title : 'CA Test'}</span>
-                  </div>
-                  <div class="text-right">
-                    <span class="font-bold text-emerald-700 block">${att.finalScore.toFixed(1)} pts (${Math.round(att.percentage)}%)</span>
-                    <span class="text-[10px] text-slate-400">${new Date(att.submittedAt).toLocaleDateString()}</span>
-                  </div>
-                </div>
+                <tr class="hover:bg-slate-50 transition-colors ${!isActive ? 'bg-rose-50/30' : ''}">
+                  <td class="py-3 px-4">
+                    <div class="flex items-center gap-3">
+                      <img src="${st.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120'}" class="w-8 h-8 rounded-full object-cover border border-slate-200">
+                      <div>
+                        <span class="font-bold text-slate-900 text-xs block">${st.name}</span>
+                        <span class="text-[11px] text-slate-500 font-mono flex items-center gap-1">
+                          <i data-lucide="mail" class="w-3 h-3 text-slate-400"></i> ${st.email}
+                        </span>
+                        <span class="text-[11px] text-blue-700 font-mono flex items-center gap-1 mt-0.5">
+                          <i data-lucide="phone" class="w-3 h-3 text-blue-500"></i> ${st.phone || '+91 98765 43210'}
+                        </span>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4">
+                    <span class="font-mono text-xs font-bold bg-slate-100 px-2 py-1 rounded text-slate-800 border border-slate-200">
+                      ${this.showStudentPasswords ? st.password : '••••••••'}
+                    </span>
+                  </td>
+                  <td class="py-3 px-4 text-xs">
+                    <span class="font-semibold text-slate-800 block">${st.caLevel}</span>
+                    <span class="text-slate-400 font-mono text-[11px]">${st.registrationNo || 'N/A'}</span>
+                  </td>
+                  <td class="py-3 px-4 text-xs text-slate-600">
+                    <span>${studentAttempts} tests • ${studentSubs} copies</span>
+                  </td>
+                  <td class="py-3 px-4">
+                    <button 
+                      onclick="window.adminDashboard.toggleStudentActivation('${st.id}')"
+                      class="px-2.5 py-0.5 rounded-full text-xs font-bold border transition-colors ${
+                        isActive 
+                          ? 'bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-200' 
+                          : 'bg-rose-100 text-rose-800 border-rose-300 hover:bg-rose-200'
+                      }"
+                      title="Click to ${isActive ? 'Deactivate' : 'Activate'}"
+                    >
+                      ${isActive ? '✓ Active' : '✕ Deactivated'}
+                    </button>
+                  </td>
+                  <td class="py-3 px-4 text-right space-x-2">
+                    <button 
+                      onclick="window.adminDashboard.openResetPasswordModal('${st.id}')"
+                      class="text-xs font-semibold text-blue-600 hover:text-blue-800"
+                    >
+                      Reset Pass
+                    </button>
+                    <button 
+                      onclick="window.adminDashboard.deleteStudent('${st.id}')"
+                      class="text-xs font-semibold text-rose-600 hover:text-rose-800"
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
               `;
             }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  togglePasswordVisibility() {
+    this.showStudentPasswords = !this.showStudentPasswords;
+    this.renderStudents();
+  }
+
+  toggleStudentActivation(studentId) {
+    const student = window.store.getUserById(studentId);
+    if (!student) return;
+
+    const newStatus = window.store.toggleUserStatus(studentId);
+    window.app.showToast(
+      `Student ${student.name} is now ${newStatus ? 'ACTIVATED' : 'DEACTIVATED'}.`,
+      newStatus ? 'success' : 'warning'
+    );
+    this.renderStudents();
+  }
+
+  deleteStudent(studentId) {
+    const student = window.store.getUserById(studentId);
+    if (!student) return;
+
+    if (confirm(`Are you sure you want to permanently remove student "${student.name}"?`)) {
+      window.store.deleteUser(studentId);
+      window.app.showToast(`Student ${student.name} deleted.`, 'info');
+      this.renderStudents();
+    }
+  }
+
+  openAddStudentModal() {
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    modalContent.innerHTML = `
+      <div class="p-6">
+        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
+          <h3 class="text-base font-bold text-slate-900">Add New Student</h3>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <form onsubmit="window.adminDashboard.saveNewStudent(event)" class="space-y-4 text-xs">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Student Full Name *</label>
+            <input type="text" id="add-st-name" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="e.g. Rahul Gupta">
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Email Address (Login) *</label>
+              <input type="email" id="add-st-email" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="rahul@castudent.in">
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Mobile / Phone Number *</label>
+              <input type="tel" id="add-st-phone" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono" placeholder="+91 98765 43210">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Password *</label>
+              <input type="text" id="add-st-pass" required value="student123" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold">
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">CA Curriculum Level *</label>
+              <select id="add-st-level" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-800 bg-white">
+                <option value="CA FOUNDATION">CA FOUNDATION</option>
+                <option value="CA INTER" selected>CA INTER</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">ICAI Registration No</label>
+            <input type="text" id="add-st-reg" required value="CRO-${Math.floor(100000 + Math.random() * 900000)}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono">
+          </div>
+
+          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+            <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+            <button type="submit" class="px-6 py-2 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">
+              Save Student
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    window.app.openModal('admin-generic-modal');
+  }
+
+  saveNewStudent(e) {
+    e.preventDefault();
+    const name = document.getElementById('add-st-name').value.trim();
+    const email = document.getElementById('add-st-email').value.trim();
+    const phone = document.getElementById('add-st-phone').value.trim();
+    const password = document.getElementById('add-st-pass').value.trim();
+    const caLevel = document.getElementById('add-st-level').value;
+    const registrationNo = document.getElementById('add-st-reg').value.trim();
+
+    const users = window.store.getUsers();
+    if (users.some(u => u.email.toLowerCase() === email.toLowerCase())) {
+      window.app.showToast('A student or user with this email already exists.', 'error');
+      return;
+    }
+
+    const newStudent = {
+      id: 'usr-' + Date.now(),
+      name,
+      email,
+      phone,
+      password,
+      role: 'student',
+      caLevel,
+      registrationNo,
+      isActive: true,
+      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
+      createdAt: new Date().toISOString()
+    };
+
+    window.store.addUser(newStudent);
+    window.app.closeModal('admin-generic-modal');
+    window.app.showToast(`Student ${name} added successfully with password: ${password}`, 'success');
+    this.renderStudents();
+  }
+
+  openResetPasswordModal(studentId) {
+    const student = window.store.getUserById(studentId);
+    if (!student) return;
+
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    modalContent.innerHTML = `
+      <div class="p-6">
+        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
+          <h3 class="text-base font-bold text-slate-900">Reset Password for ${student.name}</h3>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <form onsubmit="window.adminDashboard.saveResetPassword(event, '${student.id}')" class="space-y-4 text-xs">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Enter New Password</label>
+            <input type="text" id="reset-pass-val" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold" placeholder="e.g. 123456">
+          </div>
+
+          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+            <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+            <button type="submit" class="px-5 py-2 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">Save New Password</button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    window.app.openModal('admin-generic-modal');
+  }
+
+  saveResetPassword(e, studentId) {
+    e.preventDefault();
+    const newPass = document.getElementById('reset-pass-val').value.trim();
+    const student = window.store.getUserById(studentId);
+    if (student) {
+      student.password = newPass;
+      window.store.updateUser(student);
+      window.app.closeModal('admin-generic-modal');
+      window.app.showToast(`Password updated for ${student.name}: ${newPass}`, 'success');
+      this.renderStudents();
+    }
+  }
+
+  // --- 3. TEACHER & PRIVILEGES MANAGEMENT ---
+  renderTeachers() {
+    const container = document.getElementById('admin-content-area');
+    if (!container) return;
+
+    const teachers = window.store.getTeachers();
+    const subjects = window.store.getSubjects();
+
+    container.innerHTML = `
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h3 class="text-base font-bold text-slate-900">Faculty & Teacher Privilege Management</h3>
+          <p class="text-xs text-slate-500 mt-0.5">Invite faculty, assign subjects, and configure permissions (copy grading, test upload, lectures)</p>
+        </div>
+        <button 
+          onclick="window.adminDashboard.openAddTeacherModal()"
+          class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+        >
+          <i data-lucide="user-plus" class="w-4 h-4"></i> Add New Teacher
+        </button>
+      </div>
+
+      <div class="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
+        <table class="w-full text-left text-sm">
+          <thead>
+            <tr class="border-b border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-500 uppercase tracking-wider">
+              <th class="py-3 px-4">Teacher Name & Email</th>
+              <th class="py-3 px-4">Password</th>
+              <th class="py-3 px-4">Assigned Subjects</th>
+              <th class="py-3 px-4">Configured Privileges</th>
+              <th class="py-3 px-4 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            ${teachers.length === 0 ? `
+              <tr><td colspan="5" class="py-8 text-center text-xs text-slate-400">No teachers added yet.</td></tr>
+            ` : teachers.map(t => {
+              const privs = t.privileges || {};
+              const assignedSubs = subjects.filter(s => (t.assignedSubjects || []).includes(s.id));
+
+              return `
+                <tr class="hover:bg-slate-50 transition-colors">
+                  <td class="py-3 px-4">
+                    <div class="flex items-center gap-3">
+                      <img src="${t.avatar || 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120'}" class="w-8 h-8 rounded-full object-cover border border-slate-200">
+                      <div>
+                        <span class="font-bold text-slate-900 text-xs block">${t.name}</span>
+                        <span class="text-[11px] text-slate-500 font-mono">${t.email}</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4 font-mono text-xs font-bold text-slate-700">
+                    ${t.password}
+                  </td>
+                  <td class="py-3 px-4 text-xs">
+                    ${assignedSubs.length > 0 ? assignedSubs.map(s => `
+                      <span class="inline-block px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold text-[10px] mr-1 mb-1">
+                        ${s.name}
+                      </span>
+                    `).join('') : '<span class="text-slate-400">All Curriculum</span>'}
+                  </td>
+                  <td class="py-3 px-4 text-xs space-y-1">
+                    <div class="flex flex-wrap gap-1">
+                      <span class="px-2 py-0.5 rounded text-[10px] font-bold ${privs.canGradeCopies ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-400'}">
+                        ${privs.canGradeCopies ? '✓ Grade Copies' : '✕ No Grading'}
+                      </span>
+                      <span class="px-2 py-0.5 rounded text-[10px] font-bold ${privs.canUploadTests ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-400'}">
+                        ${privs.canUploadTests ? '✓ Upload Tests' : '✕ No Test Upload'}
+                      </span>
+                      <span class="px-2 py-0.5 rounded text-[10px] font-bold ${privs.canUploadLectures ? 'bg-purple-100 text-purple-800' : 'bg-slate-100 text-slate-400'}">
+                        ${privs.canUploadLectures ? '✓ Lectures' : '✕ No Lectures'}
+                      </span>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4 text-right space-x-2">
+                    <button 
+                      onclick="window.adminDashboard.openPrivilegesModal('${t.id}')"
+                      class="px-3 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs rounded border border-amber-200"
+                    >
+                      Adjust Privileges
+                    </button>
+                    <button 
+                      onclick="window.adminDashboard.deleteTeacher('${t.id}')"
+                      class="text-xs font-semibold text-rose-600 hover:text-rose-800"
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  openAddTeacherModal() {
+    const subjects = window.store.getSubjects();
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    modalContent.innerHTML = `
+      <div class="p-6">
+        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
+          <h3 class="text-base font-bold text-slate-900">Add Faculty / Teacher</h3>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <form onsubmit="window.adminDashboard.saveNewTeacher(event)" class="space-y-4 text-xs">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Teacher Full Name</label>
+            <input type="text" id="teach-name" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="e.g. CA Amit Kedia, FCA">
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Email (Login)</label>
+              <input type="email" id="teach-email" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="amit.teacher@excellenceca.com">
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Password</label>
+              <input type="text" id="teach-pass" required value="123456" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold">
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Assigned Subjects (Hold Ctrl to select multiple)</label>
+            <select id="teach-subjects" multiple class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs h-24">
+              ${subjects.map(s => `<option value="${s.id}" selected>${s.name}</option>`).join('')}
+            </select>
+          </div>
+
+          <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
+            <span class="font-bold text-slate-800 block text-xs">Assign Teacher Privileges:</span>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="priv-grade" checked class="rounded text-amber-600">
+                <span>Can Grade Student Copies</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="priv-upload-tests" checked class="rounded text-amber-600">
+                <span>Can Upload Test Question Papers</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="priv-lectures" class="rounded text-amber-600">
+                <span>Can Upload Video Lectures</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="priv-students" class="rounded text-amber-600">
+                <span>Can View Student Directory</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+            <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+            <button type="submit" class="px-6 py-2 font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg shadow-sm">Save Teacher</button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    window.app.openModal('admin-generic-modal');
+  }
+
+  saveNewTeacher(e) {
+    e.preventDefault();
+    const name = document.getElementById('teach-name').value.trim();
+    const email = document.getElementById('teach-email').value.trim();
+    const password = document.getElementById('teach-pass').value.trim();
+    const select = document.getElementById('teach-subjects');
+    const assignedSubjects = Array.from(select.selectedOptions).map(opt => opt.value);
+
+    const newTeacher = {
+      id: 'usr-teach-' + Date.now(),
+      name,
+      email,
+      password,
+      role: 'teacher',
+      caLevel: 'Faculty Evaluator',
+      registrationNo: 'FAC-' + Math.floor(100 + Math.random() * 900),
+      isActive: true,
+      assignedSubjects,
+      privileges: {
+        canGradeCopies: document.getElementById('priv-grade').checked,
+        canUploadTests: document.getElementById('priv-upload-tests').checked,
+        canUploadLectures: document.getElementById('priv-lectures').checked,
+        canViewStudents: document.getElementById('priv-students').checked
+      },
+      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120&auto=format&fit=crop&q=80',
+      createdAt: new Date().toISOString()
+    };
+
+    window.store.addUser(newTeacher);
+    window.app.closeModal('admin-generic-modal');
+    window.app.showToast(`Teacher ${name} added with password: ${password}`, 'success');
+    this.renderTeachers();
+  }
+
+  openPrivilegesModal(teacherId) {
+    const teacher = window.store.getUserById(teacherId);
+    if (!teacher) return;
+
+    const privs = teacher.privileges || {};
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    modalContent.innerHTML = `
+      <div class="p-6">
+        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Adjust Privileges: ${teacher.name}</h3>
+            <span class="text-xs text-slate-500">${teacher.email}</span>
+          </div>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <form onsubmit="window.adminDashboard.savePrivileges(event, '${teacher.id}')" class="space-y-4 text-xs">
+          <div class="space-y-3">
+            <label class="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer">
+              <div>
+                <span class="font-bold text-slate-900 block">Can Check & Grade Student Copies</span>
+                <span class="text-slate-500 text-[11px]">Allows evaluating answer sheets and uploading checked copies</span>
+              </div>
+              <input type="checkbox" id="edit-priv-grade" ${privs.canGradeCopies ? 'checked' : ''} class="w-4 h-4 rounded text-amber-600">
+            </label>
+
+            <label class="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer">
+              <div>
+                <span class="font-bold text-slate-900 block">Can Upload Question Papers & MCQs</span>
+                <span class="text-slate-500 text-[11px]">Allows teacher to create tests and upload Question Paper PDFs</span>
+              </div>
+              <input type="checkbox" id="edit-priv-upload" ${privs.canUploadTests ? 'checked' : ''} class="w-4 h-4 rounded text-amber-600">
+            </label>
+
+            <label class="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer">
+              <div>
+                <span class="font-bold text-slate-900 block">Can Upload Video Lectures</span>
+                <span class="text-slate-500 text-[11px]">Allows teacher to add classes to the video catalog</span>
+              </div>
+              <input type="checkbox" id="edit-priv-lectures" ${privs.canUploadLectures ? 'checked' : ''} class="w-4 h-4 rounded text-amber-600">
+            </label>
+
+            <label class="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer">
+              <div>
+                <span class="font-bold text-slate-900 block">Can View Student Directory</span>
+                <span class="text-slate-500 text-[11px]">Allows teacher to view all registered students</span>
+              </div>
+              <input type="checkbox" id="edit-priv-students" ${privs.canViewStudents ? 'checked' : ''} class="w-4 h-4 rounded text-amber-600">
+            </label>
+          </div>
+
+          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+            <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+            <button type="submit" class="px-6 py-2 font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg shadow-sm">Save Privileges</button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    window.app.openModal('admin-generic-modal');
+  }
+
+  savePrivileges(e, teacherId) {
+    e.preventDefault();
+    const teacher = window.store.getUserById(teacherId);
+    if (!teacher) return;
+
+    teacher.privileges = {
+      canGradeCopies: document.getElementById('edit-priv-grade').checked,
+      canUploadTests: document.getElementById('edit-priv-upload').checked,
+      canUploadLectures: document.getElementById('edit-priv-lectures').checked,
+      canViewStudents: document.getElementById('edit-priv-students').checked
+    };
+
+    window.store.updateUser(teacher);
+    window.app.closeModal('admin-generic-modal');
+    window.app.showToast(`Privileges updated for ${teacher.name}.`, 'success');
+    this.renderTeachers();
+  }
+
+  deleteTeacher(teacherId) {
+    const teacher = window.store.getUserById(teacherId);
+    if (!teacher) return;
+
+    if (confirm(`Remove teacher ${teacher.name}?`)) {
+      window.store.deleteUser(teacherId);
+      window.app.showToast('Teacher removed.', 'info');
+      this.renderTeachers();
+    }
+  }
+
+  // --- 4. COMPREHENSIVE TEST PAPER & QUESTION PAPER MANAGEMENT SYSTEM ---
+  renderTestPapers() {
+    const container = document.getElementById('admin-content-area');
+    if (!container) return;
+
+    const assignments = window.store.getAssignments();
+    const serverTime = window.secureBackend ? window.secureBackend.getAuthoritativeTime() : new Date();
+
+    container.innerHTML = `
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <span class="px-2 py-0.5 text-xs font-bold rounded-full bg-blue-100 text-blue-800">Admin Control</span>
+            <span class="text-xs text-slate-400">• Total Papers: ${assignments.length}</span>
+          </div>
+          <h3 class="text-lg font-bold text-slate-900">Test Papers & Examination Repository</h3>
+          <p class="text-xs text-slate-500 mt-0.5">Administer descriptive papers, live examination windows, schedule publications, and model answer keys.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button 
+            onclick="window.adminDashboard.openCreatePaperModal()"
+            class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <i data-lucide="plus-circle" class="w-4 h-4"></i> Create / Upload Test Paper
+          </button>
+        </div>
+      </div>
+
+      <div class="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead>
+              <tr class="border-b border-slate-200 bg-slate-50 text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                <th class="py-3 px-3.5 whitespace-nowrap">Test Name</th>
+                <th class="py-3 px-3 whitespace-nowrap">Subject</th>
+                <th class="py-3 px-3 whitespace-nowrap">Topic</th>
+                <th class="py-3 px-3 whitespace-nowrap">Max Marks</th>
+                <th class="py-3 px-3 whitespace-nowrap">Duration</th>
+                <th class="py-3 px-3 whitespace-nowrap">Status</th>
+                <th class="py-3 px-3 whitespace-nowrap">Scheduled Date/Time</th>
+                <th class="py-3 px-3 whitespace-nowrap">Live Start/End Time</th>
+                <th class="py-3 px-3 whitespace-nowrap">Question Paper</th>
+                <th class="py-3 px-3 whitespace-nowrap">Answer Sheet</th>
+                <th class="py-3 px-3.5 text-right whitespace-nowrap">Actions</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              ${assignments.length === 0 ? `
+                <tr>
+                  <td colspan="11" class="py-8 text-center text-slate-400">No test papers created yet. Click above to create one.</td>
+                </tr>
+              ` : assignments.map(a => {
+                const subject = window.store.getSubjectById(a.subjectId) || { name: a.subject || 'Accounting' };
+                const evalStatus = window.secureBackend ? window.secureBackend.computePaperStatus(a, serverTime) : { badgeText: a.status || 'Published', badgeClass: 'bg-slate-100 text-slate-700' };
+
+                const schedStr = a.scheduledPublishTime ? new Date(a.scheduledPublishTime).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '<span class="text-slate-400">--</span>';
+                
+                let liveStr = '<span class="text-slate-400">--</span>';
+                if (a.liveStartTime && a.liveEndTime) {
+                  const s = new Date(a.liveStartTime).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+                  const e = new Date(a.liveEndTime).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+                  liveStr = `<span class="font-mono text-[11px]">${s} to ${e}</span>`;
+                }
+
+                const isCurrentlyLive = evalStatus.statusKey === 'Live';
+
+                return `
+                  <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="py-3 px-3.5">
+                      <span class="font-bold text-slate-900 block max-w-xs line-clamp-2">${a.title}</span>
+                      <span class="text-[10px] text-slate-400 block font-mono">ID: ${a.id}</span>
+                    </td>
+                    <td class="py-3 px-3">
+                      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-800 border border-blue-200 whitespace-nowrap">
+                        ${subject.name}
+                      </span>
+                    </td>
+                    <td class="py-3 px-3 max-w-[140px] truncate text-slate-700 font-medium" title="${a.topic || ''}">
+                      ${a.topic || 'General'}
+                    </td>
+                    <td class="py-3 px-3 font-bold text-slate-800 whitespace-nowrap">
+                      ${a.maximumMarks} Marks
+                    </td>
+                    <td class="py-3 px-3 font-semibold text-slate-600 whitespace-nowrap">
+                      ${a.durationMinutes || 180} Mins
+                    </td>
+                    <td class="py-3 px-3 whitespace-nowrap">
+                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold ${evalStatus.badgeClass}">
+                        ${evalStatus.badgeText}
+                      </span>
+                    </td>
+                    <td class="py-3 px-3 whitespace-nowrap text-slate-600">
+                      ${schedStr}
+                    </td>
+                    <td class="py-3 px-3 whitespace-nowrap text-slate-600">
+                      ${liveStr}
+                    </td>
+                    <td class="py-3 px-3 whitespace-nowrap">
+                      ${a.questionPdfId || a.questionPdfData ? `
+                        <button 
+                          onclick="window.secureBackend.downloadProtectedFile('${a.questionPdfId || 'qp.pdf'}', '${a.id}', 'question', '${a.questionPdfName || 'QuestionPaper.pdf'}')" 
+                          class="inline-flex items-center gap-1 text-rose-600 hover:text-rose-800 font-bold hover:underline"
+                          title="${a.questionPdfName || 'Download Question PDF'}"
+                        >
+                          <i data-lucide="file-text" class="w-3.5 h-3.5"></i> PDF
+                        </button>
+                      ` : '<span class="text-slate-400">None</span>'}
+                    </td>
+                    <td class="py-3 px-3 whitespace-nowrap">
+                      ${a.answerPdfId || a.answerPdfData ? `
+                        <button 
+                          onclick="window.secureBackend.downloadProtectedFile('${a.answerPdfId || 'ans.pdf'}', '${a.id}', 'answer', '${a.answerPdfName || 'ModelAnswer.pdf'}')" 
+                          class="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-800 font-bold hover:underline"
+                          title="${a.answerPdfName || 'Download Answer Sheet'}"
+                        >
+                          <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i> Key PDF
+                        </button>
+                      ` : '<span class="text-slate-400">None</span>'}
+                    </td>
+                    <td class="py-3 px-3.5 text-right whitespace-nowrap space-x-1.5">
+                      <button 
+                        onclick="window.adminDashboard.openViewDetailsModal('${a.id}')"
+                        class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-semibold"
+                        title="View Details"
+                      >Details</button>
+                      <button 
+                        onclick="window.adminDashboard.openEditPaperModal('${a.id}')"
+                        class="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-[11px] font-semibold"
+                        title="Edit Paper"
+                      >Edit</button>
+                      <button 
+                        onclick="window.adminDashboard.openSchedulePaperModal('${a.id}')"
+                        class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded text-[11px] font-semibold"
+                        title="Schedule Paper"
+                      >Schedule</button>
+                      ${isCurrentlyLive ? `
+                        <button 
+                          onclick="window.adminDashboard.endPaperLive('${a.id}')"
+                          class="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-[11px] font-bold"
+                          title="End Live Test"
+                        >End Live</button>
+                      ` : `
+                        <button 
+                          onclick="window.adminDashboard.openLiveTestModal('${a.id}')"
+                          class="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded text-[11px] font-semibold"
+                          title="Configure Live Window"
+                        >Make Live</button>
+                      `}
+                      ${a.status !== 'Published' && evalStatus.statusKey !== 'Live' ? `
+                        <button 
+                          onclick="window.adminDashboard.publishPaperNow('${a.id}')"
+                          class="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded text-[11px] font-semibold"
+                          title="Publish Immediately"
+                        >Publish</button>
+                      ` : ''}
+                      <button 
+                        onclick="window.adminDashboard.confirmDeletePaper('${a.id}')"
+                        class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[11px] font-semibold"
+                        title="Delete Paper"
+                      >Delete</button>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  openCreatePaperModal() {
+    this.openEditPaperModal(null);
+  }
+
+  openUploadPaperModal() {
+    this.openCreatePaperModal();
+  }
+
+  openEditPaperModal(paperId) {
+    const isEdit = !!paperId;
+    const paper = isEdit ? window.store.getAssignmentById(paperId) : null;
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    this.activeEditingPaperId = paperId;
+    this.selectedNewQuestionFile = null;
+    this.selectedNewAnswerFile = null;
+
+    const validSubjects = [
+      { id: 'sub-1', name: 'Accounting' },
+      { id: 'sub-2', name: 'Business Law' },
+      { id: 'sub-3', name: 'Business Economics' },
+      { id: 'sub-4', name: 'Quantitative Aptitude' }
+    ];
+
+    modalContent.innerHTML = `
+      <div class="p-6 sm:p-7 max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
+          <div>
+            <h3 class="text-base font-bold text-slate-900">${isEdit ? 'Edit Test Paper / Assignment' : 'Create & Upload Test Paper (PDF)'}</h3>
+            <span class="text-xs text-slate-500">ExcellenceCA Official Examination System</span>
+          </div>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <form onsubmit="window.adminDashboard.saveTestPaper(event)" class="space-y-4 text-xs">
+          <!-- Test Name -->
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Test Name / Paper Name <span class="text-rose-500">*</span></label>
+            <input 
+              type="text" 
+              id="admin-paper-title" 
+              required 
+              value="${paper ? paper.title : ''}"
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-blue-500" 
+              placeholder="e.g. CA Foundation Accounting Mock Paper 1 - Final Assessment"
+            >
+          </div>
+
+          <!-- Subject and Topic -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Subject (Strictly CA Foundation) <span class="text-rose-500">*</span></label>
+              <select id="admin-paper-subject" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-blue-900 focus:ring-2 focus:ring-blue-500 bg-white">
+                ${validSubjects.map(s => `
+                  <option value="${s.id}" ${paper && (paper.subjectId === s.id || paper.subject === s.name) ? 'selected' : ''}>${s.name}</option>
+                `).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Topic / Chapter Name <span class="text-rose-500">*</span></label>
+              <input 
+                type="text" 
+                id="admin-paper-topic" 
+                required 
+                value="${paper ? paper.topic : ''}"
+                class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500" 
+                placeholder="e.g. Partnership Accounts & Financial Statements"
+              >
+            </div>
+          </div>
+
+          <!-- Maximum Marks and Duration -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Maximum Marks <span class="text-rose-500">*</span></label>
+              <input 
+                type="number" 
+                id="admin-paper-marks" 
+                min="10" 
+                max="500" 
+                required 
+                value="${paper ? paper.maximumMarks : 100}" 
+                class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold focus:ring-2 focus:ring-blue-500"
+              >
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Duration / Time Limit (Minutes) <span class="text-rose-500">*</span></label>
+              <input 
+                type="number" 
+                id="admin-paper-duration" 
+                min="15" 
+                max="360" 
+                required 
+                value="${paper ? (paper.durationMinutes || 180) : 180}" 
+                class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold focus:ring-2 focus:ring-blue-500"
+              >
+            </div>
+          </div>
+
+          <!-- Description -->
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Test Description & Instructions <span class="text-rose-500">*</span></label>
+            <textarea 
+              id="admin-paper-desc" 
+              rows="3" 
+              required 
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs leading-relaxed focus:ring-2 focus:ring-blue-500" 
+              placeholder="Detailed guidelines, chapters tested, and instruction notes for students..."
+            >${paper ? paper.description : ''}</textarea>
+          </div>
+
+          <!-- Question Paper PDF File Input -->
+          <div class="p-3.5 bg-rose-50/50 border border-rose-200 rounded-xl">
+            <label class="block font-bold text-rose-950 mb-1 flex items-center justify-between">
+              <span>Question Paper PDF (Only .pdf) <span class="text-rose-500">*</span></span>
+              ${paper && paper.questionPdfName ? `<span class="text-[11px] font-normal text-rose-700 font-mono">Current: ${paper.questionPdfName}</span>` : ''}
+            </label>
+            <input 
+              type="file" 
+              id="admin-paper-qp-file" 
+              accept="application/pdf,.pdf" 
+              ${!isEdit && !(paper && paper.questionPdfData) ? 'required' : ''}
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white cursor-pointer"
+              onchange="window.adminDashboard.handlePaperFileSelect(event, 'question')"
+            >
+            <span class="text-[11px] text-slate-500 mt-1 block">Protected document. Strict magic-byte check enforces %PDF- validation. Max: 15 MB.</span>
+            <div id="qp-file-status" class="hidden mt-1 text-[11px] font-semibold text-emerald-700"></div>
+          </div>
+
+          <!-- Answer Sheet / Model Solution PDF Input -->
+          <div class="p-3.5 bg-emerald-50/50 border border-emerald-200 rounded-xl">
+            <label class="block font-bold text-emerald-950 mb-1 flex items-center justify-between">
+              <span>Answer Sheet / Model Answer PDF (Optional)</span>
+              ${paper && paper.answerPdfName ? `<span class="text-[11px] font-normal text-emerald-700 font-mono">Current: ${paper.answerPdfName}</span>` : ''}
+            </label>
+            <input 
+              type="file" 
+              id="admin-paper-ans-file" 
+              accept="application/pdf,.pdf" 
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white cursor-pointer"
+              onchange="window.adminDashboard.handlePaperFileSelect(event, 'answer')"
+            >
+            <span class="text-[11px] text-slate-500 mt-1 block">Faculty evaluation key or model solutions. PDF only. Max: 15 MB.</span>
+            <div id="ans-file-status" class="hidden mt-1 text-[11px] font-semibold text-emerald-700"></div>
+          </div>
+
+          <!-- Initial Status -->
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Paper Status</label>
+            <select id="admin-paper-status" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-blue-500 bg-white">
+              <option value="Published" ${paper && paper.status === 'Published' ? 'selected' : ''}>Published (Available Immediately)</option>
+              <option value="Draft" ${paper && paper.status === 'Draft' ? 'selected' : ''}>Draft (Hidden from Students)</option>
+              <option value="Scheduled" ${paper && paper.status === 'Scheduled' ? 'selected' : ''}>Scheduled (Available on Scheduled Date)</option>
+              <option value="Live" ${paper && paper.status === 'Live' ? 'selected' : ''}>Live (Active Exam Window)</option>
+            </select>
+          </div>
+
+          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+            <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+            <button type="submit" class="px-6 py-2 font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm">
+              ${isEdit ? 'Save Changes' : 'Create & Save Paper'}
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    window.app.openModal('admin-generic-modal');
+  }
+
+  async handlePaperFileSelect(e, type) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const statusEl = document.getElementById(type === 'question' ? 'qp-file-status' : 'ans-file-status');
+
+    // Perform pre-flight magic-byte check
+    const validation = await window.secureBackend.validatePdfFile(file);
+    if (!validation.valid) {
+      window.app.showToast(validation.error, 'error');
+      e.target.value = '';
+      if (statusEl) {
+        statusEl.textContent = '❌ Invalid file rejected.';
+        statusEl.className = 'mt-1 text-[11px] font-semibold text-rose-600';
+        statusEl.classList.remove('hidden');
+      }
+      return;
+    }
+
+    if (type === 'question') {
+      this.selectedNewQuestionFile = file;
+    } else {
+      this.selectedNewAnswerFile = file;
+    }
+
+    if (statusEl) {
+      statusEl.textContent = `✓ Selected: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB, Valid PDF)`;
+      statusEl.className = 'mt-1 text-[11px] font-semibold text-emerald-700';
+      statusEl.classList.remove('hidden');
+    }
+  }
+
+  async saveTestPaper(e) {
+    e.preventDefault();
+
+    const title = document.getElementById('admin-paper-title').value.trim();
+    const subjectId = document.getElementById('admin-paper-subject').value;
+    const subjectObj = window.store.getSubjectById(subjectId) || { name: 'Accounting' };
+    const topic = document.getElementById('admin-paper-topic').value.trim();
+    const maximumMarks = parseInt(document.getElementById('admin-paper-marks').value, 10);
+    const durationMinutes = parseInt(document.getElementById('admin-paper-duration').value, 10);
+    const description = document.getElementById('admin-paper-desc').value.trim();
+    const status = document.getElementById('admin-paper-status').value;
+
+    const isEdit = !!this.activeEditingPaperId;
+    const existing = isEdit ? window.store.getAssignmentById(this.activeEditingPaperId) : null;
+
+    let questionPdfName = existing ? existing.questionPdfName : 'QuestionPaper.pdf';
+    let questionPdfId = existing ? existing.questionPdfId : null;
+    let questionPdfData = existing ? existing.questionPdfData : null;
+
+    let answerPdfName = existing ? existing.answerPdfName : null;
+    let answerPdfId = existing ? existing.answerPdfId : null;
+    let answerPdfData = existing ? existing.answerPdfData : null;
+
+    // If new Question Paper selected, upload
+    if (this.selectedNewQuestionFile) {
+      const upRes = await window.secureBackend.uploadProtectedPdf(this.selectedNewQuestionFile, 'question');
+      if (!upRes.success) {
+        window.app.showToast('Question Paper Upload Error: ' + upRes.error, 'error');
+        return;
+      }
+      questionPdfName = upRes.fileName;
+      questionPdfId = upRes.fileId;
+      questionPdfData = upRes.fileData;
+    }
+
+    // If new Answer Sheet selected, upload
+    if (this.selectedNewAnswerFile) {
+      const upRes = await window.secureBackend.uploadProtectedPdf(this.selectedNewAnswerFile, 'answer');
+      if (!upRes.success) {
+        window.app.showToast('Answer Sheet Upload Error: ' + upRes.error, 'error');
+        return;
+      }
+      answerPdfName = upRes.fileName;
+      answerPdfId = upRes.fileId;
+      answerPdfData = upRes.fileData;
+    }
+
+    const paperObj = {
+      id: isEdit ? existing.id : ('asg-' + Date.now()),
+      title,
+      subjectId,
+      subject: subjectObj.name,
+      topic,
+      maximumMarks,
+      durationMinutes,
+      description,
+      status,
+      isPublished: status !== 'Draft',
+      isLive: status === 'Live',
+      scheduledPublishTime: existing ? existing.scheduledPublishTime : (status === 'Scheduled' ? new Date(Date.now() + 86400000).toISOString() : null),
+      liveStartTime: existing ? existing.liveStartTime : (status === 'Live' ? new Date().toISOString() : null),
+      liveEndTime: existing ? existing.liveEndTime : (status === 'Live' ? new Date(Date.now() + durationMinutes * 60000).toISOString() : null),
+      expiryTime: existing ? existing.expiryTime : new Date(Date.now() + 30 * 86400000).toISOString(),
+      deadline: existing ? existing.deadline : new Date(Date.now() + 30 * 86400000).toISOString(),
+      questionPdfName,
+      questionPdfId,
+      questionPdfData,
+      answerPdfName,
+      answerPdfId,
+      answerPdfData,
+      createdAt: existing ? existing.createdAt : new Date().toISOString()
+    };
+
+    if (isEdit) {
+      window.store.updateAssignment(paperObj);
+      window.app.showToast('Test Paper updated successfully!', 'success');
+    } else {
+      window.store.addAssignment(paperObj);
+      window.app.showToast('Test Paper created & uploaded successfully!', 'success');
+    }
+
+    // Sync with backend API if online
+    fetch('/api/papers', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${window.auth.getCurrentUser().token || window.auth.getCurrentUser().email}`
+      },
+      body: JSON.stringify(paperObj)
+    }).catch(() => {});
+
+    window.app.closeModal('admin-generic-modal');
+    this.renderTestPapers();
+  }
+
+  confirmDeletePaper(paperId) {
+    const paper = window.store.getAssignmentById(paperId);
+    if (!paper) return;
+
+    if (confirm(`Are you sure you want to permanently delete the test paper:
+"${paper.title}"?
+
+This will remove the question paper, attached answer keys, and student submission records.`)) {
+      window.store.deleteAssignment(paperId);
+      
+      fetch('/api/papers/delete', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${window.auth.getCurrentUser().token || window.auth.getCurrentUser().email}`
+        },
+        body: JSON.stringify({ id: paperId })
+      }).catch(() => {});
+
+      window.app.showToast('Test paper deleted successfully.', 'info');
+      this.renderTestPapers();
+    }
+  }
+
+  openSchedulePaperModal(paperId) {
+    const paper = window.store.getAssignmentById(paperId);
+    if (!paper) return;
+
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    const defaultDate = paper.scheduledPublishTime ? paper.scheduledPublishTime.slice(0, 16) : new Date(Date.now() + 86400000).toISOString().slice(0, 16);
+    const defaultExpiry = paper.expiryTime ? paper.expiryTime.slice(0, 16) : new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 16);
+
+    modalContent.innerHTML = `
+      <div class="p-6">
+        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Schedule Test Paper Release</h3>
+            <p class="text-xs text-slate-500 mt-0.5">${paper.title}</p>
+          </div>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <form onsubmit="window.adminDashboard.saveScheduledPaper(event, '${paper.id}')" class="space-y-4 text-xs">
+          <div class="p-3 bg-indigo-50 border border-indigo-200 rounded-lg text-indigo-900 leading-relaxed">
+            <i data-lucide="clock" class="w-4 h-4 inline-block mr-1 text-indigo-600"></i>
+            Scheduled test papers will be locked. Students cannot view or download the Question Paper before the scheduled date and time.
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Publish / Schedule Date & Time <span class="text-rose-500">*</span></label>
+            <input 
+              type="datetime-local" 
+              id="sched-publish-time" 
+              required 
+              value="${defaultDate}"
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-indigo-500"
+            >
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Optional Expiry Date & Time</label>
+            <input 
+              type="datetime-local" 
+              id="sched-expiry-time" 
+              value="${defaultExpiry}"
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-indigo-500"
+            >
+            <span class="text-[11px] text-slate-400 mt-1 block">After this date, the paper moves to Completed/Expired status.</span>
+          </div>
+
+          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+            <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+            <button type="submit" class="px-5 py-2 font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm">
+              Confirm Schedule
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    window.app.openModal('admin-generic-modal');
+  }
+
+  saveScheduledPaper(e, paperId) {
+    e.preventDefault();
+    const paper = window.store.getAssignmentById(paperId);
+    if (!paper) return;
+
+    const publishTimeVal = document.getElementById('sched-publish-time').value;
+    const expiryTimeVal = document.getElementById('sched-expiry-time').value;
+
+    paper.status = 'Scheduled';
+    paper.scheduledPublishTime = new Date(publishTimeVal).toISOString();
+    if (expiryTimeVal) {
+      paper.expiryTime = new Date(expiryTimeVal).toISOString();
+      paper.deadline = paper.expiryTime;
+    }
+
+    window.store.updateAssignment(paper);
+    window.app.closeModal('admin-generic-modal');
+    window.app.showToast('Paper scheduled successfully!', 'success');
+    this.renderTestPapers();
+  }
+
+  openLiveTestModal(paperId) {
+    const paper = window.store.getAssignmentById(paperId);
+    if (!paper) return;
+
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    const now = new Date();
+    const defaultStart = paper.liveStartTime ? paper.liveStartTime.slice(0, 16) : now.toISOString().slice(0, 16);
+    const defaultEnd = paper.liveEndTime ? paper.liveEndTime.slice(0, 16) : new Date(now.getTime() + (paper.durationMinutes || 180) * 60000).toISOString().slice(0, 16);
+
+    modalContent.innerHTML = `
+      <div class="p-6">
+        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Configure Live Examination Window</h3>
+            <p class="text-xs text-slate-500 mt-0.5">${paper.title}</p>
+          </div>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <form onsubmit="window.adminDashboard.saveLiveTest(e, '${paper.id}')" class="space-y-4 text-xs">
+          <div class="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-950 leading-relaxed">
+            <i data-lucide="alert-circle" class="w-4 h-4 inline-block mr-1 text-rose-600"></i>
+            Live Window Rule: The paper will display <strong>"Live Test starts at [date/time]"</strong> before start time, <strong>"Live Now"</strong> during the window, and <strong>"Live Test Ended"</strong> after conclusion. Access is strictly blocked outside the window.
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Live Start Date & Time <span class="text-rose-500">*</span></label>
+            <input 
+              type="datetime-local" 
+              id="live-start-time" 
+              required 
+              value="${defaultStart}"
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold focus:ring-2 focus:ring-rose-500"
+            >
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Live End Date & Time <span class="text-rose-500">*</span></label>
+            <input 
+              type="datetime-local" 
+              id="live-end-time" 
+              required 
+              value="${defaultEnd}"
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold focus:ring-2 focus:ring-rose-500"
+            >
+          </div>
+
+          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+            <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+            <button type="button" onclick="window.adminDashboard.saveLiveTestDirect('${paper.id}')" class="px-5 py-2 font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm">
+              Activate Live Window
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    window.app.openModal('admin-generic-modal');
+  }
+
+  saveLiveTestDirect(paperId) {
+    const paper = window.store.getAssignmentById(paperId);
+    if (!paper) return;
+
+    const startVal = document.getElementById('live-start-time').value;
+    const endVal = document.getElementById('live-end-time').value;
+
+    if (!startVal || !endVal) {
+      window.app.showToast('Both Start and End Date/Time are required.', 'warning');
+      return;
+    }
+
+    const startDate = new Date(startVal);
+    const endDate = new Date(endVal);
+
+    if (endDate <= startDate) {
+      window.app.showToast('End time must be after start time.', 'error');
+      return;
+    }
+
+    paper.status = 'Live';
+    paper.isLive = true;
+    paper.liveStartTime = startDate.toISOString();
+    paper.liveEndTime = endDate.toISOString();
+    paper.expiryTime = paper.liveEndTime;
+    paper.deadline = paper.liveEndTime;
+
+    window.store.updateAssignment(paper);
+    window.app.closeModal('admin-generic-modal');
+    window.app.showToast('Live Test window successfully configured!', 'success');
+    this.renderTestPapers();
+  }
+
+  endPaperLive(paperId) {
+    const paper = window.store.getAssignmentById(paperId);
+    if (!paper) return;
+
+    if (confirm(`End the live examination for "${paper.title}" immediately?`)) {
+      paper.isLive = false;
+      paper.status = 'Completed/Expired';
+      paper.liveEndTime = new Date().toISOString();
+      paper.expiryTime = paper.liveEndTime;
+      window.store.updateAssignment(paper);
+      window.app.showToast('Live test ended.', 'info');
+      this.renderTestPapers();
+    }
+  }
+
+  publishPaperNow(paperId) {
+    const paper = window.store.getAssignmentById(paperId);
+    if (!paper) return;
+
+    paper.status = 'Published';
+    paper.isPublished = true;
+    paper.isLive = false;
+    paper.scheduledPublishTime = new Date().toISOString();
+    window.store.updateAssignment(paper);
+    window.app.showToast('Paper published and available immediately!', 'success');
+    this.renderTestPapers();
+  }
+
+  openViewDetailsModal(paperId) {
+    const paper = window.store.getAssignmentById(paperId);
+    if (!paper) return;
+
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    const subject = window.store.getSubjectById(paper.subjectId) || { name: paper.subject || 'Accounting' };
+    const evalStatus = window.secureBackend ? window.secureBackend.computePaperStatus(paper) : { badgeText: paper.status, badgeClass: '' };
+
+    modalContent.innerHTML = `
+      <div class="p-6 sm:p-7 max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
+          <div>
+            <span class="text-xs font-bold text-blue-600 uppercase tracking-wider">${subject.name} • ${paper.topic}</span>
+            <h3 class="text-lg font-bold text-slate-900 mt-0.5">${paper.title}</h3>
+          </div>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+          <div class="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+            <span class="text-[10px] font-bold text-slate-400 uppercase block">Status</span>
+            <span class="text-xs font-bold text-slate-800">${evalStatus.badgeText}</span>
+          </div>
+          <div class="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+            <span class="text-[10px] font-bold text-slate-400 uppercase block">Max Marks</span>
+            <span class="text-xs font-bold text-slate-800">${paper.maximumMarks} Marks</span>
+          </div>
+          <div class="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+            <span class="text-[10px] font-bold text-slate-400 uppercase block">Duration</span>
+            <span class="text-xs font-bold text-slate-800">${paper.durationMinutes || 180} Minutes</span>
+          </div>
+          <div class="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+            <span class="text-[10px] font-bold text-slate-400 uppercase block">Paper ID</span>
+            <span class="text-xs font-bold text-slate-800 font-mono">${paper.id}</span>
           </div>
         </div>
 
-        <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
-          <h3 class="text-sm font-bold text-slate-900 mb-4 flex items-center justify-between">
-            <span>Recent Assignment Uploads</span>
-            <span class="text-xs text-blue-600 font-semibold">${submissions.length} Total</span>
-          </h3>
-          <div class="space-y-3">
-            ${submissions.slice(0, 5).map(sub => {
+        <div class="space-y-4 text-xs mb-6">
+          <div class="p-3.5 bg-slate-50 border border-slate-200 rounded-xl leading-relaxed">
+            <span class="font-bold text-slate-800 block mb-1">Instructions / Description:</span>
+            <p class="text-slate-600 whitespace-pre-line">${paper.description}</p>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="p-3 border border-slate-200 rounded-lg">
+              <span class="font-bold text-slate-700 block mb-1">Schedule Window</span>
+              <p class="text-slate-600">Publish Time: <strong>${paper.scheduledPublishTime ? new Date(paper.scheduledPublishTime).toLocaleString() : 'Not scheduled'}</strong></p>
+              <p class="text-slate-600">Expiry Time: <strong>${paper.expiryTime ? new Date(paper.expiryTime).toLocaleString() : 'No expiry'}</strong></p>
+            </div>
+            <div class="p-3 border border-slate-200 rounded-lg">
+              <span class="font-bold text-slate-700 block mb-1">Live Examination Window</span>
+              <p class="text-slate-600">Live Start: <strong>${paper.liveStartTime ? new Date(paper.liveStartTime).toLocaleString() : 'Not configured'}</strong></p>
+              <p class="text-slate-600">Live End: <strong>${paper.liveEndTime ? new Date(paper.liveEndTime).toLocaleString() : 'Not configured'}</strong></p>
+            </div>
+          </div>
+
+          <div class="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between">
+            <div>
+              <span class="font-bold text-rose-950 block">Official Question Paper (PDF)</span>
+              <span class="text-slate-500 font-mono text-[11px]">${paper.questionPdfName || 'qp.pdf'}</span>
+            </div>
+            <button 
+              onclick="window.secureBackend.downloadProtectedFile('${paper.questionPdfId || 'qp.pdf'}', '${paper.id}', 'question', '${paper.questionPdfName || 'QuestionPaper.pdf'}')" 
+              class="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold shadow-xs flex items-center gap-1"
+            >
+              <i data-lucide="download" class="w-3.5 h-3.5"></i> Download
+            </button>
+          </div>
+
+          ${paper.answerPdfName || paper.answerPdfData ? `
+            <div class="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between">
+              <div>
+                <span class="font-bold text-emerald-950 block">Official Model Answer Sheet (PDF)</span>
+                <span class="text-slate-500 font-mono text-[11px]">${paper.answerPdfName || 'ans.pdf'}</span>
+              </div>
+              <button 
+                onclick="window.secureBackend.downloadProtectedFile('${paper.answerPdfId || 'ans.pdf'}', '${paper.id}', 'answer', '${paper.answerPdfName || 'ModelAnswer.pdf'}')" 
+                class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold shadow-xs flex items-center gap-1"
+              >
+                <i data-lucide="download" class="w-3.5 h-3.5"></i> Download
+              </button>
+            </div>
+          ` : ''}
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-4 border-t border-slate-200">
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="px-5 py-2 font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg">Close</button>
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    window.app.openModal('admin-generic-modal');
+  }
+
+
+  // --- 5. CHECKED COPY GRADING CENTER ---
+  renderGradingCenter() {
+    const container = document.getElementById('admin-content-area');
+    if (!container) return;
+
+    const submissions = window.store.getSubmissions();
+
+    container.innerHTML = `
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h3 class="text-base font-bold text-slate-900">Student Copy Evaluation & Return Center</h3>
+          <p class="text-xs text-slate-500 mt-0.5">Check student answers, award marks, write remarks, and upload Evaluated/Checked Copy PDFs</p>
+        </div>
+      </div>
+
+      <div class="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
+        <table class="w-full text-left text-sm">
+          <thead>
+            <tr class="border-b border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-500 uppercase tracking-wider">
+              <th class="py-3 px-4">Student</th>
+              <th class="py-3 px-4">Test Paper</th>
+              <th class="py-3 px-4">Student Answer Sheet</th>
+              <th class="py-3 px-4">Status & Score</th>
+              <th class="py-3 px-4">Returned Checked Copy</th>
+              <th class="py-3 px-4 text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            ${submissions.length === 0 ? `
+              <tr><td colspan="6" class="py-8 text-center text-xs text-slate-400">No student copies submitted yet.</td></tr>
+            ` : submissions.map(sub => {
               const asg = window.store.getAssignmentById(sub.assignmentId);
+              const isEvaluated = sub.status === 'Evaluated';
+
               return `
-                <div class="flex items-center justify-between p-3 rounded-lg bg-slate-50 border border-slate-100 text-xs">
-                  <div>
-                    <span class="font-bold text-slate-900">${sub.studentName}</span>
-                    <span class="text-slate-500 block truncate max-w-xs">${asg ? asg.title : 'Case Study'}</span>
-                  </div>
-                  <div class="text-right">
-                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      sub.status === 'Evaluated' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                    }">${sub.status}</span>
-                    <span class="text-[10px] text-slate-400 block mt-1">${new Date(sub.submittedAt).toLocaleDateString()}</span>
-                  </div>
-                </div>
+                <tr class="hover:bg-slate-50 transition-colors">
+                  <td class="py-3 px-4">
+                    <span class="font-bold text-slate-900 text-xs block">${sub.studentName}</span>
+                    <span class="text-[11px] text-slate-500">${new Date(sub.submittedAt).toLocaleDateString()}</span>
+                  </td>
+                  <td class="py-3 px-4 text-xs text-slate-700 font-semibold max-w-xs truncate">
+                    ${asg ? asg.title : 'CA Paper'}
+                  </td>
+                  <td class="py-3 px-4 text-xs font-mono">
+                    <a href="${sub.fileData}" download="${sub.fileName}" class="text-blue-600 hover:underline flex items-center gap-1 font-semibold">
+                      <i data-lucide="file" class="w-3.5 h-3.5 text-rose-500"></i>
+                      ${sub.fileName}
+                    </a>
+                  </td>
+                  <td class="py-3 px-4">
+                    <span class="px-2 py-0.5 rounded-full text-xs font-bold ${isEvaluated ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
+                      ${sub.status} ${isEvaluated ? `(${sub.marksObtained}/${sub.maxMarks || 50})` : ''}
+                    </span>
+                  </td>
+                  <td class="py-3 px-4 text-xs">
+                    ${sub.checkedCopyPdfData ? `
+                      <a href="${sub.checkedCopyPdfData}" download="${sub.checkedCopyFileName}" class="text-emerald-700 hover:underline font-bold inline-flex items-center gap-1">
+                        <i data-lucide="check-circle" class="w-3.5 h-3.5 text-emerald-600"></i>
+                        ${sub.checkedCopyFileName}
+                      </a>
+                    ` : '<span class="text-slate-400 italic">Not uploaded yet</span>'}
+                  </td>
+                  <td class="py-3 px-4 text-right">
+                    <button 
+                      onclick="window.adminDashboard.openGradeModal('${sub.id}')"
+                      class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm"
+                    >
+                      ${isEvaluated ? 'Edit Checked Copy' : 'Check Copy & Grade →'}
+                    </button>
+                  </td>
+                </tr>
               `;
             }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  openGradeModal(submissionId) {
+    this.activeGradingSubmissionId = submissionId;
+    this.selectedCheckedPdfFile = null;
+
+    const submission = window.store.getSubmissions().find(s => s.id === submissionId);
+    if (!submission) return;
+
+    const asg = window.store.getAssignmentById(submission.assignmentId);
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    modalContent.innerHTML = `
+      <div class="p-6 sm:p-8 max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Evaluate Student Answer Sheet</h3>
+            <span class="text-xs text-slate-500">Student: <strong>${submission.studentName}</strong> • ${asg ? asg.title : 'CA Paper'}</span>
+          </div>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between mb-5">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center">
+              <i data-lucide="file-text" class="w-6 h-6"></i>
+            </div>
+            <div>
+              <span class="text-xs font-mono font-bold text-slate-900 block">${submission.fileName}</span>
+              <span class="text-[11px] text-slate-500">Submitted: ${new Date(submission.submittedAt).toLocaleString()}</span>
+            </div>
+          </div>
+          <a 
+            href="${submission.fileData}" 
+            download="${submission.fileName}"
+            class="px-3.5 py-1.5 text-xs font-bold text-blue-600 hover:text-blue-800 bg-white border border-slate-200 rounded-lg shadow-sm inline-flex items-center gap-1.5"
+          >
+            <i data-lucide="download" class="w-3.5 h-3.5"></i> Download Student Answer Copy
+          </a>
+        </div>
+
+        <form onsubmit="window.adminDashboard.saveGrade(event)" class="space-y-4 text-xs">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Marks (Out of ${asg ? asg.maximumMarks : 50})</label>
+              <input 
+                type="number" 
+                id="admin-grade-marks" 
+                step="0.5" 
+                min="0" 
+                max="${asg ? asg.maximumMarks : 50}" 
+                required 
+                value="${submission.marksObtained !== null ? submission.marksObtained : ''}" 
+                class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-emerald-800"
+              >
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Status</label>
+              <select id="admin-grade-status" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold">
+                <option value="Evaluated" selected>Evaluated (Checked & Returned)</option>
+                <option value="Needs Revision">Needs Revision</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Examiner Feedback / Working Notes Comments</label>
+            <textarea id="admin-grade-feedback" rows="3" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="Feedback on steps, standard references...">${submission.adminFeedback || ''}</textarea>
+          </div>
+
+          <!-- Checked Copy Upload -->
+          <div class="border-t border-slate-200 pt-4">
+            <label class="block font-bold text-slate-900 mb-1">Upload Checked / Evaluated Copy (PDF)</label>
+            <p class="text-[11px] text-slate-500 mb-2">Upload your corrected sheet. The student will be able to download this copy.</p>
+
+            <input 
+              type="file" 
+              id="admin-checked-copy-file" 
+              accept="application/pdf,.pdf" 
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-slate-50"
+              onchange="window.adminDashboard.handleCheckedFileSelect(event)"
+            >
+
+            ${submission.checkedCopyFileName ? `
+              <div class="mt-2 text-xs text-slate-600 flex items-center justify-between">
+                <span>Current checked copy: <strong class="text-emerald-700">${submission.checkedCopyFileName}</strong></span>
+                <a href="${submission.checkedCopyPdfData}" download="${submission.checkedCopyFileName}" class="text-blue-600 hover:underline">Download</a>
+              </div>
+            ` : ''}
+          </div>
+
+          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+            <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+            <button type="submit" class="px-6 py-2 font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm">Save & Return Copy</button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    window.app.openModal('admin-generic-modal');
+  }
+
+  handleCheckedFileSelect(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      window.app.showToast('Only PDF files are allowed.', 'error');
+      e.target.value = '';
+      return;
+    }
+    this.selectedCheckedPdfFile = file;
+  }
+
+  saveGrade(e) {
+    e.preventDefault();
+    const submissionId = this.activeGradingSubmissionId;
+    const submission = window.store.getSubmissions().find(s => s.id === submissionId);
+    if (!submission) return;
+
+    const marks = parseFloat(document.getElementById('admin-grade-marks').value);
+    const status = document.getElementById('admin-grade-status').value;
+    const feedback = document.getElementById('admin-grade-feedback').value.trim();
+    const currentUser = window.auth.getCurrentUser();
+
+    submission.marksObtained = marks;
+    submission.status = status;
+    submission.adminFeedback = feedback;
+    submission.evaluatedBy = currentUser ? currentUser.name : 'Administrator';
+    submission.evaluatedAt = new Date().toISOString();
+
+    if (this.selectedCheckedPdfFile) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        submission.checkedCopyFileName = this.selectedCheckedPdfFile.name;
+        submission.checkedCopyPdfData = reader.result;
+        window.store.updateSubmission(submission);
+        window.app.closeModal('admin-generic-modal');
+        window.app.showToast(`Checked copy and marks (${marks}) returned to student!`, 'success');
+        this.renderGradingCenter();
+      };
+      reader.readAsDataURL(this.selectedCheckedPdfFile);
+    } else {
+      window.store.updateSubmission(submission);
+      window.app.closeModal('admin-generic-modal');
+      window.app.showToast(`Evaluation saved. Marks: ${marks}`, 'success');
+      this.renderGradingCenter();
+    }
+  }
+
+  // --- 6. MCQ TESTS BUILDER & COMPREHENSIVE QUESTION MANAGEMENT ---
+  renderMCQTests() {
+    const container = document.getElementById('admin-content-area');
+    if (!container) return;
+
+    const tests = window.store.getTests();
+
+    container.innerHTML = `
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h3 class="text-base font-bold text-slate-900">MCQ Mock Examination Management</h3>
+          <p class="text-xs text-slate-500 mt-0.5">Author tests, configure dynamic marking schemes, manage attempt limits, import PDFs, and preview student experience</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button 
+            onclick="window.adminDashboard.openTestModal()"
+            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <i data-lucide="plus" class="w-4 h-4"></i> Create MCQ Test
+          </button>
+        </div>
+      </div>
+
+      <div class="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
+        <table class="w-full text-left text-xs min-w-[950px]">
+          <thead>
+            <tr class="border-b border-slate-200 bg-slate-50/80 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+              <th class="py-3 px-3">Test Title</th>
+              <th class="py-3 px-3">Subject</th>
+              <th class="py-3 px-3">Topic</th>
+              <th class="py-3 px-2 text-center">Questions</th>
+              <th class="py-3 px-2 text-center">Max Marks</th>
+              <th class="py-3 px-2 text-center">Duration</th>
+              <th class="py-3 px-2 text-center">Marking (+ / -)</th>
+              <th class="py-3 px-2 text-center">Attempt Limit</th>
+              <th class="py-3 px-3 text-center">Status</th>
+              <th class="py-3 px-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            ${tests.length === 0 ? `
+              <tr>
+                <td colspan="10" class="py-12 text-center text-slate-400 text-xs">
+                  No mock tests registered yet. Click "Create MCQ Test" to start.
+                </td>
+              </tr>
+            ` : tests.map(tst => {
+              const subject = window.store.getSubjectById(tst.subjectId);
+              const subjectName = subject ? subject.name : (tst.subject || 'Accounting');
+              const qCount = window.store.getQuestionsByTestId(tst.id).length;
+              const posMark = typeof tst.marksPerCorrect === 'number' ? tst.marksPerCorrect : 2.0;
+              const negMark = typeof tst.negativeMarksPerWrong === 'number' ? tst.negativeMarksPerWrong : 0.5;
+              const maxAtt = tst.maxAttempts || 3;
+              const status = tst.status || (tst.isPublished ? 'Published' : 'Draft');
+
+              let statusBadgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
+              if (status === 'Published') statusBadgeClass = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+              else if (status === 'Live') statusBadgeClass = 'bg-amber-50 text-amber-800 border-amber-200 animate-pulse';
+              else if (status === 'Scheduled') statusBadgeClass = 'bg-purple-50 text-purple-800 border-purple-200';
+              else if (status === 'Completed/Expired') statusBadgeClass = 'bg-rose-50 text-rose-800 border-rose-200';
+
+              return `
+                <tr class="hover:bg-slate-50/70 transition-colors">
+                  <td class="py-3 px-3 max-w-[220px]">
+                    <div class="font-bold text-slate-900 line-clamp-1">${tst.title}</div>
+                    <span class="text-[10px] text-slate-400">${new Date(tst.createdAt || Date.now()).toLocaleDateString()}</span>
+                  </td>
+                  <td class="py-3 px-3">
+                    <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700">
+                      ${subjectName}
+                    </span>
+                  </td>
+                  <td class="py-3 px-3 max-w-[130px] truncate text-slate-600 font-medium">${tst.topic || tst.chapter || 'Syllabus Core'}</td>
+                  <td class="py-3 px-2 text-center">
+                    <button 
+                      onclick="window.adminDashboard.openQuestionBuilder('${tst.id}')"
+                      class="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded text-[11px] transition-colors cursor-pointer"
+                      title="Manage Questions"
+                    >
+                      ${qCount} MCQs →
+                    </button>
+                  </td>
+                  <td class="py-3 px-2 text-center font-bold text-slate-800">${tst.maximumMarks || (qCount * posMark) || 10}</td>
+                  <td class="py-3 px-2 text-center text-slate-600 font-medium">${tst.durationMinutes}m</td>
+                  <td class="py-3 px-2 text-center font-semibold">
+                    <span class="text-emerald-700">+${posMark}</span> / <span class="text-rose-600">-${negMark}</span>
+                  </td>
+                  <td class="py-3 px-2 text-center font-bold text-slate-700">${maxAtt}</td>
+                  <td class="py-3 px-3 text-center">
+                    <span class="px-2 py-0.5 text-[10px] font-bold rounded-full border ${statusBadgeClass}">
+                      ${status}
+                    </span>
+                  </td>
+                  <td class="py-3 px-3 text-right">
+                    <div class="flex items-center justify-end gap-1.5">
+                      <button 
+                        onclick="window.adminDashboard.openTestModal('${tst.id}')"
+                        class="px-2 py-1 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                        title="Edit Test Details"
+                      >
+                        Edit
+                      </button>
+                      <button 
+                        onclick="window.adminDashboard.openQuestionBuilder('${tst.id}')"
+                        class="px-2 py-1 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition-colors font-semibold"
+                        title="Add/Review Questions"
+                      >
+                        Questions
+                      </button>
+                      <button 
+                        onclick="window.adminDashboard.previewTest('${tst.id}')"
+                        class="px-2 py-1 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded transition-colors font-semibold flex items-center gap-0.5"
+                        title="Preview Exact Student Interface"
+                      >
+                        <i data-lucide="eye" class="w-3 h-3"></i> Preview
+                      </button>
+                      <button 
+                        onclick="window.adminDashboard.openPublishModal('${tst.id}')"
+                        class="px-2 py-1 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 rounded transition-colors font-semibold"
+                        title="Publish / Schedule"
+                      >
+                        Publish
+                      </button>
+                      <button 
+                        onclick="window.adminDashboard.deleteTest('${tst.id}')"
+                        class="px-2 py-1 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded transition-colors"
+                        title="Delete Test"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  openTestModal(testId = null) {
+    const isEdit = !!testId;
+    const test = isEdit ? window.store.getTestById(testId) : null;
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    const subjects = [
+      { id: 'sub-1', name: 'Accounting' },
+      { id: 'sub-2', name: 'Business Law' },
+      { id: 'sub-3', name: 'Business Economics' },
+      { id: 'sub-4', name: 'Quantitative Aptitude' }
+    ];
+
+    modalContent.innerHTML = `
+      <div class="p-6">
+        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
+          <div>
+            <h3 class="text-base font-bold text-slate-900">${isEdit ? 'Edit MCQ Test' : 'Create New MCQ Test'}</h3>
+            <p class="text-xs text-slate-500">Configure CA Foundation test parameters, dynamic marking, and attempt limits</p>
+          </div>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600 p-1">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <form onsubmit="window.adminDashboard.saveTest(event, '${testId || ''}')" class="space-y-4 text-xs">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Test Name / Title *</label>
+            <input 
+              type="text" 
+              id="tst-title" 
+              required 
+              value="${test ? test.title : ''}"
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500" 
+              placeholder="e.g. Ind AS 115 Revenue Recognition Speed Assessment"
+            >
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Subject (CA Foundation) *</label>
+              <select id="tst-subject" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium">
+                ${subjects.map(s => `
+                  <option value="${s.id}" ${test && (test.subjectId === s.id || test.subject === s.name) ? 'selected' : ''}>
+                    ${s.name}
+                  </option>
+                `).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Chapter / Topic *</label>
+              <input 
+                type="text" 
+                id="tst-topic" 
+                required 
+                value="${test ? (test.topic || test.chapter || '') : ''}"
+                class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500" 
+                placeholder="e.g. Accounting Standards / Ind AS"
+              >
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Duration (Mins) *</label>
+              <input 
+                type="number" 
+                id="tst-duration" 
+                min="1" 
+                required 
+                value="${test ? test.durationMinutes : 15}"
+                class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold"
+              >
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Max Marks *</label>
+              <input 
+                type="number" 
+                id="tst-maxmarks" 
+                step="0.5" 
+                min="1" 
+                required 
+                value="${test ? (test.maximumMarks || 10) : 10}"
+                class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold"
+              >
+            </div>
+            <div>
+              <label class="block font-bold text-emerald-800 mb-1">Correct Mark (+) *</label>
+              <input 
+                type="number" 
+                id="tst-positive" 
+                step="0.25" 
+                min="0.25" 
+                required 
+                value="${test && typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0}"
+                class="w-full px-2.5 py-1.5 border border-emerald-300 bg-emerald-50/50 rounded-lg text-xs font-bold text-emerald-800"
+              >
+            </div>
+            <div>
+              <label class="block font-bold text-rose-800 mb-1">Negative Mark (-) *</label>
+              <input 
+                type="number" 
+                id="tst-negative" 
+                step="0.05" 
+                min="0" 
+                required 
+                value="${test && typeof test.negativeMarksPerWrong === 'number' ? test.negativeMarksPerWrong : 0.5}"
+                class="w-full px-2.5 py-1.5 border border-rose-300 bg-rose-50/50 rounded-lg text-xs font-bold text-rose-800"
+              >
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Maximum Attempts Allowed *</label>
+              <input 
+                type="number" 
+                id="tst-maxattempts" 
+                min="1" 
+                max="20" 
+                required 
+                value="${test ? (test.maxAttempts || 3) : 3}"
+                class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold"
+              >
+              <p class="text-[10px] text-slate-400 mt-0.5">Students will be blocked once they reach this limit.</p>
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Initial Status *</label>
+              <select id="tst-status" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold">
+                <option value="Draft" ${test && test.status === 'Draft' ? 'selected' : ''}>Draft / Under Review</option>
+                <option value="Published" ${test && test.status === 'Published' ? 'selected' : (!test ? 'selected' : '')}>Published (Live for Students)</option>
+                <option value="Scheduled" ${test && test.status === 'Scheduled' ? 'selected' : ''}>Scheduled</option>
+                <option value="Live" ${test && test.status === 'Live' ? 'selected' : ''}>Live Window</option>
+                <option value="Completed/Expired" ${test && test.status === 'Completed/Expired' ? 'selected' : ''}>Completed/Expired</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Test Description & Student Instructions *</label>
+            <textarea 
+              id="tst-desc" 
+              rows="3" 
+              required 
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500" 
+              placeholder="Explain the topic coverage, syllabus focus, and guidelines for students..."
+            >${test ? test.description : ''}</textarea>
+          </div>
+
+          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+            <button 
+              type="button" 
+              onclick="window.app.closeModal('admin-generic-modal')" 
+              class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit" 
+              class="px-5 py-2 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors cursor-pointer"
+            >
+              ${isEdit ? 'Save Changes' : 'Create Test & Proceed to Questions →'}
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    window.app.openModal('admin-generic-modal');
+  }
+
+  async saveTest(e, existingId = '') {
+    e.preventDefault();
+    const title = document.getElementById('tst-title').value.trim();
+    const subjectId = document.getElementById('tst-subject').value;
+    const topic = document.getElementById('tst-topic').value.trim();
+    const durationMinutes = parseInt(document.getElementById('tst-duration').value, 10);
+    const maximumMarks = parseFloat(document.getElementById('tst-maxmarks').value);
+    const marksPerCorrect = parseFloat(document.getElementById('tst-positive').value);
+    const negativeMarksPerWrong = parseFloat(document.getElementById('tst-negative').value);
+    const maxAttempts = parseInt(document.getElementById('tst-maxattempts').value, 10);
+    const status = document.getElementById('tst-status').value;
+    const description = document.getElementById('tst-desc').value.trim();
+
+    const subMap = {
+      'sub-1': 'Accounting',
+      'sub-2': 'Business Law',
+      'sub-3': 'Business Economics',
+      'sub-4': 'Quantitative Aptitude'
+    };
+    const subjectName = subMap[subjectId] || 'Accounting';
+
+    const testPayload = {
+      id: existingId || ('tst-' + Date.now()),
+      title,
+      subjectId,
+      subject: subjectName,
+      chapter: topic,
+      topic,
+      durationMinutes,
+      maximumMarks,
+      marksPerCorrect,
+      negativeMarksPerWrong,
+      unattemptedMarks: 0.0,
+      maxAttempts,
+      status,
+      isPublished: (status === 'Published' || status === 'Live'),
+      description,
+      totalQuestions: existingId ? (window.store.getQuestionsByTestId(existingId).length) : 0,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (!existingId) {
+      testPayload.createdAt = new Date().toISOString();
+      testPayload.attemptsCount = 0;
+      window.store.addTest(testPayload);
+    } else {
+      window.store.updateTest(testPayload);
+    }
+
+    // Attempt backend sync
+    const user = window.auth.getCurrentUser();
+    const token = user ? (user.token || user.email) : '';
+    try {
+      await fetch('/api/tests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(testPayload)
+      });
+    } catch (err) {
+      console.warn('Backend sync error:', err);
+    }
+
+    window.app.showToast(existingId ? 'Test updated successfully!' : 'Test created! You can now add questions.', 'success');
+    this.renderMCQTests();
+    this.openQuestionBuilder(testPayload.id);
+  }
+
+  async deleteTest(id) {
+    if (!confirm('Are you sure you want to permanently delete this mock test and all its questions?')) return;
+
+    window.store.deleteTest(id);
+
+    const user = window.auth.getCurrentUser();
+    const token = user ? (user.token || user.email) : '';
+    try {
+      await fetch('/api/tests/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ id })
+      });
+    } catch (e) {}
+
+    window.app.showToast('Test and associated questions deleted.', 'info');
+    this.renderMCQTests();
+  }
+
+  // --- QUESTION BUILDER MODAL ---
+  openQuestionBuilder(testId) {
+    this.activeTestQuestionsId = testId;
+    const test = window.store.getTestById(testId);
+    if (!test) return;
+
+    const questions = window.store.getQuestionsByTestId(testId);
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    const posMark = typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0;
+    const negMark = typeof test.negativeMarksPerWrong === 'number' ? test.negativeMarksPerWrong : 0.5;
+
+    modalContent.innerHTML = `
+      <div class="p-6 sm:p-8 max-h-[90vh] overflow-y-auto">
+        <!-- Top Header & Summary -->
+        <div class="border-b border-slate-200 pb-4 mb-5">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <span class="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 mb-1">
+                ${test.subject || 'CA Foundation'} • ${test.topic || test.chapter || ''}
+              </span>
+              <h3 class="text-lg font-bold text-slate-900">${test.title}</h3>
+              <div class="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-1">
+                <span>Duration: <strong>${test.durationMinutes} mins</strong></span>
+                <span>•</span>
+                <span>Marking: <strong class="text-emerald-700">+${posMark}</strong> / <strong class="text-rose-600">-${negMark}</strong></span>
+                <span>•</span>
+                <span>Max Attempts: <strong>${test.maxAttempts || 3}</strong></span>
+                <span>•</span>
+                <span>Status: <strong class="text-slate-800">${test.status || 'Draft'}</strong></span>
+              </div>
+            </div>
+            <button onclick="window.app.closeModal('admin-generic-modal'); window.adminDashboard.renderMCQTests();" class="text-slate-400 hover:text-slate-600 p-1 self-start">
+              <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+          </div>
+
+          <!-- Action Toolbar -->
+          <div class="flex flex-wrap items-center gap-2.5 mt-5 pt-4 border-t border-slate-100">
+            <button 
+              onclick="window.adminDashboard.openQuestionForm()"
+              class="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <i data-lucide="plus" class="w-4 h-4"></i> + Add Question
+            </button>
+            <button 
+              onclick="window.adminDashboard.openPdfImportModal('${testId}')"
+              class="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <i data-lucide="file-up" class="w-4 h-4"></i> Import from PDF
+            </button>
+            <button 
+              onclick="window.adminDashboard.previewTest('${testId}')"
+              class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <i data-lucide="play" class="w-4 h-4"></i> PREVIEW TEST
+            </button>
+            <button 
+              onclick="window.adminDashboard.openPublishModal('${testId}')"
+              class="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 ml-auto cursor-pointer"
+            >
+              <i data-lucide="send" class="w-4 h-4"></i> Publish Workflow
+            </button>
+          </div>
+        </div>
+
+        <!-- Questions List -->
+        <div class="space-y-4">
+          ${questions.length === 0 ? `
+            <div class="text-center py-12 bg-slate-50 border border-dashed border-slate-200 rounded-xl p-8">
+              <i data-lucide="help-circle" class="w-10 h-10 text-slate-300 mx-auto mb-2"></i>
+              <h4 class="text-sm font-bold text-slate-700">No questions added to this test yet.</h4>
+              <p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                Use <strong>+ Add Question</strong> to manually author rich text questions, or <strong>Import from PDF</strong> to automatically extract MCQs.
+              </p>
+            </div>
+          ` : questions.map((q, idx) => {
+            const hasQImage = !!q.questionImage;
+            const hasOptImages = q.optionImages && Object.values(q.optionImages).some(Boolean);
+            const isDraft = !!q.isDraft;
+            const isDuplicate = !!q.isDuplicate;
+            const hasAiSuggested = !!q.aiSuggestedAnswer;
+            const isCorrectSet = !!q.correctOption;
+
+            return `
+              <div class="bg-white border ${isDuplicate ? 'border-rose-300 ring-1 ring-rose-200' : (isDraft ? 'border-amber-300 bg-amber-50/20' : 'border-slate-200')} rounded-xl p-4 shadow-sm text-xs space-y-3 transition-all">
+                <!-- Question Card Header -->
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-[11px]">
+                      Question ${idx + 1}
+                    </span>
+                    ${isDraft ? `
+                      <span class="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded bg-amber-100 text-amber-900 border border-amber-300">
+                        DRAFT / NEEDS REVIEW
+                      </span>
+                    ` : ''}
+                    ${isDuplicate ? `
+                      <span class="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded bg-rose-100 text-rose-900 border border-rose-300 flex items-center gap-1">
+                        <i data-lucide="alert-triangle" class="w-3 h-3"></i> Possible Duplicate Question
+                      </span>
+                    ` : ''}
+                    ${hasQImage ? `<span class="px-2 py-0.5 text-[10px] font-semibold rounded bg-purple-50 text-purple-700">Image Prompt</span>` : ''}
+                    ${hasOptImages ? `<span class="px-2 py-0.5 text-[10px] font-semibold rounded bg-indigo-50 text-indigo-700">Image Options</span>` : ''}
+                  </div>
+
+                  <!-- Reorder & Action Controls -->
+                  <div class="flex items-center gap-1.5">
+                    <button 
+                      onclick="window.adminDashboard.moveQuestion('${q.id}', -1)"
+                      ${idx === 0 ? 'disabled' : ''}
+                      class="p-1 text-slate-500 hover:text-slate-800 disabled:opacity-30 disabled:cursor-not-allowed rounded"
+                      title="Move Question Up"
+                    >
+                      <i data-lucide="arrow-up" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <button 
+                      onclick="window.adminDashboard.moveQuestion('${q.id}', 1)"
+                      ${idx === questions.length - 1 ? 'disabled' : ''}
+                      class="p-1 text-slate-500 hover:text-slate-800 disabled:opacity-30 disabled:cursor-not-allowed rounded"
+                      title="Move Question Down"
+                    >
+                      <i data-lucide="arrow-down" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <span class="text-slate-300">|</span>
+                    <button 
+                      onclick="window.adminDashboard.openQuestionForm('${q.id}')" 
+                      class="text-blue-600 hover:text-blue-800 font-bold px-1.5 py-0.5"
+                    >
+                      Edit
+                    </button>
+                    <button 
+                      onclick="window.adminDashboard.duplicateQuestion('${q.id}')" 
+                      class="text-indigo-600 hover:text-indigo-800 font-semibold px-1.5 py-0.5"
+                      title="Duplicate Question"
+                    >
+                      Duplicate
+                    </button>
+                    <button 
+                      onclick="window.adminDashboard.deleteQuestion('${q.id}')" 
+                      class="text-rose-600 hover:text-rose-800 font-semibold px-1.5 py-0.5"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Prompt Body -->
+                <div class="space-y-2">
+                  <div class="font-medium text-slate-800 text-sm leading-relaxed">${q.text}</div>
+                  ${hasQImage ? `
+                    <div class="my-2 max-w-sm rounded-lg overflow-hidden border border-slate-200">
+                      <img src="${q.questionImage}" alt="Question Diagram" class="w-full h-auto object-contain max-h-48 bg-slate-50">
+                    </div>
+                  ` : ''}
+                </div>
+
+                <!-- Options A, B, C, D Grid -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-700 bg-slate-50/70 p-3 rounded-lg border border-slate-100">
+                  ${['A', 'B', 'C', 'D'].map(optKey => {
+                    const optText = q['option' + optKey] || '';
+                    const optImg = q.optionImages ? q.optionImages[optKey] : null;
+                    const isCorrect = q.correctOption === optKey;
+
+                    return `
+                      <div class="p-2 rounded border ${isCorrect ? 'border-emerald-500 bg-emerald-50/70 text-emerald-900 font-semibold' : 'border-slate-200 bg-white'} flex items-start gap-2">
+                        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${isCorrect ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-700'}">
+                          ${optKey}
+                        </span>
+                        <div class="flex-1 space-y-1">
+                          ${optText ? `<div>${optText}</div>` : ''}
+                          ${optImg ? `<img src="${optImg}" class="max-h-20 rounded border border-slate-200 object-contain">` : ''}
+                        </div>
+                        ${isCorrect ? `<i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>` : ''}
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+
+                <!-- Status / Correct Key / AI Suggested Footer -->
+                <div class="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px]">
+                  <div class="flex items-center gap-2">
+                    ${hasAiSuggested ? `
+                      <span class="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-bold border border-blue-200">
+                        AI Suggested Answer: Option ${q.aiSuggestedAnswer}
+                      </span>
+                    ` : ''}
+                    
+                    ${isCorrectSet ? `
+                      <span class="text-emerald-800 font-semibold bg-emerald-50 px-2 py-0.5 rounded">
+                        ✓ Verified Key: <strong>Option ${q.correctOption}</strong>
+                      </span>
+                    ` : `
+                      <span class="text-rose-700 font-bold bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                        ⚠ Correct Answer: Not Set (Admin verification required)
+                      </span>
+                    `}
+                  </div>
+
+                  ${isDraft ? `
+                    <button 
+                      onclick="window.adminDashboard.verifyQuestionDraft('${q.id}')"
+                      class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded text-[10px] transition-colors cursor-pointer"
+                    >
+                      ✓ Mark as Verified
+                    </button>
+                  ` : ''}
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    window.app.openModal('admin-generic-modal');
+  }
+
+  // --- MANUAL QUESTION BUILDER FORM WITH RICH TEXT & IMAGES ---
+  openQuestionForm(questionId = null) {
+    const testId = this.activeTestQuestionsId;
+    const test = window.store.getTestById(testId);
+    const existingQ = questionId ? window.store.getQuestions().find(x => x.id === questionId) : null;
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    const optTypes = existingQ && existingQ.optionTypes ? existingQ.optionTypes : { A: 'text', B: 'text', C: 'text', D: 'text' };
+    const optImages = existingQ && existingQ.optionImages ? existingQ.optionImages : { A: null, B: null, C: null, D: null };
+
+    modalContent.innerHTML = `
+      <div class="p-6 sm:p-8 max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
+          <div>
+            <h3 class="text-base font-bold text-slate-900">${existingQ ? 'Edit MCQ Question' : 'Add MCQ Question'}</h3>
+            <p class="text-xs text-slate-500">Supports rich text, equations, formulas, tables, and mixed image options</p>
+          </div>
+          <button onclick="window.adminDashboard.openQuestionBuilder('${testId}')" class="text-slate-400 hover:text-slate-600 p-1">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <form onsubmit="window.adminDashboard.saveQuestion(event, '${questionId || ''}')" class="space-y-5 text-xs">
+          <!-- Question Prompt Section -->
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="font-bold text-slate-800">Question Prompt / Text *</label>
+              <!-- Math & Formatting Toolbar -->
+              <div class="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 text-[11px]">
+                <button type="button" onclick="window.adminDashboard.insertFormat('<b>', '</b>')" class="px-2 py-0.5 font-bold hover:bg-white rounded transition-colors" title="Bold">B</button>
+                <button type="button" onclick="window.adminDashboard.insertFormat('<i>', '</i>')" class="px-2 py-0.5 italic hover:bg-white rounded transition-colors" title="Italic">I</button>
+                <button type="button" onclick="window.adminDashboard.insertFormat('<u>', '</u>')" class="px-2 py-0.5 underline hover:bg-white rounded transition-colors" title="Underline">U</button>
+                <span class="text-slate-300">|</span>
+                <button type="button" onclick="window.adminDashboard.insertFormat('<sup>', '</sup>')" class="px-2 py-0.5 hover:bg-white rounded transition-colors" title="Superscript">x²</button>
+                <button type="button" onclick="window.adminDashboard.insertFormat('<sub>', '</sub>')" class="px-2 py-0.5 hover:bg-white rounded transition-colors" title="Subscript">x₂</button>
+                <span class="text-slate-300">|</span>
+                <button type="button" onclick="window.adminDashboard.insertSymbol('√')" class="px-1.5 py-0.5 hover:bg-white rounded" title="Square Root">√</button>
+                <button type="button" onclick="window.adminDashboard.insertSymbol('∑')" class="px-1.5 py-0.5 hover:bg-white rounded" title="Summation">∑</button>
+                <button type="button" onclick="window.adminDashboard.insertSymbol('π')" class="px-1.5 py-0.5 hover:bg-white rounded" title="Pi">π</button>
+                <button type="button" onclick="window.adminDashboard.insertSymbol('±')" class="px-1.5 py-0.5 hover:bg-white rounded" title="Plus Minus">±</button>
+                <button type="button" onclick="window.adminDashboard.insertSymbol('≠')" class="px-1.5 py-0.5 hover:bg-white rounded" title="Not Equal">≠</button>
+                <button type="button" onclick="window.adminDashboard.insertSymbol('≤')" class="px-1.5 py-0.5 hover:bg-white rounded" title="Less or Equal">≤</button>
+                <button type="button" onclick="window.adminDashboard.insertSymbol('≥')" class="px-1.5 py-0.5 hover:bg-white rounded" title="Greater or Equal">≥</button>
+                <button type="button" onclick="window.adminDashboard.insertTable()" class="px-2 py-0.5 hover:bg-white rounded font-semibold text-blue-600" title="Insert Accounting Table">+ Table</button>
+              </div>
+            </div>
+
+            <textarea 
+              id="q-text" 
+              rows="3" 
+              required 
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500" 
+              placeholder="Enter question text here. HTML tags (<b>, <i>, <sup>, etc.) and formulas are supported..."
+            >${existingQ ? existingQ.text : ''}</textarea>
+          </div>
+
+          <!-- Question Image Upload (Optional) -->
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+            <label class="block font-bold text-slate-700">Question Image / Diagram (Optional)</label>
+            <p class="text-[11px] text-slate-500">Upload diagram, balance sheet excerpt, or mathematical formula image (&lt;5 MB)</p>
+            <div class="flex items-center gap-3">
+              <input 
+                type="file" 
+                id="q-img-file" 
+                accept="image/*"
+                onchange="window.adminDashboard.handleQuestionImageUpload(this)" 
+                class="text-xs file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+              >
+              <input type="hidden" id="q-img-url" value="${existingQ && existingQ.questionImage ? existingQ.questionImage : ''}">
+            </div>
+            <div id="q-img-preview-container" class="${existingQ && existingQ.questionImage ? '' : 'hidden'} mt-2 relative inline-block">
+              <img id="q-img-preview" src="${existingQ && existingQ.questionImage ? existingQ.questionImage : ''}" class="max-h-32 rounded border border-slate-300">
+              <button type="button" onclick="window.adminDashboard.removeQuestionImage()" class="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full p-1 shadow hover:bg-rose-700">
+                <i data-lucide="x" class="w-3 h-3"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- 4 Options (A, B, C, D) with Text / Image Toggles -->
+          <div class="space-y-3">
+            <label class="block font-bold text-slate-800 text-sm">MCQ Options (A, B, C, D) *</label>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              ${['A', 'B', 'C', 'D'].map(optKey => {
+                const optVal = existingQ ? (existingQ['option' + optKey] || '') : '';
+                const optImg = optImages[optKey];
+                const isImageMode = optTypes[optKey] === 'image';
+
+                return `
+                  <div class="border border-slate-200 rounded-xl p-3 bg-white space-y-2">
+                    <div class="flex items-center justify-between">
+                      <span class="w-6 h-6 rounded-full bg-slate-100 text-slate-800 font-bold text-xs flex items-center justify-center border border-slate-200">
+                        ${optKey}
+                      </span>
+                      <div class="flex items-center gap-2">
+                        <label class="text-[11px] font-medium text-slate-600 flex items-center gap-1 cursor-pointer">
+                          <input 
+                            type="radio" 
+                            name="opt-mode-${optKey}" 
+                            value="text" 
+                            ${!isImageMode ? 'checked' : ''} 
+                            onchange="window.adminDashboard.toggleOptionMode('${optKey}', 'text')"
+                          > Text
+                        </label>
+                        <label class="text-[11px] font-medium text-slate-600 flex items-center gap-1 cursor-pointer">
+                          <input 
+                            type="radio" 
+                            name="opt-mode-${optKey}" 
+                            value="image" 
+                            ${isImageMode ? 'checked' : ''} 
+                            onchange="window.adminDashboard.toggleOptionMode('${optKey}', 'image')"
+                          > Image
+                        </label>
+                      </div>
+                    </div>
+
+                    <!-- Text Option Input -->
+                    <div id="opt-text-wrap-${optKey}" class="${isImageMode ? 'hidden' : ''}">
+                      <input 
+                        type="text" 
+                        id="q-opt${optKey}" 
+                        value="${optVal}"
+                        placeholder="Option ${optKey} text..."
+                        class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                      >
+                    </div>
+
+                    <!-- Image Option Input -->
+                    <div id="opt-img-wrap-${optKey}" class="${!isImageMode ? 'hidden' : ''} space-y-1.5">
+                      <input 
+                        type="file" 
+                        accept="image/*"
+                        onchange="window.adminDashboard.handleOptionImageUpload(this, '${optKey}')"
+                        class="text-[11px] file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[11px] file:font-semibold file:bg-slate-100 file:text-slate-700"
+                      >
+                      <input type="hidden" id="q-opt${optKey}-img-url" value="${optImg || ''}">
+                      <div id="opt-img-preview-container-${optKey}" class="${optImg ? '' : 'hidden'} relative inline-block">
+                        <img id="opt-img-preview-${optKey}" src="${optImg || ''}" class="max-h-20 rounded border border-slate-200">
+                        <button type="button" onclick="window.adminDashboard.removeOptionImage('${optKey}')" class="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full p-0.5 shadow">
+                          <i data-lucide="x" class="w-2.5 h-2.5"></i>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <!-- Correct Answer Selector -->
+          <div class="bg-emerald-50/70 border border-emerald-200 rounded-xl p-4 space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="font-bold text-emerald-950 text-sm">Correct Answer Key *</label>
+              <span class="text-[10px] font-bold text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-200">
+                🔒 Private: Protected until student submits
+              </span>
+            </div>
+            <p class="text-[11px] text-emerald-800">Select which option is authoritative. This is kept strictly private on the server.</p>
+
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+              ${['A', 'B', 'C', 'D'].map(k => `
+                <label class="flex items-center justify-center gap-2 p-2.5 rounded-lg border bg-white border-emerald-300 font-bold text-slate-800 hover:bg-emerald-100/50 cursor-pointer transition-colors">
+                  <input 
+                    type="radio" 
+                    name="q-correct-choice" 
+                    value="${k}" 
+                    ${existingQ && existingQ.correctOption === k ? 'checked' : ''}
+                    class="text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
+                  >
+                  <span>Option ${k}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Explanation / ICAI Standard Reference -->
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">ICAI Solution Explanation & Conceptual Reference</label>
+            <textarea 
+              id="q-explanation" 
+              rows="2" 
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" 
+              placeholder="Explain the solution formula, section reference, or accounting principle..."
+            >${existingQ ? (existingQ.explanation || '') : ''}</textarea>
+          </div>
+
+          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+            <button 
+              type="button" 
+              onclick="window.adminDashboard.openQuestionBuilder('${testId}')" 
+              class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+            >
+              Back
+            </button>
+            <button 
+              type="submit" 
+              class="px-6 py-2 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm cursor-pointer"
+            >
+              ${existingQ ? 'Update Question' : 'Save Question'}
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  insertFormat(openTag, closeTag) {
+    const txtArea = document.getElementById('q-text');
+    if (!txtArea) return;
+    const start = txtArea.selectionStart;
+    const end = txtArea.selectionEnd;
+    const sel = txtArea.value.substring(start, end);
+    const replacement = openTag + (sel || 'text') + closeTag;
+    txtArea.value = txtArea.value.substring(0, start) + replacement + txtArea.value.substring(end);
+    txtArea.focus();
+  }
+
+  insertSymbol(sym) {
+    const txtArea = document.getElementById('q-text');
+    if (!txtArea) return;
+    const start = txtArea.selectionStart;
+    txtArea.value = txtArea.value.substring(0, start) + sym + txtArea.value.substring(start);
+    txtArea.focus();
+  }
+
+  insertTable() {
+    const txtArea = document.getElementById('q-text');
+    if (!txtArea) return;
+    const tableHtml = '\n<table class="w-full text-xs border border-slate-300 my-2"><thead><tr class="bg-slate-100"><th class="border p-1">Particulars</th><th class="border p-1">Amount (₹)</th></tr></thead><tbody><tr><td class="border p-1">Item 1</td><td class="border p-1">10,000</td></tr></tbody></table>\n';
+    txtArea.value += tableHtml;
+    txtArea.focus();
+  }
+
+  async handleQuestionImageUpload(input) {
+    if (!input.files || !input.files[0]) return;
+    const file = input.files[0];
+    const res = await window.secureBackend.uploadImageFile(file);
+    if (res.success) {
+      document.getElementById('q-img-url').value = res.imageUrl;
+      document.getElementById('q-img-preview').src = res.imageUrl;
+      document.getElementById('q-img-preview-container').classList.remove('hidden');
+      window.app.showToast('Question image attached.', 'success');
+    } else {
+      window.app.showToast(res.error || 'Failed to upload image.', 'error');
+    }
+  }
+
+  removeQuestionImage() {
+    document.getElementById('q-img-url').value = '';
+    document.getElementById('q-img-preview-container').classList.add('hidden');
+    const fInput = document.getElementById('q-img-file');
+    if (fInput) fInput.value = '';
+  }
+
+  toggleOptionMode(optKey, mode) {
+    const textWrap = document.getElementById(`opt-text-wrap-${optKey}`);
+    const imgWrap = document.getElementById(`opt-img-wrap-${optKey}`);
+    if (mode === 'image') {
+      textWrap.classList.add('hidden');
+      imgWrap.classList.remove('hidden');
+    } else {
+      imgWrap.classList.add('hidden');
+      textWrap.classList.remove('hidden');
+    }
+  }
+
+  async handleOptionImageUpload(input, optKey) {
+    if (!input.files || !input.files[0]) return;
+    const file = input.files[0];
+    const res = await window.secureBackend.uploadImageFile(file);
+    if (res.success) {
+      document.getElementById(`q-opt${optKey}-img-url`).value = res.imageUrl;
+      document.getElementById(`opt-img-preview-${optKey}`).src = res.imageUrl;
+      document.getElementById(`opt-img-preview-container-${optKey}`).classList.remove('hidden');
+      window.app.showToast(`Option ${optKey} image attached.`, 'success');
+    } else {
+      window.app.showToast(res.error || 'Failed to upload image.', 'error');
+    }
+  }
+
+  removeOptionImage(optKey) {
+    document.getElementById(`q-opt${optKey}-img-url`).value = '';
+    document.getElementById(`opt-img-preview-container-${optKey}`).classList.add('hidden');
+  }
+
+  async saveQuestion(e, existingQId = '') {
+    e.preventDefault();
+    const testId = this.activeTestQuestionsId;
+    const test = window.store.getTestById(testId);
+    const existingQs = window.store.getQuestionsByTestId(testId);
+
+    const text = document.getElementById('q-text').value.trim();
+    const qImgUrl = document.getElementById('q-img-url').value;
+
+    const optA = document.getElementById('q-optA').value.trim();
+    const optB = document.getElementById('q-optB').value.trim();
+    const optC = document.getElementById('q-optC').value.trim();
+    const optD = document.getElementById('q-optD').value.trim();
+
+    const optAImg = document.getElementById('q-optA-img-url').value;
+    const optBImg = document.getElementById('q-optB-img-url').value;
+    const optCImg = document.getElementById('q-optC-img-url').value;
+    const optDImg = document.getElementById('q-optD-img-url').value;
+
+    const selectedRadio = document.querySelector('input[name="q-correct-choice"]:checked');
+    const correctOption = selectedRadio ? selectedRadio.value : null;
+
+    if (!correctOption) {
+      window.app.showToast('Please select the correct answer key (A, B, C, or D).', 'warning');
+      return;
+    }
+
+    const explanation = document.getElementById('q-explanation').value.trim();
+
+    const qPayload = {
+      id: existingQId || ('q-' + Date.now()),
+      testId: testId,
+      number: existingQId ? (existingQs.find(x => x.id === existingQId)?.number || 1) : (existingQs.length + 1),
+      text,
+      questionType: qImgUrl ? (text ? 'both' : 'image') : 'text',
+      questionImage: qImgUrl || null,
+      optionA: optA || 'Option A',
+      optionB: optB || 'Option B',
+      optionC: optC || 'Option C',
+      optionD: optD || 'Option D',
+      optionTypes: {
+        A: optAImg ? 'image' : 'text',
+        B: optBImg ? 'image' : 'text',
+        C: optCImg ? 'image' : 'text',
+        D: optDImg ? 'image' : 'text'
+      },
+      optionImages: {
+        A: optAImg || null,
+        B: optBImg || null,
+        C: optCImg || null,
+        D: optDImg || null
+      },
+      correctOption,
+      marks: test ? (test.marksPerCorrect || 2.0) : 2.0,
+      explanation: explanation || 'Refer to ICAI Module.',
+      isDraft: false, // Explicit admin authoring is verified
+      isDuplicate: false
+    };
+
+    if (existingQId) {
+      window.store.updateQuestion(qPayload);
+    } else {
+      window.store.addQuestion(qPayload);
+    }
+
+    if (test) {
+      const allQs = window.store.getQuestionsByTestId(testId);
+      test.totalQuestions = allQs.length;
+      test.maximumMarks = allQs.length * (test.marksPerCorrect || 2.0);
+      window.store.updateTest(test);
+    }
+
+    // Backend sync
+    const user = window.auth.getCurrentUser();
+    const token = user ? (user.token || user.email) : '';
+    try {
+      await fetch('/api/tests/questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(qPayload)
+      });
+    } catch (e) {}
+
+    window.app.showToast('Question saved successfully!', 'success');
+    this.openQuestionBuilder(testId);
+  }
+
+  async duplicateQuestion(questionId) {
+    const q = window.store.duplicateQuestion(questionId);
+    if (!q) return;
+
+    const user = window.auth.getCurrentUser();
+    const token = user ? (user.token || user.email) : '';
+    try {
+      await fetch('/api/tests/questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ action: 'duplicate', questionId })
+      });
+    } catch (e) {}
+
+    window.app.showToast('Question duplicated.', 'success');
+    this.openQuestionBuilder(this.activeTestQuestionsId);
+  }
+
+  async moveQuestion(questionId, direction) {
+    const testId = this.activeTestQuestionsId;
+    const questions = window.store.getQuestionsByTestId(testId);
+    const idx = questions.findIndex(q => q.id === questionId);
+    if (idx === -1) return;
+
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= questions.length) return;
+
+    // Swap
+    const temp = questions[idx];
+    questions[idx] = questions[targetIdx];
+    questions[targetIdx] = temp;
+
+    const orderIds = questions.map(q => q.id);
+    window.store.reorderQuestions(testId, orderIds);
+
+    const user = window.auth.getCurrentUser();
+    const token = user ? (user.token || user.email) : '';
+    try {
+      await fetch('/api/tests/questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ action: 'reorder', testId, questionIds: orderIds })
+      });
+    } catch (e) {}
+
+    this.openQuestionBuilder(testId);
+  }
+
+  async deleteQuestion(id) {
+    if (!confirm('Delete this question permanently?')) return;
+    const testId = this.activeTestQuestionsId;
+    window.store.deleteQuestion(id);
+
+    const test = window.store.getTestById(testId);
+    if (test) {
+      const remaining = window.store.getQuestionsByTestId(testId);
+      test.totalQuestions = remaining.length;
+      test.maximumMarks = remaining.length * (test.marksPerCorrect || 2.0);
+      window.store.updateTest(test);
+    }
+
+    const user = window.auth.getCurrentUser();
+    const token = user ? (user.token || user.email) : '';
+    try {
+      await fetch('/api/tests/questions/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ id })
+      });
+    } catch (e) {}
+
+    window.app.showToast('Question deleted.', 'info');
+    this.openQuestionBuilder(testId);
+  }
+
+  verifyQuestionDraft(questionId) {
+    const q = window.store.getQuestions().find(x => x.id === questionId);
+    if (!q) return;
+
+    if (!q.correctOption) {
+      window.app.showToast('Please edit the question and select the correct answer key first.', 'warning');
+      this.openQuestionForm(questionId);
+      return;
+    }
+
+    q.isDraft = false;
+    q.isDuplicate = false;
+    window.store.updateQuestion(q);
+    window.app.showToast('Question marked as verified.', 'success');
+    this.openQuestionBuilder(this.activeTestQuestionsId);
+  }
+
+  // --- PDF MCQ IMPORT MODAL ---
+  openPdfImportModal(testId) {
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    modalContent.innerHTML = `
+      <div class="p-6">
+        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Import MCQs from PDF Document</h3>
+            <p class="text-xs text-slate-500">Automatically extracts individual questions, options, suggested answer keys, and preserves diagrams</p>
+          </div>
+          <button onclick="window.adminDashboard.openQuestionBuilder('${testId}')" class="text-slate-400 hover:text-slate-600">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="space-y-4 text-xs">
+          <!-- Important PDF Rule Alert -->
+          <div class="bg-amber-50 border border-amber-200 p-3.5 rounded-xl text-amber-950 space-y-1">
+            <div class="font-bold flex items-center gap-1.5 text-amber-900">
+              <i data-lucide="shield-alert" class="w-4 h-4 text-amber-600"></i>
+              MANDATORY DRAFT / REVIEW POLICY
+            </div>
+            <p class="leading-relaxed">
+              Imported questions are <strong>never published automatically</strong>. All extracted questions will be staged as <strong>DRAFT / NEEDS REVIEW</strong> with AI suggested answers highlighted for mandatory admin verification before publication.
+            </p>
+          </div>
+
+          <!-- File Upload Zone -->
+          <div class="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center bg-slate-50 hover:bg-slate-100/60 transition-colors">
+            <i data-lucide="file-up" class="w-10 h-10 text-indigo-500 mx-auto mb-2"></i>
+            <h4 class="font-bold text-slate-800">Select PDF Question Paper</h4>
+            <p class="text-[11px] text-slate-500 mt-0.5 mb-3">Accepts official ICAI Mock Test, RTP, or MTP PDF files (&lt;15 MB)</p>
+            <input 
+              type="file" 
+              id="pdf-import-file" 
+              accept=".pdf,application/pdf"
+              class="text-xs file:mr-3 file:py-1.5 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 cursor-pointer"
+            >
+          </div>
+
+          <!-- Direct OCR Text Paste Area (Optional Override) -->
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Or Paste MCQ Text directly:</label>
+            <textarea 
+              id="pdf-raw-text" 
+              rows="4" 
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono" 
+              placeholder="e.g.\n1. What is the statutory notice period for board meetings?\n(A) 3 days\n(B) 7 days\n(C) 14 days\n(D) 21 days\nAnswer: B"
+            ></textarea>
+          </div>
+
+          <div id="pdf-import-status" class="hidden p-3 rounded-lg text-xs"></div>
+
+          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+            <button 
+              type="button" 
+              onclick="window.adminDashboard.openQuestionBuilder('${testId}')" 
+              class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button 
+              type="button" 
+              onclick="window.adminDashboard.executePdfImport('${testId}')"
+              id="btn-run-pdf-import"
+              class="px-5 py-2 font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer"
+            >
+              <i data-lucide="sparkles" class="w-4 h-4"></i> Extract & Review Questions
+            </button>
           </div>
         </div>
       </div>
@@ -173,7 +2977,243 @@ class AdminDashboard {
     if (window.lucide) window.lucide.createIcons();
   }
 
-  // --- LECTURES TAB ---
+  async executePdfImport(testId) {
+    const fileInput = document.getElementById('pdf-import-file');
+    const rawText = document.getElementById('pdf-raw-text').value.trim();
+    const statusBox = document.getElementById('pdf-import-status');
+    const btn = document.getElementById('btn-run-pdf-import');
+
+    const file = fileInput && fileInput.files ? fileInput.files[0] : null;
+    if (!file && !rawText) {
+      window.app.showToast('Please select a PDF file or paste question text.', 'warning');
+      return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Processing & Parsing...';
+    statusBox.className = 'p-3 rounded-lg text-xs bg-blue-50 text-blue-800 border border-blue-200 block';
+    statusBox.innerHTML = 'Analyzing document structure, extracting questions and identifying answer patterns...';
+    if (window.lucide) window.lucide.createIcons();
+
+    const res = await window.secureBackend.importMCQFromPdf(file, testId, rawText);
+
+    if (res.success && res.questions && res.questions.length > 0) {
+      // Add extracted questions to store as DRAFT
+      const test = window.store.getTestById(testId);
+      const existingQs = window.store.getQuestionsByTestId(testId);
+
+      res.questions.forEach((q, idx) => {
+        q.id = 'q-' + Date.now() + '-' + idx;
+        q.testId = testId;
+        q.number = existingQs.length + idx + 1;
+        q.isDraft = true; // MANDATORY DRAFT
+        window.store.addQuestion(q);
+      });
+
+      if (test) {
+        test.totalQuestions = (existingQs.length + res.questions.length);
+        test.maximumMarks = test.totalQuestions * (test.marksPerCorrect || 2.0);
+        window.store.updateTest(test);
+      }
+
+      window.app.showToast(`Successfully extracted ${res.questions.length} questions into Draft Review!`, 'success');
+      this.openQuestionBuilder(testId);
+    } else {
+      btn.disabled = false;
+      btn.innerHTML = '<i data-lucide="sparkles" class="w-4 h-4"></i> Extract & Review Questions';
+      statusBox.className = 'p-3 rounded-lg text-xs bg-rose-50 text-rose-800 border border-rose-200 block';
+      statusBox.innerHTML = res.error || 'Could not parse questions from document. Please check PDF content format.';
+      if (window.lucide) window.lucide.createIcons();
+    }
+  }
+
+  // --- MANDATORY ADMIN PREVIEW MODE ---
+  previewTest(testId) {
+    const test = window.store.getTestById(testId);
+    if (!test) {
+      window.app.showToast('Test not found.', 'error');
+      return;
+    }
+    const questions = window.store.getQuestionsByTestId(testId);
+    if (questions.length === 0) {
+      window.app.showToast('Cannot preview test with 0 questions. Please add questions first.', 'warning');
+      return;
+    }
+
+    // Close admin modal
+    window.app.closeModal('admin-generic-modal');
+
+    // Launch student exam interface in Preview Mode
+    window.testEngine.startTest(testId, { isPreview: true });
+  }
+
+  // --- PUBLISHING CONFIRMATION WORKFLOW ---
+  openPublishModal(testId) {
+    const test = window.store.getTestById(testId);
+    if (!test) return;
+
+    const questions = window.store.getQuestionsByTestId(testId);
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    const draftsCount = questions.filter(q => q.isDraft).length;
+    const duplicatesCount = questions.filter(q => q.isDuplicate).length;
+    const unsetAnswersCount = questions.filter(q => !q.correctOption).length;
+    const canPublish = questions.length > 0 && unsetAnswersCount === 0;
+
+    modalContent.innerHTML = `
+      <div class="p-6">
+        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Publish Confirmation & Schedule</h3>
+            <p class="text-xs text-slate-500">Step 6 of 6 in the verified authoring workflow</p>
+          </div>
+          <button onclick="window.adminDashboard.openQuestionBuilder('${testId}')" class="text-slate-400 hover:text-slate-600">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="space-y-4 text-xs">
+          <!-- Summary Checklist -->
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
+            <h4 class="font-bold text-slate-800 uppercase tracking-wider text-[11px]">Examination Overview</h4>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-600">
+              <div>Test: <strong>${test.title}</strong></div>
+              <div>Subject: <strong>${test.subject || 'Accounting'}</strong></div>
+              <div>Topic: <strong>${test.topic || test.chapter || 'Full Syllabus'}</strong></div>
+              <div>Total Questions: <strong>${questions.length} MCQs</strong></div>
+              <div>Duration: <strong>${test.durationMinutes} mins</strong></div>
+              <div>Marking: <strong class="text-emerald-700">+${test.marksPerCorrect}</strong> / <strong class="text-rose-600">-${test.negativeMarksPerWrong}</strong></div>
+              <div>Attempt Limit: <strong>${test.maxAttempts || 3} allowed</strong></div>
+              <div>Current Status: <strong>${test.status || 'Draft'}</strong></div>
+            </div>
+          </div>
+
+          <!-- Pre-flight Validation Alerts -->
+          ${questions.length === 0 ? `
+            <div class="bg-rose-50 border border-rose-200 p-3 rounded-lg text-rose-800 font-bold flex items-center gap-2">
+              <i data-lucide="alert-circle" class="w-4 h-4"></i>
+              Cannot publish: The test has 0 questions. Please add questions before publishing.
+            </div>
+          ` : ''}
+
+          ${unsetAnswersCount > 0 ? `
+            <div class="bg-rose-50 border border-rose-200 p-3 rounded-lg text-rose-800 font-semibold flex items-center gap-2">
+              <i data-lucide="alert-circle" class="w-4 h-4"></i>
+              Warning: ${unsetAnswersCount} question(s) do not have a verified correct answer. Admin verification is required.
+            </div>
+          ` : ''}
+
+          ${draftsCount > 0 ? `
+            <div class="bg-amber-50 border border-amber-200 p-3 rounded-lg text-amber-800 flex items-center gap-2">
+              <i data-lucide="info" class="w-4 h-4"></i>
+              Notice: ${draftsCount} question(s) are still flagged as draft. Publishing will verify and release all questions.
+            </div>
+          ` : ''}
+
+          <!-- Schedule Options -->
+          <div class="space-y-3 pt-2">
+            <label class="block font-bold text-slate-800">Select Release Mode:</label>
+            <div class="space-y-2">
+              <label class="flex items-center gap-2 p-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 cursor-pointer">
+                <input type="radio" name="publish-mode" value="immediate" checked onchange="document.getElementById('schedule-picker-box').classList.add('hidden')">
+                <div>
+                  <strong class="text-slate-900 block">Publish Immediately</strong>
+                  <span class="text-slate-500 text-[11px]">Make visible to all enrolled students right now.</span>
+                </div>
+              </label>
+
+              <label class="flex items-center gap-2 p-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 cursor-pointer">
+                <input type="radio" name="publish-mode" value="schedule" onchange="document.getElementById('schedule-picker-box').classList.remove('hidden')">
+                <div>
+                  <strong class="text-slate-900 block">Schedule for Specific Date & Time</strong>
+                  <span class="text-slate-500 text-[11px]">Automatically releases at the scheduled future timestamp.</span>
+                </div>
+              </label>
+
+              <div id="schedule-picker-box" class="hidden p-3 bg-purple-50/50 border border-purple-200 rounded-xl space-y-2">
+                <label class="block font-bold text-purple-900">Publish Date & Time:</label>
+                <input type="datetime-local" id="tst-schedule-datetime" class="px-3 py-2 border border-purple-300 rounded-lg bg-white w-full">
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+            <button 
+              type="button" 
+              onclick="window.adminDashboard.openQuestionBuilder('${testId}')" 
+              class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+            >
+              Back to Builder
+            </button>
+            <button 
+              type="button" 
+              onclick="window.adminDashboard.confirmPublish('${testId}')"
+              ${!canPublish ? 'disabled' : ''}
+              class="px-6 py-2 font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg shadow-sm transition-colors cursor-pointer"
+            >
+              Confirm & Publish
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  async confirmPublish(testId) {
+    const test = window.store.getTestById(testId);
+    if (!test) return;
+
+    const modeRadio = document.querySelector('input[name="publish-mode"]:checked');
+    const mode = modeRadio ? modeRadio.value : 'immediate';
+
+    let newStatus = 'Published';
+    let schedTime = null;
+
+    if (mode === 'schedule') {
+      const dtInput = document.getElementById('tst-schedule-datetime');
+      if (dtInput && dtInput.value) {
+        schedTime = new Date(dtInput.value).toISOString();
+        newStatus = 'Scheduled';
+      } else {
+        window.app.showToast('Please specify the scheduled date and time.', 'warning');
+        return;
+      }
+    }
+
+    test.status = newStatus;
+    test.isPublished = (newStatus === 'Published');
+    if (schedTime) test.scheduledPublishTime = schedTime;
+
+    // Verify any pending draft questions
+    const questions = window.store.getQuestionsByTestId(testId);
+    questions.forEach(q => {
+      q.isDraft = false;
+      q.isDuplicate = false;
+      window.store.updateQuestion(q);
+    });
+
+    window.store.updateTest(test);
+
+    // Backend sync
+    const user = window.auth.getCurrentUser();
+    const token = user ? (user.token || user.email) : '';
+    try {
+      await fetch('/api/tests/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ testId, status: newStatus, scheduledPublishTime: schedTime })
+      });
+    } catch (e) {}
+
+    window.app.closeModal('admin-generic-modal');
+    window.app.showToast(`Test successfully ${newStatus.toLowerCase()}!`, 'success');
+    this.renderMCQTests();
+  }
+
+  // --- 7. VIDEO LECTURES ---
   renderLectures() {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
@@ -194,7 +3234,7 @@ class AdminDashboard {
         </button>
       </div>
 
-      <div class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+      <div class="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
         <table class="w-full text-left text-sm">
           <thead>
             <tr class="border-b border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-500 uppercase tracking-wider">
@@ -232,19 +3272,8 @@ class AdminDashboard {
                       ${lec.isPublished ? 'Published' : 'Draft'}
                     </button>
                   </td>
-                  <td class="py-3 px-4 text-right space-x-2">
-                    <button 
-                      onclick="window.adminDashboard.openLectureModal('${lec.id}')"
-                      class="text-xs font-semibold text-blue-600 hover:text-blue-800"
-                    >
-                      Edit
-                    </button>
-                    <button 
-                      onclick="window.adminDashboard.deleteLecture('${lec.id}')"
-                      class="text-xs font-semibold text-rose-600 hover:text-rose-800"
-                    >
-                      Delete
-                    </button>
+                  <td class="py-3 px-4 text-right">
+                    <button onclick="window.adminDashboard.deleteLecture('${lec.id}')" class="text-xs font-semibold text-rose-600 hover:text-rose-800">Delete</button>
                   </td>
                 </tr>
               `;
@@ -257,68 +3286,58 @@ class AdminDashboard {
     if (window.lucide) window.lucide.createIcons();
   }
 
-  openLectureModal(lectureId = null) {
-    this.activeEditingLectureId = lectureId;
-    const lecture = lectureId ? window.store.getLectures().find(l => l.id === lectureId) : null;
+  openLectureModal() {
     const subjects = window.store.getSubjects();
-
     const modalContent = document.getElementById('admin-generic-modal-content');
     if (!modalContent) return;
 
     modalContent.innerHTML = `
       <div class="p-6">
         <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
-          <h3 class="text-base font-bold text-slate-900">${lecture ? 'Edit Lecture' : 'Create New Lecture'}</h3>
+          <h3 class="text-base font-bold text-slate-900">Create New Lecture</h3>
           <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
             <i data-lucide="x" class="w-5 h-5"></i>
           </button>
         </div>
 
-        <form id="lecture-form" onsubmit="window.adminDashboard.saveLecture(event)" class="space-y-4 text-xs">
+        <form onsubmit="window.adminDashboard.saveLecture(event)" class="space-y-4 text-xs">
           <div>
             <label class="block font-bold text-slate-700 mb-1">Lecture Title</label>
-            <input type="text" id="lec-title" required value="${lecture ? lecture.title : ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="e.g. Ind AS 115 Revenue Recognition Practical">
+            <input type="text" id="lec-title" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="e.g. Ind AS 115 Revenue Recognition Practical">
           </div>
 
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block font-bold text-slate-700 mb-1">Subject</label>
               <select id="lec-subject" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
-                ${subjects.map(s => `
-                  <option value="${s.id}" ${lecture && lecture.subjectId === s.id ? 'selected' : ''}>${s.name}</option>
-                `).join('')}
+                ${subjects.map(s => `<option value="${s.id}">${s.name}</option>`).join('')}
               </select>
             </div>
             <div>
               <label class="block font-bold text-slate-700 mb-1">Chapter / Topic</label>
-              <input type="text" id="lec-chapter" required value="${lecture ? lecture.chapter : ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="e.g. Accounting Standards">
+              <input type="text" id="lec-chapter" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="e.g. Accounting Standards">
             </div>
           </div>
 
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="block font-bold text-slate-700 mb-1">Video Embed URL (YouTube/Vimeo)</label>
-              <input type="url" id="lec-video-url" required value="${lecture ? lecture.videoUrl : ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="https://www.youtube-nocookie.com/embed/...">
+              <input type="url" id="lec-video-url" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="https://www.youtube-nocookie.com/embed/...">
             </div>
             <div>
               <label class="block font-bold text-slate-700 mb-1">Duration (Minutes)</label>
-              <input type="number" id="lec-duration" min="1" required value="${lecture ? lecture.durationMinutes : 45}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
+              <input type="number" id="lec-duration" min="1" required value="45" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
             </div>
           </div>
 
           <div>
             <label class="block font-bold text-slate-700 mb-1">Thumbnail Image URL</label>
-            <input type="url" id="lec-thumbnail" required value="${lecture ? lecture.thumbnail : 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=600'}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
+            <input type="url" id="lec-thumbnail" required value="https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=600" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
           </div>
 
           <div>
             <label class="block font-bold text-slate-700 mb-1">Description & Study Notes</label>
-            <textarea id="lec-desc" rows="4" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="Detailed syllabus breakdown and notes...">${lecture ? lecture.description : ''}</textarea>
-          </div>
-
-          <div class="flex items-center gap-2 pt-2">
-            <input type="checkbox" id="lec-published" ${lecture ? (lecture.isPublished ? 'checked' : '') : 'checked'} class="rounded text-blue-600 w-4 h-4">
-            <label for="lec-published" class="font-bold text-slate-700">Publish Immediately to Students</label>
+            <textarea id="lec-desc" rows="3" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="Detailed notes..."></textarea>
           </div>
 
           <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
@@ -335,48 +3354,23 @@ class AdminDashboard {
 
   saveLecture(e) {
     e.preventDefault();
-    const title = document.getElementById('lec-title').value.trim();
-    const subjectId = document.getElementById('lec-subject').value;
-    const chapter = document.getElementById('lec-chapter').value.trim();
-    const videoUrl = document.getElementById('lec-video-url').value.trim();
-    const durationMinutes = parseInt(document.getElementById('lec-duration').value, 10);
-    const thumbnail = document.getElementById('lec-thumbnail').value.trim();
-    const description = document.getElementById('lec-desc').value.trim();
-    const isPublished = document.getElementById('lec-published').checked;
+    const newLec = {
+      id: 'lec-' + Date.now(),
+      title: document.getElementById('lec-title').value.trim(),
+      subjectId: document.getElementById('lec-subject').value,
+      chapter: document.getElementById('lec-chapter').value.trim(),
+      videoUrl: document.getElementById('lec-video-url').value.trim(),
+      durationMinutes: parseInt(document.getElementById('lec-duration').value, 10),
+      thumbnail: document.getElementById('lec-thumbnail').value.trim(),
+      description: document.getElementById('lec-desc').value.trim(),
+      isPublished: true,
+      views: 0,
+      createdAt: new Date().toISOString()
+    };
 
-    if (this.activeEditingLectureId) {
-      const existing = window.store.getLectures().find(l => l.id === this.activeEditingLectureId);
-      if (existing) {
-        existing.title = title;
-        existing.subjectId = subjectId;
-        existing.chapter = chapter;
-        existing.videoUrl = videoUrl;
-        existing.durationMinutes = durationMinutes;
-        existing.thumbnail = thumbnail;
-        existing.description = description;
-        existing.isPublished = isPublished;
-        window.store.updateLecture(existing);
-        window.app.showToast('Lecture updated successfully.', 'success');
-      }
-    } else {
-      const newLec = {
-        id: 'lec-' + Date.now(),
-        title,
-        subjectId,
-        chapter,
-        videoUrl,
-        durationMinutes,
-        thumbnail,
-        description,
-        isPublished,
-        views: 0,
-        createdAt: new Date().toISOString()
-      };
-      window.store.addLecture(newLec);
-      window.app.showToast('Lecture created successfully.', 'success');
-    }
-
+    window.store.addLecture(newLec);
     window.app.closeModal('admin-generic-modal');
+    window.app.showToast('Lecture added.', 'success');
     this.renderLectures();
   }
 
@@ -390,662 +3384,258 @@ class AdminDashboard {
   }
 
   deleteLecture(id) {
-    if (confirm('Are you sure you want to delete this lecture?')) {
+    if (confirm('Delete this lecture?')) {
       window.store.deleteLecture(id);
       window.app.showToast('Lecture deleted.', 'info');
       this.renderLectures();
     }
   }
 
-  // --- TESTS TAB ---
-  renderTests() {
+  // --- 8. WEBSITE UPDATES BANNER & SLIDER MANAGEMENT ---
+  renderBanners() {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
 
-    const tests = window.store.getTests();
+    const banners = window.store.getBanners();
+    const visibleCount = banners.filter(b => b.isVisible !== false).length;
 
     container.innerHTML = `
-      <div class="flex items-center justify-between mb-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h3 class="text-base font-bold text-slate-900">MCQ Examination Management</h3>
-          <p class="text-xs text-slate-500 mt-0.5">Configure tests, timer limits, negative marks, and manage individual MCQ questions</p>
+          <h3 class="text-base font-bold text-slate-900">Website Updates Banner & Slider Manager</h3>
+          <p class="text-xs text-slate-500 mt-0.5">
+            Upload and control centralized update images. If 1 image is active it displays statically; 2 or more images automatically create a sliding carousel for all website visitors.
+          </p>
         </div>
-        <button 
-          onclick="window.adminDashboard.openTestModal()"
-          class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
-        >
-          <i data-lucide="plus" class="w-4 h-4"></i> Create New Test
-        </button>
-      </div>
-
-      <div class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-        <table class="w-full text-left text-sm">
-          <thead>
-            <tr class="border-b border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-500 uppercase tracking-wider">
-              <th class="py-3 px-4">Test Title</th>
-              <th class="py-3 px-4">Duration</th>
-              <th class="py-3 px-4">Questions</th>
-              <th class="py-3 px-4">Marking (+ / -)</th>
-              <th class="py-3 px-4">Max Attempts</th>
-              <th class="py-3 px-4">Status</th>
-              <th class="py-3 px-4 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100">
-            ${tests.map(tst => {
-              const subject = window.store.getSubjectById(tst.subjectId);
-              const qCount = window.store.getQuestionsByTestId(tst.id).length;
-              return `
-                <tr class="hover:bg-slate-50 transition-colors">
-                  <td class="py-3 px-4">
-                    <span class="text-[11px] font-bold text-blue-600 uppercase block">${subject ? subject.name : 'CA Practice'}</span>
-                    <span class="font-bold text-slate-900 text-xs">${tst.title}</span>
-                  </td>
-                  <td class="py-3 px-4 text-xs text-slate-600">${tst.durationMinutes} mins</td>
-                  <td class="py-3 px-4 text-xs font-semibold text-slate-800">
-                    <button 
-                      onclick="window.adminDashboard.openQuestionBuilder('${tst.id}')"
-                      class="text-blue-600 hover:underline font-bold"
-                    >
-                      ${qCount} Questions (Manage) →
-                    </button>
-                  </td>
-                  <td class="py-3 px-4 text-xs font-bold">
-                    <span class="text-emerald-700">+${tst.marksPerCorrect}</span> / <span class="text-rose-600">-${tst.negativeMarksPerWrong}</span>
-                  </td>
-                  <td class="py-3 px-4 text-xs text-slate-600">${tst.maxAttempts || 1}</td>
-                  <td class="py-3 px-4">
-                    <button 
-                      onclick="window.adminDashboard.toggleTestPublish('${tst.id}')"
-                      class="px-2.5 py-1 text-xs font-semibold rounded-full border transition-colors ${
-                        tst.isPublished 
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' 
-                          : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
-                      }"
-                    >
-                      ${tst.isPublished ? 'Published' : 'Draft'}
-                    </button>
-                  </td>
-                  <td class="py-3 px-4 text-right space-x-2">
-                    <button 
-                      onclick="window.adminDashboard.openTestModal('${tst.id}')"
-                      class="text-xs font-semibold text-blue-600 hover:text-blue-800"
-                    >
-                      Edit
-                    </button>
-                    <button 
-                      onclick="window.adminDashboard.deleteTest('${tst.id}')"
-                      class="text-xs font-semibold text-rose-600 hover:text-rose-800"
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              `;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-    `;
-
-    if (window.lucide) window.lucide.createIcons();
-  }
-
-  openTestModal(testId = null) {
-    this.activeEditingTestId = testId;
-    const test = testId ? window.store.getTestById(testId) : null;
-    const subjects = window.store.getSubjects();
-
-    const modalContent = document.getElementById('admin-generic-modal-content');
-    if (!modalContent) return;
-
-    modalContent.innerHTML = `
-      <div class="p-6">
-        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
-          <h3 class="text-base font-bold text-slate-900">${test ? 'Edit Test Configuration' : 'Create New MCQ Test'}</h3>
-          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
-            <i data-lucide="x" class="w-5 h-5"></i>
+        <div class="flex items-center gap-2">
+          <button 
+            onclick="window.adminDashboard.openAddBannerModal()"
+            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+          >
+            <i data-lucide="plus-circle" class="w-4 h-4"></i> Upload New Banner
           </button>
         </div>
-
-        <form id="test-form" onsubmit="window.adminDashboard.saveTest(event)" class="space-y-4 text-xs">
-          <div>
-            <label class="block font-bold text-slate-700 mb-1">Test Title</label>
-            <input type="text" id="tst-title" required value="${test ? test.title : ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="e.g. Ind AS 115 Revenue Recognition Mock Assessment">
-          </div>
-
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Subject</label>
-              <select id="tst-subject" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
-                ${subjects.map(s => `
-                  <option value="${s.id}" ${test && test.subjectId === s.id ? 'selected' : ''}>${s.name}</option>
-                `).join('')}
-              </select>
-            </div>
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Chapter / Topic</label>
-              <input type="text" id="tst-chapter" required value="${test ? test.chapter : ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="e.g. Accounting Standards">
-            </div>
-          </div>
-
-          <div class="grid grid-cols-3 gap-3">
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Duration (Mins)</label>
-              <input type="number" id="tst-duration" min="1" required value="${test ? test.durationMinutes : 15}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
-            </div>
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Marks/Correct</label>
-              <input type="number" id="tst-positive" step="0.5" min="0.5" required value="${test ? test.marksPerCorrect : 2.0}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
-            </div>
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Negative Marks</label>
-              <input type="number" id="tst-negative" step="0.25" min="0" required value="${test ? test.negativeMarksPerWrong : 0.5}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Max Allowed Attempts</label>
-              <input type="number" id="tst-attempts" min="1" max="10" required value="${test ? test.maxAttempts : 2}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
-            </div>
-            <div class="flex items-center gap-2 pt-5">
-              <input type="checkbox" id="tst-published" ${test ? (test.isPublished ? 'checked' : '') : 'checked'} class="rounded text-blue-600 w-4 h-4">
-              <label for="tst-published" class="font-bold text-slate-700">Published to Students</label>
-            </div>
-          </div>
-
-          <div>
-            <label class="block font-bold text-slate-700 mb-1">Instructions & Guidelines</label>
-            <textarea id="tst-desc" rows="3" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="Instructions displayed to students before starting...">${test ? test.description : ''}</textarea>
-          </div>
-
-          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
-            <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-            <button type="submit" class="px-5 py-2 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">Save Test</button>
-          </div>
-        </form>
       </div>
-    `;
 
-    if (window.lucide) window.lucide.createIcons();
-    window.app.openModal('admin-generic-modal');
-  }
-
-  saveTest(e) {
-    e.preventDefault();
-    const title = document.getElementById('tst-title').value.trim();
-    const subjectId = document.getElementById('tst-subject').value;
-    const chapter = document.getElementById('tst-chapter').value.trim();
-    const durationMinutes = parseInt(document.getElementById('tst-duration').value, 10);
-    const marksPerCorrect = parseFloat(document.getElementById('tst-positive').value);
-    const negativeMarksPerWrong = parseFloat(document.getElementById('tst-negative').value);
-    const maxAttempts = parseInt(document.getElementById('tst-attempts').value, 10);
-    const description = document.getElementById('tst-desc').value.trim();
-    const isPublished = document.getElementById('tst-published').checked;
-
-    if (this.activeEditingTestId) {
-      const existing = window.store.getTestById(this.activeEditingTestId);
-      if (existing) {
-        existing.title = title;
-        existing.subjectId = subjectId;
-        existing.chapter = chapter;
-        existing.durationMinutes = durationMinutes;
-        existing.marksPerCorrect = marksPerCorrect;
-        existing.negativeMarksPerWrong = negativeMarksPerWrong;
-        existing.maxAttempts = maxAttempts;
-        existing.description = description;
-        existing.isPublished = isPublished;
-        window.store.updateTest(existing);
-        window.app.showToast('Test updated successfully.', 'success');
-      }
-    } else {
-      const newTest = {
-        id: 'tst-' + Date.now(),
-        title,
-        subjectId,
-        chapter,
-        durationMinutes,
-        marksPerCorrect,
-        negativeMarksPerWrong,
-        maxAttempts,
-        description,
-        totalQuestions: 0,
-        isPublished,
-        startDate: new Date().toISOString(),
-        endDate: new Date(Date.now() + 30 * 86400000).toISOString()
-      };
-      window.store.addTest(newTest);
-      window.app.showToast('Test created! Now add questions.', 'success');
-    }
-
-    window.app.closeModal('admin-generic-modal');
-    this.renderTests();
-  }
-
-  toggleTestPublish(id) {
-    const tst = window.store.getTestById(id);
-    if (tst) {
-      tst.isPublished = !tst.isPublished;
-      window.store.updateTest(tst);
-      this.renderTests();
-    }
-  }
-
-  deleteTest(id) {
-    if (confirm('Are you sure you want to delete this test and its associated questions?')) {
-      window.store.deleteTest(id);
-      window.app.showToast('Test deleted.', 'info');
-      this.renderTests();
-    }
-  }
-
-  // --- MCQ QUESTION BUILDER ---
-  openQuestionBuilder(testId) {
-    this.activeTestQuestionsId = testId;
-    const test = window.store.getTestById(testId);
-    if (!test) return;
-
-    const questions = window.store.getQuestionsByTestId(testId);
-
-    const modalContent = document.getElementById('admin-generic-modal-content');
-    if (!modalContent) return;
-
-    modalContent.innerHTML = `
-      <div class="p-6 sm:p-8 max-h-[90vh] overflow-y-auto">
-        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
-          <div>
-            <h3 class="text-base font-bold text-slate-900">Manage MCQs: ${test.title}</h3>
-            <span class="text-xs text-slate-500">${questions.length} questions registered</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <button 
-              onclick="window.adminDashboard.openQuestionForm()"
-              class="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1"
-            >
-              <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add Question
-            </button>
-            <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600 p-1">
-              <i data-lucide="x" class="w-5 h-5"></i>
-            </button>
-          </div>
+      <!-- Banner Status KPIs -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <div class="bg-white border border-slate-200 rounded-xl p-4">
+          <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Total Banners</span>
+          <span class="text-2xl font-black text-slate-900 mt-0.5 block">${banners.length}</span>
+          <span class="text-[11px] text-slate-400">Uploaded announcements</span>
         </div>
+        <div class="bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <span class="text-xs font-semibold text-blue-800 uppercase tracking-wider block">Currently Visible</span>
+          <span class="text-2xl font-black text-blue-900 mt-0.5 block">${visibleCount}</span>
+          <span class="text-[11px] text-blue-700">Displayed on website</span>
+        </div>
+        <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+          <span class="text-xs font-semibold text-emerald-800 uppercase tracking-wider block">Display Mode</span>
+          <span class="text-2xl font-black text-emerald-900 mt-0.5 block">
+            ${visibleCount === 1 ? 'Static Banner' : (visibleCount > 1 ? 'Auto Slider (' + visibleCount + ')' : 'Hidden (0)')}
+          </span>
+          <span class="text-[11px] text-emerald-700">
+            ${visibleCount > 1 ? 'Continuous horizontal carousel' : (visibleCount === 1 ? 'Single hero banner' : 'No active images')}
+          </span>
+        </div>
+      </div>
 
-        <div id="question-list-area" class="space-y-4">
-          ${questions.length === 0 ? `
-            <div class="text-center py-12 text-slate-400 text-xs">
-              No questions added yet. Click "+ Add Question" to create MCQs.
-            </div>
-          ` : questions.map((q, idx) => `
-            <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm text-xs space-y-2">
-              <div class="flex items-center justify-between">
-                <span class="font-bold text-blue-600">Question ${idx + 1}</span>
-                <div class="space-x-2">
-                  <button onclick="window.adminDashboard.openQuestionForm('${q.id}')" class="text-blue-600 hover:underline font-semibold">Edit</button>
-                  <button onclick="window.adminDashboard.deleteQuestion('${q.id}')" class="text-rose-600 hover:underline font-semibold">Delete</button>
+      <!-- Banners List / Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        ${banners.length === 0 ? `
+          <div class="col-span-full py-12 text-center bg-white border border-slate-200 rounded-2xl">
+            <i data-lucide="image" class="w-10 h-10 text-slate-300 mx-auto mb-2"></i>
+            <h4 class="text-sm font-bold text-slate-700">No Update Banners Yet</h4>
+            <p class="text-xs text-slate-400 mt-1 mb-4">Upload your first notification or announcement image for CA students.</p>
+            <button onclick="window.adminDashboard.openAddBannerModal()" class="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg shadow-sm">
+              + Upload Banner
+            </button>
+          </div>
+        ` : banners.map(b => {
+          const isVis = b.isVisible !== false;
+          return `
+            <div class="bg-white border ${isVis ? 'border-slate-200' : 'border-rose-200 bg-rose-50/20'} rounded-xl overflow-hidden shadow-xs flex flex-col justify-between">
+              <div>
+                <div class="relative h-36 w-full bg-slate-900 overflow-hidden">
+                  <img src="${b.imageUrl}" alt="${b.title}" class="w-full h-full object-cover" onerror="this.src='https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=1200&auto=format&fit=crop&q=80'">
+                  <div class="absolute top-2 left-2 flex items-center gap-1.5">
+                    <span class="px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider rounded-full bg-blue-600 text-white shadow-xs">
+                      ${b.tag || 'UPDATE'}
+                    </span>
+                  </div>
+                  <div class="absolute top-2 right-2">
+                    <span class="px-2 py-0.5 text-[10px] font-bold rounded-full border ${isVis ? 'bg-emerald-500 text-white border-emerald-600' : 'bg-rose-500 text-white border-rose-600'}">
+                      ${isVis ? '● Live' : '✕ Hidden'}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="p-4">
+                  <h4 class="font-bold text-slate-900 text-xs line-clamp-2">${b.title}</h4>
+                  ${b.subtitle ? `<p class="text-[11px] text-slate-500 mt-1 line-clamp-2">${b.subtitle}</p>` : ''}
+                  ${b.linkUrl ? `<span class="text-[10px] text-blue-600 font-mono block mt-1.5 truncate">Link: ${b.linkUrl}</span>` : ''}
                 </div>
               </div>
-              <p class="font-semibold text-slate-800">${q.text}</p>
-              <div class="grid grid-cols-2 gap-2 text-slate-600 bg-slate-50 p-2.5 rounded-lg">
-                <div class="${q.correctOption === 'A' ? 'font-bold text-emerald-700' : ''}">A: ${q.optionA}</div>
-                <div class="${q.correctOption === 'B' ? 'font-bold text-emerald-700' : ''}">B: ${q.optionB}</div>
-                <div class="${q.correctOption === 'C' ? 'font-bold text-emerald-700' : ''}">C: ${q.optionC}</div>
-                <div class="${q.correctOption === 'D' ? 'font-bold text-emerald-700' : ''}">D: ${q.optionD}</div>
-              </div>
-              <div class="text-[11px] text-emerald-800 bg-emerald-50 px-2 py-1 rounded">
-                <strong>Correct Key:</strong> Option ${q.correctOption} • <strong>Marks:</strong> ${q.marks}
-              </div>
-              <div class="text-[11px] text-slate-500 italic">
-                <strong>Explanation:</strong> ${q.explanation}
+
+              <div class="p-4 pt-0 border-t border-slate-100 flex items-center justify-between gap-2 mt-2">
+                <button 
+                  onclick="window.adminDashboard.toggleBannerVisibility('${b.id}')"
+                  class="px-2.5 py-1 text-xs font-bold rounded-lg border transition-colors ${
+                    isVis 
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' 
+                      : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                  }"
+                  title="Toggle Visibility"
+                >
+                  ${isVis ? '✓ Visible' : '✕ Hidden'}
+                </button>
+
+                <div class="space-x-1">
+                  <button 
+                    onclick="window.adminDashboard.openEditBannerModal('${b.id}')"
+                    class="px-2.5 py-1 text-xs font-bold text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                  >
+                    Edit
+                  </button>
+                  <button 
+                    onclick="window.adminDashboard.deleteBanner('${b.id}')"
+                    class="px-2.5 py-1 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
             </div>
-          `).join('')}
-        </div>
+          `;
+        }).join('')}
       </div>
     `;
 
     if (window.lucide) window.lucide.createIcons();
-    window.app.openModal('admin-generic-modal');
   }
 
-  openQuestionForm(questionId = null) {
-    const testId = this.activeTestQuestionsId;
-    const test = window.store.getTestById(testId);
-    const question = questionId ? window.store.getQuestions().find(q => q.id === questionId) : null;
+  openAddBannerModal() {
+    this.activeEditingBannerId = null;
+    this.showBannerModal({
+      title: '',
+      tag: 'NEW UPDATE',
+      subtitle: '',
+      imageUrl: 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=1200&auto=format&fit=crop&q=80',
+      linkUrl: '#tests',
+      isVisible: true
+    }, 'Upload New Website Update Banner');
+  }
 
+  openEditBannerModal(id) {
+    const banner = window.store.getBannerById(id);
+    if (!banner) return;
+    this.activeEditingBannerId = id;
+    this.showBannerModal(banner, 'Edit Website Update Banner');
+  }
+
+  showBannerModal(b, modalTitle) {
     const modalContent = document.getElementById('admin-generic-modal-content');
     if (!modalContent) return;
 
     modalContent.innerHTML = `
       <div class="p-6">
         <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
-          <h3 class="text-base font-bold text-slate-900">${question ? 'Edit Question' : 'Add New MCQ Question'}</h3>
-          <button onclick="window.adminDashboard.openQuestionBuilder('${testId}')" class="text-slate-400 hover:text-slate-600">
-            <i data-lucide="x" class="w-5 h-5"></i>
-          </button>
-        </div>
-
-        <form id="question-form" onsubmit="window.adminDashboard.saveQuestion(event, '${questionId || ''}')" class="space-y-4 text-xs">
-          <div>
-            <label class="block font-bold text-slate-700 mb-1">Question Prompt / Case Stem</label>
-            <textarea id="q-text" rows="3" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="State the question clearly...">${question ? question.text : ''}</textarea>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Option A</label>
-              <input type="text" id="q-optA" required value="${question ? question.optionA : ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
-            </div>
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Option B</label>
-              <input type="text" id="q-optB" required value="${question ? question.optionB : ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
-            </div>
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Option C</label>
-              <input type="text" id="q-optC" required value="${question ? question.optionC : ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
-            </div>
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Option D</label>
-              <input type="text" id="q-optD" required value="${question ? question.optionD : ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Correct Answer Key</label>
-              <select id="q-correct" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-emerald-800 bg-emerald-50">
-                <option value="A" ${question && question.correctOption === 'A' ? 'selected' : ''}>Option A</option>
-                <option value="B" ${question && question.correctOption === 'B' ? 'selected' : ''}>Option B</option>
-                <option value="C" ${question && question.correctOption === 'C' ? 'selected' : ''}>Option C</option>
-                <option value="D" ${question && question.correctOption === 'D' ? 'selected' : ''}>Option D</option>
-              </select>
-            </div>
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Marks Weight</label>
-              <input type="number" id="q-marks" step="0.5" min="0.5" required value="${question ? question.marks : (test ? test.marksPerCorrect : 2.0)}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
-            </div>
-          </div>
-
-          <div>
-            <label class="block font-bold text-slate-700 mb-1">Detailed Explanation / ICAI Standard Reference</label>
-            <textarea id="q-explanation" rows="3" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="Detailed reason for the correct option and Ind AS / Act reference...">${question ? question.explanation : ''}</textarea>
-          </div>
-
-          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
-            <button type="button" onclick="window.adminDashboard.openQuestionBuilder('${testId}')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Back</button>
-            <button type="submit" class="px-5 py-2 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">Save Question</button>
-          </div>
-        </form>
-      </div>
-    `;
-
-    if (window.lucide) window.lucide.createIcons();
-  }
-
-  saveQuestion(e, questionId) {
-    e.preventDefault();
-    const testId = this.activeTestQuestionsId;
-    const text = document.getElementById('q-text').value.trim();
-    const optionA = document.getElementById('q-optA').value.trim();
-    const optionB = document.getElementById('q-optB').value.trim();
-    const optionC = document.getElementById('q-optC').value.trim();
-    const optionD = document.getElementById('q-optD').value.trim();
-    const correctOption = document.getElementById('q-correct').value;
-    const marks = parseFloat(document.getElementById('q-marks').value);
-    const explanation = document.getElementById('q-explanation').value.trim();
-
-    if (questionId) {
-      const q = window.store.getQuestions().find(x => x.id === questionId);
-      if (q) {
-        q.text = text;
-        q.optionA = optionA;
-        q.optionB = optionB;
-        q.optionC = optionC;
-        q.optionD = optionD;
-        q.correctOption = correctOption;
-        q.marks = marks;
-        q.explanation = explanation;
-        window.store.updateQuestion(q);
-        window.app.showToast('Question updated.', 'success');
-      }
-    } else {
-      const existingQs = window.store.getQuestionsByTestId(testId);
-      const newQ = {
-        id: 'q-' + Date.now(),
-        testId: testId,
-        number: existingQs.length + 1,
-        text,
-        optionA,
-        optionB,
-        optionC,
-        optionD,
-        correctOption,
-        marks,
-        explanation
-      };
-      window.store.addQuestion(newQ);
-
-      // Update test total questions count
-      const test = window.store.getTestById(testId);
-      if (test) {
-        test.totalQuestions = existingQs.length + 1;
-        window.store.updateTest(test);
-      }
-
-      window.app.showToast('Question added.', 'success');
-    }
-
-    this.openQuestionBuilder(testId);
-  }
-
-  deleteQuestion(id) {
-    if (confirm('Delete this question?')) {
-      const q = window.store.getQuestions().find(x => x.id === id);
-      window.store.deleteQuestion(id);
-      if (q) {
-        const test = window.store.getTestById(q.testId);
-        if (test) {
-          test.totalQuestions = Math.max(0, (test.totalQuestions || 1) - 1);
-          window.store.updateTest(test);
-        }
-      }
-      window.app.showToast('Question deleted.', 'info');
-      this.openQuestionBuilder(this.activeTestQuestionsId);
-    }
-  }
-
-  // --- ASSIGNMENTS & GRADING TAB ---
-  renderAssignments() {
-    const container = document.getElementById('admin-content-area');
-    if (!container) return;
-
-    const assignments = window.store.getAssignments();
-    const submissions = window.store.getSubmissions();
-
-    container.innerHTML = `
-      <div class="flex items-center justify-between mb-6">
-        <div>
-          <h3 class="text-base font-bold text-slate-900">Assignment Creation & PDF Grading Center</h3>
-          <p class="text-xs text-slate-500 mt-0.5">Publish practical case problems, inspect submitted student PDFs, assign marks and feedback</p>
-        </div>
-        <button 
-          onclick="window.adminDashboard.openAssignmentModal()"
-          class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
-        >
-          <i data-lucide="plus" class="w-4 h-4"></i> Create Assignment
-        </button>
-      </div>
-
-      <!-- Section 1: Student PDF Submissions Queue (Evaluation Center) -->
-      <div class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm mb-8">
-        <div class="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-          <h4 class="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
-            <i data-lucide="inbox" class="w-4 h-4 text-blue-600"></i>
-            Student Submissions Queue (${submissions.length})
-          </h4>
-        </div>
-
-        <table class="w-full text-left text-sm">
-          <thead>
-            <tr class="border-b border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-500 uppercase tracking-wider">
-              <th class="py-3 px-4">Student</th>
-              <th class="py-3 px-4">Assignment</th>
-              <th class="py-3 px-4">Submitted File</th>
-              <th class="py-3 px-4">Date</th>
-              <th class="py-3 px-4">Status</th>
-              <th class="py-3 px-4">Score</th>
-              <th class="py-3 px-4 text-right">Action</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100">
-            ${submissions.length === 0 ? `
-              <tr><td colspan="7" class="py-8 text-center text-xs text-slate-400">No submissions uploaded yet.</td></tr>
-            ` : submissions.map(sub => {
-              const asg = window.store.getAssignmentById(sub.assignmentId);
-              return `
-                <tr class="hover:bg-slate-50 transition-colors">
-                  <td class="py-3 px-4 font-bold text-slate-900 text-xs">${sub.studentName}</td>
-                  <td class="py-3 px-4 text-xs text-slate-700">${asg ? asg.title : 'CA Assignment'}</td>
-                  <td class="py-3 px-4 text-xs font-mono text-slate-600">
-                    <a href="${sub.fileData}" download="${sub.fileName}" class="text-blue-600 hover:underline flex items-center gap-1">
-                      <i data-lucide="file" class="w-3.5 h-3.5 text-rose-500"></i>
-                      ${sub.fileName}
-                    </a>
-                  </td>
-                  <td class="py-3 px-4 text-xs text-slate-500">${new Date(sub.submittedAt).toLocaleDateString()}</td>
-                  <td class="py-3 px-4">
-                    <span class="px-2 py-0.5 text-xs font-semibold rounded-full ${
-                      sub.status === 'Evaluated' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                    }">${sub.status}</span>
-                  </td>
-                  <td class="py-3 px-4 text-xs font-bold text-slate-800">
-                    ${sub.status === 'Evaluated' ? `${sub.marksObtained} / ${asg ? asg.maximumMarks : 50}` : '--'}
-                  </td>
-                  <td class="py-3 px-4 text-right">
-                    <button 
-                      onclick="window.adminDashboard.openGradingModal('${sub.id}')"
-                      class="px-3 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm"
-                    >
-                      ${sub.status === 'Evaluated' ? 'Edit Grade' : 'Grade PDF'}
-                    </button>
-                  </td>
-                </tr>
-              `;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Section 2: All Assignments Catalog -->
-      <div class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-        <div class="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-          <h4 class="text-xs font-bold text-slate-800 uppercase tracking-wider">
-            All Practical Assignments (${assignments.length})
-          </h4>
-        </div>
-        <table class="w-full text-left text-sm">
-          <thead>
-            <tr class="border-b border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-500 uppercase tracking-wider">
-              <th class="py-3 px-4">Title & Subject</th>
-              <th class="py-3 px-4">Deadline</th>
-              <th class="py-3 px-4">Max Marks</th>
-              <th class="py-3 px-4">Status</th>
-              <th class="py-3 px-4 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100">
-            ${assignments.map(a => {
-              const subject = window.store.getSubjectById(a.subjectId);
-              return `
-                <tr class="hover:bg-slate-50 transition-colors">
-                  <td class="py-3 px-4">
-                    <span class="text-[11px] font-bold text-blue-600 uppercase block">${subject ? subject.name : 'CA'} • ${a.topic}</span>
-                    <span class="font-bold text-slate-900 text-xs">${a.title}</span>
-                  </td>
-                  <td class="py-3 px-4 text-xs text-slate-600">${new Date(a.deadline).toLocaleDateString()}</td>
-                  <td class="py-3 px-4 text-xs font-bold text-slate-800">${a.maximumMarks} Marks</td>
-                  <td class="py-3 px-4">
-                    <span class="px-2 py-0.5 text-xs font-semibold rounded-full ${a.isPublished ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}">
-                      ${a.isPublished ? 'Published' : 'Draft'}
-                    </span>
-                  </td>
-                  <td class="py-3 px-4 text-right space-x-2">
-                    <button onclick="window.adminDashboard.openAssignmentModal('${a.id}')" class="text-xs font-semibold text-blue-600 hover:text-blue-800">Edit</button>
-                    <button onclick="window.adminDashboard.deleteAssignment('${a.id}')" class="text-xs font-semibold text-rose-600 hover:text-rose-800">Delete</button>
-                  </td>
-                </tr>
-              `;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-    `;
-
-    if (window.lucide) window.lucide.createIcons();
-  }
-
-  openAssignmentModal(asgId = null) {
-    this.activeEditingAssignmentId = asgId;
-    const asg = asgId ? window.store.getAssignmentById(asgId) : null;
-    const subjects = window.store.getSubjects();
-
-    const modalContent = document.getElementById('admin-generic-modal-content');
-    if (!modalContent) return;
-
-    modalContent.innerHTML = `
-      <div class="p-6">
-        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
-          <h3 class="text-base font-bold text-slate-900">${asg ? 'Edit Assignment' : 'Create New Assignment'}</h3>
+          <h3 class="text-base font-bold text-slate-900">${modalTitle}</h3>
           <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
             <i data-lucide="x" class="w-5 h-5"></i>
           </button>
         </div>
 
-        <form id="asg-form" onsubmit="window.adminDashboard.saveAssignment(event)" class="space-y-4 text-xs">
+        <form onsubmit="window.adminDashboard.saveBanner(event)" class="space-y-4 text-xs">
           <div>
-            <label class="block font-bold text-slate-700 mb-1">Assignment Title</label>
-            <input type="text" id="asg-title" required value="${asg ? asg.title : ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="e.g. Computation of Total Income & Tax Payable (AY 2025-26)">
+            <label class="block font-bold text-slate-700 mb-1">Banner Headline / Title *</label>
+            <input type="text" id="bnr-form-title" required value="${b.title || ''}" placeholder="e.g. ICAI Exam Pattern 2026: Updated Syllabus Released" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold">
           </div>
 
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label class="block font-bold text-slate-700 mb-1">Subject</label>
-              <select id="asg-subject" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
-                ${subjects.map(s => `
-                  <option value="${s.id}" ${asg && asg.subjectId === s.id ? 'selected' : ''}>${s.name}</option>
-                `).join('')}
-              </select>
+              <label class="block font-bold text-slate-700 mb-1">Badge Tag *</label>
+              <input type="text" id="bnr-form-tag" required value="${b.tag || 'NEW UPDATE'}" placeholder="e.g. NOTICE, MOCK EXAMS, REVISION" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs uppercase font-bold">
             </div>
             <div>
-              <label class="block font-bold text-slate-700 mb-1">Topic / Area</label>
-              <input type="text" id="asg-topic" required value="${asg ? asg.topic : ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="e.g. Individuals & HUF Taxation">
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Maximum Marks</label>
-              <input type="number" id="asg-marks" min="10" required value="${asg ? asg.maximumMarks : 50}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
-            </div>
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Submission Deadline</label>
-              <input type="date" id="asg-deadline" required value="${asg ? asg.deadline.split('T')[0] : new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
+              <label class="block font-bold text-slate-700 mb-1">Target Click Link URL</label>
+              <input type="text" id="bnr-form-link" value="${b.linkUrl || '#tests'}" placeholder="#tests, #assignments or https://..." class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono">
             </div>
           </div>
 
           <div>
-            <label class="block font-bold text-slate-700 mb-1">Detailed Case Study Instructions & Requirements (Formatted)</label>
-            <textarea id="asg-desc" rows="5" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono" placeholder="Provide detailed scenario, numbers, and required steps...">${asg ? asg.description : ''}</textarea>
+            <label class="block font-bold text-slate-700 mb-1">Subtitle / Summary</label>
+            <textarea id="bnr-form-subtitle" rows="2" placeholder="Short description of the update..." class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">${b.subtitle || ''}</textarea>
           </div>
 
-          <div class="flex items-center gap-2 pt-2">
-            <input type="checkbox" id="asg-published" ${asg ? (asg.isPublished ? 'checked' : '') : 'checked'} class="rounded text-blue-600 w-4 h-4">
-            <label for="asg-published" class="font-bold text-slate-700">Published immediately for student submissions</label>
+          <!-- Image Upload / URL Input -->
+          <div class="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3">
+            <label class="block font-bold text-slate-800">Banner Image</label>
+            
+            <div class="flex flex-col sm:flex-row gap-3">
+              <div class="flex-1">
+                <label class="block text-[11px] font-semibold text-slate-600 mb-1">Option A: Image URL</label>
+                <input 
+                  type="url" 
+                  id="bnr-form-image-url" 
+                  value="${b.imageUrl || ''}" 
+                  placeholder="https://..." 
+                  oninput="document.getElementById('bnr-preview-img').src = this.value"
+                  class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white"
+                >
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-600 mb-1">Option B: Upload File</label>
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  id="bnr-form-file" 
+                  onchange="window.adminDashboard.handleBannerFileSelect(event)" 
+                  class="block w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
+                >
+              </div>
+            </div>
+
+            <!-- Image Presets for Fast Admin Use -->
+            <div>
+              <span class="text-[11px] text-slate-500 font-semibold block mb-1">Quick Sample Presets:</span>
+              <div class="flex flex-wrap gap-1.5 text-[11px]">
+                <button type="button" onclick="window.adminDashboard.setPresetBanner('ICAI Syllabus Notice', 'EXAM NOTICE', 'New guidance notes issued for Accounting & Law standards.', 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=1200&auto=format&fit=crop&q=80', '#tests')" class="px-2 py-1 bg-white border border-slate-200 rounded text-slate-700 hover:bg-slate-100 font-medium">
+                  📚 Exam Notice
+                </button>
+                <button type="button" onclick="window.adminDashboard.setPresetBanner('All-India CA Mock Series', 'TEST SERIES', 'Timed test simulation with negative marking and solutions.', 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=1200&auto=format&fit=crop&q=80', '#tests')" class="px-2 py-1 bg-white border border-slate-200 rounded text-slate-700 hover:bg-slate-100 font-medium">
+                  📝 Mock Series
+                </button>
+                <button type="button" onclick="window.adminDashboard.setPresetBanner('Faculty Copy Checking', 'EVALUATION', 'Submit PDF answers and receive checked copy corrections.', 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=1200&auto=format&fit=crop&q=80', '#assignments')" class="px-2 py-1 bg-white border border-slate-200 rounded text-slate-700 hover:bg-slate-100 font-medium">
+                  ✍️ Copy Checking
+                </button>
+              </div>
+            </div>
+
+            <!-- Preview Container -->
+            <div class="relative h-28 w-full rounded-lg overflow-hidden bg-slate-200 border border-slate-300">
+              <img 
+                id="bnr-preview-img" 
+                src="${b.imageUrl || 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=1200&auto=format&fit=crop&q=80'}" 
+                class="w-full h-full object-cover"
+                alt="Banner Preview"
+              >
+              <div class="absolute bottom-1 right-2 text-[10px] bg-black/60 text-white px-2 py-0.5 rounded font-mono">
+                Live Preview
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2 pt-1">
+            <input type="checkbox" id="bnr-form-visible" ${b.isVisible !== false ? 'checked' : ''} class="w-4 h-4 text-blue-600 rounded">
+            <label for="bnr-form-visible" class="font-bold text-slate-800 text-xs">Publish and display immediately on website</label>
           </div>
 
           <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
             <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-            <button type="submit" class="px-5 py-2 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">Save Assignment</button>
+            <button type="submit" class="px-6 py-2 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">
+              ${this.activeEditingBannerId ? 'Update Banner' : 'Save & Publish Banner'}
+            </button>
           </div>
         </form>
       </div>
@@ -1055,313 +3645,584 @@ class AdminDashboard {
     window.app.openModal('admin-generic-modal');
   }
 
-  saveAssignment(e) {
-    e.preventDefault();
-    const title = document.getElementById('asg-title').value.trim();
-    const subjectId = document.getElementById('asg-subject').value;
-    const topic = document.getElementById('asg-topic').value.trim();
-    const maximumMarks = parseInt(document.getElementById('asg-marks').value, 10);
-    const deadline = new Date(document.getElementById('asg-deadline').value).toISOString();
-    const description = document.getElementById('asg-desc').value.trim();
-    const isPublished = document.getElementById('asg-published').checked;
+  handleBannerFileSelect(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
 
-    if (this.activeEditingAssignmentId) {
-      const existing = window.store.getAssignmentById(this.activeEditingAssignmentId);
+    if (!file.type.startsWith('image/')) {
+      window.app.showToast('Please select a valid image file (JPG, PNG, WebP).', 'error');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target.result;
+      const urlInput = document.getElementById('bnr-form-image-url');
+      const previewImg = document.getElementById('bnr-preview-img');
+      if (urlInput) urlInput.value = dataUrl;
+      if (previewImg) previewImg.src = dataUrl;
+      window.app.showToast('Image loaded successfully.', 'success');
+    };
+    reader.readAsDataURL(file);
+  }
+
+  setPresetBanner(title, tag, subtitle, imageUrl, linkUrl) {
+    const tInput = document.getElementById('bnr-form-title');
+    const tagInput = document.getElementById('bnr-form-tag');
+    const subInput = document.getElementById('bnr-form-subtitle');
+    const urlInput = document.getElementById('bnr-form-image-url');
+    const linkInput = document.getElementById('bnr-form-link');
+    const previewImg = document.getElementById('bnr-preview-img');
+
+    if (tInput) tInput.value = title;
+    if (tagInput) tagInput.value = tag;
+    if (subInput) subInput.value = subtitle;
+    if (urlInput) urlInput.value = imageUrl;
+    if (linkInput) linkInput.value = linkUrl;
+    if (previewImg) previewImg.src = imageUrl;
+  }
+
+  saveBanner(e) {
+    e.preventDefault();
+    const title = document.getElementById('bnr-form-title').value.trim();
+    const tag = document.getElementById('bnr-form-tag').value.trim();
+    const subtitle = document.getElementById('bnr-form-subtitle').value.trim();
+    let imageUrl = document.getElementById('bnr-form-image-url').value.trim();
+    const linkUrl = document.getElementById('bnr-form-link').value.trim();
+    const isVisible = document.getElementById('bnr-form-visible').checked;
+
+    if (!imageUrl) {
+      imageUrl = 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=1200&auto=format&fit=crop&q=80';
+    }
+
+    if (this.activeEditingBannerId) {
+      const existing = window.store.getBannerById(this.activeEditingBannerId);
       if (existing) {
         existing.title = title;
-        existing.subjectId = subjectId;
-        existing.topic = topic;
-        existing.maximumMarks = maximumMarks;
-        existing.deadline = deadline;
-        existing.description = description;
-        existing.isPublished = isPublished;
-        window.store.updateAssignment(existing);
-        window.app.showToast('Assignment updated.', 'success');
+        existing.tag = tag;
+        existing.subtitle = subtitle;
+        existing.imageUrl = imageUrl;
+        existing.linkUrl = linkUrl;
+        existing.isVisible = isVisible;
+        existing.updatedAt = new Date().toISOString();
+        window.store.updateBanner(existing);
+        window.app.showToast('Banner updated successfully.', 'success');
       }
     } else {
-      const newAsg = {
-        id: 'asg-' + Date.now(),
+      const newBanner = {
+        id: 'bnr-' + Date.now(),
         title,
-        subjectId,
-        topic,
-        maximumMarks,
-        deadline,
-        description,
-        isPublished,
+        tag,
+        subtitle,
+        imageUrl,
+        linkUrl,
+        isVisible,
         createdAt: new Date().toISOString()
       };
-      window.store.addAssignment(newAsg);
-      window.app.showToast('Assignment created.', 'success');
+      window.store.addBanner(newBanner);
+      window.app.showToast('New update banner published.', 'success');
     }
 
     window.app.closeModal('admin-generic-modal');
-    this.renderAssignments();
-  }
+    this.renderBanners();
 
-  deleteAssignment(id) {
-    if (confirm('Are you sure you want to delete this assignment?')) {
-      window.store.deleteAssignment(id);
-      window.app.showToast('Assignment deleted.', 'info');
-      this.renderAssignments();
+    // Trigger website updates banner reload across all views
+    if (window.bannerManager) {
+      window.bannerManager.render();
     }
   }
 
-  // --- PDF GRADING MODAL ---
-  openGradingModal(submissionId) {
-    this.activeGradingSubmissionId = submissionId;
-    const submission = window.store.getSubmissions().find(s => s.id === submissionId);
-    if (!submission) return;
+  deleteBanner(id) {
+    const banner = window.store.getBannerById(id);
+    if (!banner) return;
 
-    const asg = window.store.getAssignmentById(submission.assignmentId);
+    if (confirm(`Are you sure you want to delete banner "${banner.title}"?`)) {
+      window.store.deleteBanner(id);
+      window.app.showToast('Banner deleted.', 'info');
+      this.renderBanners();
 
-    const modalContent = document.getElementById('admin-generic-modal-content');
-    if (!modalContent) return;
-
-    modalContent.innerHTML = `
-      <div class="p-6">
-        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
-          <div>
-            <h3 class="text-base font-bold text-slate-900">Grade Assignment Submission</h3>
-            <span class="text-xs text-slate-500">Student: <strong>${submission.studentName}</strong> • ${asg ? asg.title : 'Practical Case'}</span>
-          </div>
-          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
-            <i data-lucide="x" class="w-5 h-5"></i>
-          </button>
-        </div>
-
-        <!-- Submitted PDF Document Banner -->
-        <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between mb-5">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center">
-              <i data-lucide="file-text" class="w-6 h-6"></i>
-            </div>
-            <div>
-              <span class="text-xs font-mono font-bold text-slate-900 block">${submission.fileName}</span>
-              <span class="text-[11px] text-slate-500">Submitted on ${new Date(submission.submittedAt).toLocaleString()}</span>
-            </div>
-          </div>
-          <a 
-            href="${submission.fileData}" 
-            download="${submission.fileName}"
-            class="px-3.5 py-1.5 text-xs font-bold text-blue-600 hover:text-blue-800 bg-white border border-slate-200 rounded-lg shadow-sm inline-flex items-center gap-1.5"
-          >
-            <i data-lucide="download" class="w-3.5 h-3.5"></i> Download & Inspect PDF
-          </a>
-        </div>
-
-        <!-- Grading Form -->
-        <form id="grading-form" onsubmit="window.adminDashboard.saveGrade(event)" class="space-y-4 text-xs">
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Marks Awarded (Out of ${asg ? asg.maximumMarks : 50})</label>
-              <input 
-                type="number" 
-                id="grade-marks" 
-                min="0" 
-                max="${asg ? asg.maximumMarks : 50}" 
-                step="0.5" 
-                required 
-                value="${submission.marksObtained !== null ? submission.marksObtained : ''}" 
-                class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-emerald-800"
-                placeholder="e.g. 45"
-              >
-            </div>
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Submission Status</label>
-              <select id="grade-status" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold">
-                <option value="Evaluated" ${submission.status === 'Evaluated' ? 'selected' : ''}>Evaluated (Complete)</option>
-                <option value="Needs Revision" ${submission.status === 'Needs Revision' ? 'selected' : ''}>Needs Revision (Resubmit)</option>
-                <option value="Submitted" ${submission.status === 'Submitted' ? 'selected' : ''}>Submitted (Pending)</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label class="block font-bold text-slate-700 mb-1">Faculty Feedback & Working Notes Comments</label>
-            <textarea 
-              id="grade-feedback" 
-              rows="4" 
-              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" 
-              placeholder="Provide constructive feedback on calculations, schedule presentations, and tax provisions..."
-            >${submission.adminFeedback || ''}</textarea>
-          </div>
-
-          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
-            <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-            <button type="submit" class="px-6 py-2 font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm">Save Evaluation</button>
-          </div>
-        </form>
-      </div>
-    `;
-
-    if (window.lucide) window.lucide.createIcons();
-    window.app.openModal('admin-generic-modal');
+      if (window.bannerManager) {
+        window.bannerManager.render();
+      }
+    }
   }
 
-  saveGrade(e) {
-    e.preventDefault();
-    const submissionId = this.activeGradingSubmissionId;
-    const submission = window.store.getSubmissions().find(s => s.id === submissionId);
-    if (!submission) return;
+  toggleBannerVisibility(id) {
+    const newStatus = window.store.toggleBannerVisibility(id);
+    window.app.showToast(
+      `Banner is now ${newStatus ? 'VISIBLE on website' : 'HIDDEN from website'}.`,
+      newStatus ? 'success' : 'warning'
+    );
+    this.renderBanners();
 
-    const marks = parseFloat(document.getElementById('grade-marks').value);
-    const status = document.getElementById('grade-status').value;
-    const feedback = document.getElementById('grade-feedback').value.trim();
-
-    submission.marksObtained = marks;
-    submission.status = status;
-    submission.adminFeedback = feedback;
-    submission.evaluatedBy = window.auth.getCurrentUser().name;
-    submission.evaluatedAt = new Date().toISOString();
-
-    window.store.updateSubmission(submission);
-    window.app.closeModal('admin-generic-modal');
-    window.app.showToast(`Submission evaluated successfully. Score: ${marks}`, 'success');
-    this.renderAssignments();
+    if (window.bannerManager) {
+      window.bannerManager.render();
+    }
   }
 
-  // --- STUDENTS TAB ---
-  renderStudents() {
+  // ==========================================
+  // XP & GAMING RANK TIERS CONFIGURATION
+  // ==========================================
+  renderRanksConfig() {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
 
-    const students = window.store.getUsers().filter(u => u.role === 'student');
-    const attempts = window.store.getAttempts();
-    const submissions = window.store.getSubmissions();
+    const rankTiers = window.store.getRankTiers();
+    const xpSettings = window.store.getXpSettings();
 
     container.innerHTML = `
-      <div class="flex items-center justify-between mb-6">
-        <div>
-          <h3 class="text-base font-bold text-slate-900">Registered CA Students Directory</h3>
-          <p class="text-xs text-slate-500 mt-0.5">View student progress, exam scores, and submitted solutions</p>
+      <div class="space-y-8">
+        
+        <!-- Header -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+          <div>
+            <div class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 mb-2">
+              <i data-lucide="award" class="w-3.5 h-3.5"></i> Gamified Rank Tier Architecture
+            </div>
+            <h2 class="text-xl font-black text-slate-900">XP Rules & Competitive Rank Tiers</h2>
+            <p class="text-xs text-slate-500 mt-1">Configure minimum XP requirements for all 19 competitive tiers and set referral bonus values.</p>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button 
+              onclick="window.adminDashboard.resetRankTiers()"
+              class="px-4 py-2 text-xs font-bold rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            >
+              Reset to Defaults
+            </button>
+            <button 
+              onclick="window.adminDashboard.saveRankTiers()"
+              class="px-5 py-2 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <i data-lucide="save" class="w-4 h-4"></i> Save All Tier Changes
+            </button>
+          </div>
         </div>
-      </div>
 
-      <div class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-        <table class="w-full text-left text-sm">
-          <thead>
-            <tr class="border-b border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-500 uppercase tracking-wider">
-              <th class="py-3 px-4">Student</th>
-              <th class="py-3 px-4">CA Level</th>
-              <th class="py-3 px-4">Registration No</th>
-              <th class="py-3 px-4 text-center">Tests Taken</th>
-              <th class="py-3 px-4 text-center">Assignments</th>
-              <th class="py-3 px-4 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100">
-            ${students.map(st => {
-              const studentAttempts = attempts.filter(a => a.userId === st.id);
-              const studentSubs = submissions.filter(s => s.studentId === st.id);
-              return `
-                <tr class="hover:bg-slate-50 transition-colors">
-                  <td class="py-3 px-4">
-                    <div class="flex items-center gap-3">
-                      <img src="${st.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120'}" class="w-8 h-8 rounded-full object-cover border border-slate-200">
-                      <div>
-                        <span class="font-bold text-slate-900 text-xs block">${st.name}</span>
-                        <span class="text-[11px] text-slate-500">${st.email}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td class="py-3 px-4 text-xs text-slate-700">${st.caLevel}</td>
-                  <td class="py-3 px-4 text-xs font-mono text-slate-600">${st.registrationNo || 'N/A'}</td>
-                  <td class="py-3 px-4 text-center font-bold text-blue-600 text-xs">${studentAttempts.length}</td>
-                  <td class="py-3 px-4 text-center font-bold text-slate-700 text-xs">${studentSubs.length}</td>
-                  <td class="py-3 px-4 text-right">
-                    <button 
-                      onclick="window.adminDashboard.viewStudentDetail('${st.id}')"
-                      class="text-xs font-semibold text-blue-600 hover:text-blue-800"
-                    >
-                      View Profile & History →
-                    </button>
-                  </td>
-                </tr>
-              `;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-    `;
+        <!-- Referral XP & Earning Rules Card -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          
+          <!-- Referral Settings -->
+          <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                <i data-lucide="user-plus" class="w-5 h-5"></i>
+              </div>
+              <div>
+                <h3 class="text-sm font-bold text-slate-900">Referral XP Bonus</h3>
+                <p class="text-xs text-slate-500">XP awarded to student when a referred peer registers</p>
+              </div>
+            </div>
 
-    if (window.lucide) window.lucide.createIcons();
-  }
+            <div class="space-y-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5">XP Awarded per Valid Referral</label>
+                <div class="flex items-center gap-3">
+                  <input 
+                    type="number" 
+                    id="admin-referral-xp" 
+                    value="${xpSettings.referralXp || 500}"
+                    min="0"
+                    step="50"
+                    class="w-40 px-3.5 py-2 text-xs font-bold border border-slate-300 rounded-xl font-mono text-slate-900 focus:ring-2 focus:ring-blue-500"
+                  >
+                  <span class="text-xs font-bold text-slate-500">XP</span>
+                  <button 
+                    onclick="window.adminDashboard.saveReferralXp()"
+                    class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
+                  >
+                    Update Referral XP
+                  </button>
+                </div>
+              </div>
+              <p class="text-[11px] text-slate-500 italic">
+                Referral XP propagates immediately across student standing calculations upon updating.
+              </p>
+            </div>
+          </div>
 
-  viewStudentDetail(studentId) {
-    const student = window.store.getUsers().find(u => u.id === studentId);
-    if (!student) return;
+          <!-- Academic Exam Rule Summary -->
+          <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
+                <i data-lucide="shield-alert" class="w-5 h-5"></i>
+              </div>
+              <div>
+                <h3 class="text-sm font-bold text-slate-900">Exam Mark Allocation Rule</h3>
+                <p class="text-xs text-slate-500">Direct integration with ICAI question marks</p>
+              </div>
+            </div>
+            <ul class="text-xs text-slate-600 space-y-2 mt-2 leading-relaxed">
+              <li class="flex items-start gap-2">
+                <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5"></i>
+                <span><strong>MCQs:</strong> Correctly solved questions award XP strictly according to the marks assigned (+1 XP for 1 mark, +2 XP for 2 marks, +4 XP for 4 marks).</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5"></i>
+                <span><strong>Descriptive Papers:</strong> Evaluated submissions award XP exactly equal to the marks awarded by faculty evaluators.</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5"></i>
+                <span><strong>Anti-Cheat:</strong> XP is credited once per unique examination paper to prevent duplicate spamming.</span>
+              </li>
+            </ul>
+          </div>
 
-    const attempts = window.store.getAttemptsByUser(studentId);
-    const submissions = window.store.getSubmissionsByUser(studentId);
+        </div>
 
-    const modalContent = document.getElementById('admin-generic-modal-content');
-    if (!modalContent) return;
-
-    modalContent.innerHTML = `
-      <div class="p-6 sm:p-8 max-h-[90vh] overflow-y-auto">
-        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-6">
-          <div class="flex items-center gap-3">
-            <img src="${student.avatar}" class="w-12 h-12 rounded-full object-cover border border-slate-200">
+        <!-- 19 Rank Tiers Configuration Table -->
+        <div class="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
+          <div class="p-5 border-b border-slate-100 flex items-center justify-between">
             <div>
-              <h3 class="text-base font-bold text-slate-900">${student.name}</h3>
-              <span class="text-xs text-slate-500">${student.caLevel} • ${student.email} • ${student.registrationNo}</span>
+              <h3 class="text-sm font-bold text-slate-900">19 Competitive Rank Tiers</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Edit rank names and minimum XP thresholds. Values must be in ascending order.</p>
             </div>
+            <span class="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-200">
+              19 Active Tiers
+            </span>
           </div>
-          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
-            <i data-lucide="x" class="w-5 h-5"></i>
-          </button>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead>
+                <tr class="border-b border-slate-200 bg-slate-50/80 text-[11px] font-black text-slate-500 uppercase tracking-wider">
+                  <th class="py-3 px-4 w-12 text-center">#</th>
+                  <th class="py-3 px-4 w-16 text-center">Badge</th>
+                  <th class="py-3 px-4">Family / Category</th>
+                  <th class="py-3 px-4">Display Rank Name</th>
+                  <th class="py-3 px-4">Minimum XP Required</th>
+                  <th class="py-3 px-4 text-right">XP Bracket</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                ${rankTiers.map((tier, idx) => {
+                  const badgeSvg = window.leaderboardManager ? window.leaderboardManager.getTierBadgeSvg(tier, 28) : '';
+                  const nextTier = rankTiers[idx + 1];
+                  const bracketText = nextTier 
+                    ? `${tier.minXp.toLocaleString()} – ${(nextTier.minXp - 1).toLocaleString()} XP`
+                    : `${tier.minXp.toLocaleString()}+ XP`;
+
+                  return `
+                    <tr class="hover:bg-slate-50 transition-colors">
+                      <td class="py-3 px-4 text-center font-mono font-bold text-slate-500">${idx + 1}</td>
+                      <td class="py-3 px-4 text-center">${badgeSvg}</td>
+                      <td class="py-3 px-4 font-bold text-slate-700">${tier.family}</td>
+                      <td class="py-3 px-4">
+                        <input 
+                          type="text" 
+                          id="tier-name-${tier.id}"
+                          value="${tier.name}"
+                          class="w-full max-w-xs px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-500"
+                        >
+                      </td>
+                      <td class="py-3 px-4">
+                        <div class="flex items-center gap-2">
+                          <input 
+                            type="number" 
+                            id="tier-minxp-${tier.id}"
+                            value="${tier.minXp}"
+                            min="0"
+                            step="100"
+                            class="w-32 px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg font-mono text-slate-900 focus:ring-2 focus:ring-blue-500"
+                          >
+                          <span class="text-slate-400 font-mono text-[11px]">XP</span>
+                        </div>
+                      </td>
+                      <td class="py-3 px-4 text-right font-mono text-slate-600 font-bold whitespace-nowrap">
+                        ${bracketText}
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-3">
+            <button 
+              onclick="window.adminDashboard.resetRankTiers()"
+              class="px-4 py-2 text-xs font-bold rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            >
+              Reset to Defaults
+            </button>
+            <button 
+              onclick="window.adminDashboard.saveRankTiers()"
+              class="px-6 py-2 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <i data-lucide="save" class="w-4 h-4"></i> Save Rank Configuration
+            </button>
+          </div>
+
         </div>
 
-        <div class="space-y-6 text-xs">
-          <!-- Test Attempts -->
-          <div>
-            <h4 class="font-bold text-slate-900 uppercase tracking-wider mb-2">Test Attempts (${attempts.length})</h4>
-            <div class="space-y-2">
-              ${attempts.length === 0 ? '<p class="text-slate-400">No test attempts recorded.</p>' : attempts.map(a => {
-                const t = window.store.getTestById(a.testId);
-                return `
-                  <div class="p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between">
-                    <div>
-                      <span class="font-bold text-slate-900">${t ? t.title : 'CA Test'}</span>
-                      <span class="text-slate-500 block text-[11px]">${new Date(a.submittedAt).toLocaleDateString()}</span>
-                    </div>
-                    <div class="text-right">
-                      <span class="font-bold text-emerald-700">${a.finalScore.toFixed(1)} pts (${Math.round(a.percentage)}%)</span>
-                    </div>
-                  </div>
-                `;
-              }).join('')}
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  saveReferralXp() {
+    const input = document.getElementById('admin-referral-xp');
+    if (!input) return;
+
+    const val = parseInt(input.value, 10);
+    if (isNaN(val) || val < 0) {
+      window.app.showToast('Please enter a valid non-negative number for referral XP.', 'error');
+      return;
+    }
+
+    const curr = window.store.getXpSettings();
+    curr.referralXp = val;
+    window.store.saveXpSettings(curr);
+
+    if (window.leaderboardManager) {
+      window.leaderboardManager.calculateAllStandings();
+    }
+
+    window.app.showToast(`Referral XP updated to ${val} XP per referral!`, 'success');
+  }
+
+  saveRankTiers() {
+    const rankTiers = window.store.getRankTiers();
+    const updated = [];
+
+    for (let i = 0; i < rankTiers.length; i++) {
+      const t = rankTiers[i];
+      const nameInput = document.getElementById(`tier-name-${t.id}`);
+      const minXpInput = document.getElementById(`tier-minxp-${t.id}`);
+
+      const newName = nameInput ? nameInput.value.trim() : t.name;
+      const newMinXp = minXpInput ? parseInt(minXpInput.value, 10) : t.minXp;
+
+      if (!newName) {
+        window.app.showToast(`Tier #${i + 1} name cannot be empty.`, 'error');
+        return;
+      }
+      if (isNaN(newMinXp) || newMinXp < 0) {
+        window.app.showToast(`Tier #${i + 1} minimum XP must be a non-negative number.`, 'error');
+        return;
+      }
+
+      updated.push({
+        ...t,
+        name: newName,
+        minXp: newMinXp
+      });
+    }
+
+    // Validate ascending order
+    for (let i = 1; i < updated.length; i++) {
+      if (updated[i].minXp <= updated[i - 1].minXp) {
+        window.app.showToast(`Validation Error: ${updated[i].name} (${updated[i].minXp} XP) must have a higher threshold than ${updated[i - 1].name} (${updated[i - 1].minXp} XP).`, 'error');
+        return;
+      }
+    }
+
+    // Update maxXp for each tier
+    for (let i = 0; i < updated.length; i++) {
+      if (i < updated.length - 1) {
+        updated[i].maxXp = updated[i + 1].minXp - 1;
+      } else {
+        updated[i].maxXp = Infinity;
+      }
+    }
+
+    window.store.saveRankTiers(updated);
+
+    if (window.leaderboardManager) {
+      window.leaderboardManager.calculateAllStandings();
+    }
+
+    window.app.showToast('All 19 rank tiers and XP thresholds updated successfully!', 'success');
+    this.renderRanksConfig();
+  }
+
+  resetRankTiers() {
+    if (confirm('Are you sure you want to restore all 19 rank tiers to ICAI default names and XP thresholds?')) {
+      window.store.resetRankTiersToDefault();
+      if (window.leaderboardManager) {
+        window.leaderboardManager.calculateAllStandings();
+      }
+      window.app.showToast('Rank tiers restored to defaults.', 'info');
+      this.renderRanksConfig();
+    }
+  }
+
+  // --- 10. REFERRAL MANAGEMENT & AUDIT ---
+  renderReferrals() {
+    const container = document.getElementById('admin-content-area');
+    if (!container) return;
+
+    const referrals = window.store.getReferrals ? window.store.getReferrals() : [];
+    const totalPoints = referrals.reduce((sum, r) => sum + (r.pointsAwarded || 100), 0);
+
+    // Compute top referrers
+    const referrerMap = {};
+    referrals.forEach(r => {
+      const key = r.referrerUsername || r.referrerName || r.referrerId;
+      if (!referrerMap[key]) {
+        referrerMap[key] = {
+          name: r.referrerName || key,
+          username: r.referrerUsername || key,
+          count: 0,
+          points: 0
+        };
+      }
+      referrerMap[key].count += 1;
+      referrerMap[key].points += (r.pointsAwarded || 100);
+    });
+
+    container.innerHTML = `
+      <div class="space-y-6">
+        <!-- Top Stats Row -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex items-center gap-4">
+            <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="share-2" class="w-6 h-6"></i>
+            </div>
+            <div>
+              <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Total Referrals</span>
+              <span class="text-2xl font-black text-slate-900">${referrals.length}</span>
+              <span class="text-[11px] text-slate-400 block">Successful student signups</span>
             </div>
           </div>
 
-          <!-- Assignment Submissions -->
-          <div>
-            <h4 class="font-bold text-slate-900 uppercase tracking-wider mb-2">Assignment Submissions (${submissions.length})</h4>
-            <div class="space-y-2">
-              ${submissions.length === 0 ? '<p class="text-slate-400">No assignments submitted.</p>' : submissions.map(s => {
-                const asg = window.store.getAssignmentById(s.assignmentId);
-                return `
-                  <div class="p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between">
-                    <div>
-                      <span class="font-bold text-slate-900">${asg ? asg.title : 'Assignment'}</span>
-                      <span class="text-slate-500 block text-[11px]">${s.fileName}</span>
-                    </div>
-                    <div class="text-right">
-                      <span class="font-bold text-blue-600">${s.status}</span>
-                      ${s.status === 'Evaluated' ? `<span class="block text-emerald-700 font-bold">${s.marksObtained} Marks</span>` : ''}
-                    </div>
-                  </div>
-                `;
-              }).join('')}
+          <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex items-center gap-4">
+            <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="gift" class="w-6 h-6"></i>
             </div>
+            <div>
+              <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Points Awarded</span>
+              <span class="text-2xl font-black text-emerald-700">${totalPoints.toLocaleString()} Pts</span>
+              <span class="text-[11px] text-emerald-600 font-semibold block">100 points per verified referral</span>
+            </div>
+          </div>
+
+          <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex items-center gap-4">
+            <div class="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="trophy" class="w-6 h-6"></i>
+            </div>
+            <div>
+              <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Active Referrers</span>
+              <span class="text-2xl font-black text-purple-700">${Object.keys(referrerMap).length}</span>
+              <span class="text-[11px] text-slate-400 block">Student community builders</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Main Referral Audit Table Container -->
+        <div class="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+          <div class="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 class="text-base font-bold text-slate-900">Student Referral Audit Log</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Real-time log of student invitations, rewarded bonus points, and verified account activations</p>
+            </div>
+            
+            <div class="flex items-center gap-2">
+              <div class="relative w-64">
+                <input 
+                  type="text" 
+                  id="admin-referral-search" 
+                  placeholder="Search by student or username..." 
+                  oninput="window.adminDashboard.filterReferralsTable(this.value)"
+                  class="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs" id="admin-referrals-table">
+              <thead class="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
+                <tr>
+                  <th class="px-4 py-3">Date & Time</th>
+                  <th class="px-4 py-3">Referring Student</th>
+                  <th class="px-4 py-3">Referred Student</th>
+                  <th class="px-4 py-3">Course Level</th>
+                  <th class="px-4 py-3">Points Awarded</th>
+                  <th class="px-4 py-3">Audit Status</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100 font-medium text-slate-700" id="admin-referrals-tbody">
+                ${this.renderReferralRows(referrals)}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
     `;
 
     if (window.lucide) window.lucide.createIcons();
-    window.app.openModal('admin-generic-modal');
   }
+
+  renderReferralRows(referrals) {
+    if (!referrals || referrals.length === 0) {
+      return `
+        <tr>
+          <td colspan="6" class="px-4 py-8 text-center text-slate-400">
+            No referral records logged yet. Share student referral links to start tracking rewards.
+          </td>
+        </tr>
+      `;
+    }
+
+    return referrals.map(r => {
+      const dateStr = r.createdAt 
+        ? new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) 
+        : 'Recent';
+
+      return `
+        <tr class="hover:bg-slate-50 transition-colors">
+          <td class="px-4 py-3 text-slate-500 whitespace-nowrap">
+            <span class="font-mono text-[11px]">${dateStr}</span>
+          </td>
+          <td class="px-4 py-3">
+            <div class="font-bold text-slate-900">${r.referrerName || 'Referrer'}</div>
+            <div class="text-[10px] text-blue-600 font-mono">@${r.referrerUsername || 'unknown'}</div>
+          </td>
+          <td class="px-4 py-3">
+            <div class="font-bold text-slate-900">${r.referredName || 'New Student'}</div>
+            <div class="text-[10px] text-slate-500 font-mono">@${r.referredUsername || 'student'}</div>
+          </td>
+          <td class="px-4 py-3 whitespace-nowrap">
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+              ${r.examLevel || 'CA INTER'}
+            </span>
+          </td>
+          <td class="px-4 py-3 whitespace-nowrap">
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200">
+              +${r.pointsAwarded || 100} Points
+            </span>
+          </td>
+          <td class="px-4 py-3 whitespace-nowrap">
+            <span class="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700">
+              <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i> Verified
+            </span>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  filterReferralsTable(query) {
+    const q = (query || '').toLowerCase().trim();
+    const referrals = window.store.getReferrals ? window.store.getReferrals() : [];
+    const filtered = !q ? referrals : referrals.filter(r => 
+      (r.referrerName && r.referrerName.toLowerCase().includes(q)) ||
+      (r.referrerUsername && r.referrerUsername.toLowerCase().includes(q)) ||
+      (r.referredName && r.referredName.toLowerCase().includes(q)) ||
+      (r.referredUsername && r.referredUsername.toLowerCase().includes(q)) ||
+      (r.examLevel && r.examLevel.toLowerCase().includes(q))
+    );
+    const tbody = document.getElementById('admin-referrals-tbody');
+    if (tbody) {
+      tbody.innerHTML = this.renderReferralRows(filtered);
+      if (window.lucide) window.lucide.createIcons();
+    }
+  }
+
 }
+
 
 window.adminDashboard = new AdminDashboard();
