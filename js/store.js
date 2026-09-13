@@ -732,29 +732,6 @@ const DEFAULT_USERS = [
     createdAt: '2026-09-11T11:00:00.000Z'
   },
   {
-    id: 'usr-student-26',
-    name: 'Divya Nair',
-    username: 'divya_nair',
-    referralPoints: 100,
-    email: 'divya.nair@castudent.in',
-    password: 'divyapassword',
-    role: 'student',
-    caLevel: 'CA FOUNDATION',
-    registrationNo: 'SRO-0129845',
-    phone: '+91 98999 77889',
-    isActive: true,
-    state: 'Kerala',
-    city: 'Kochi',
-    district: 'Ernakulam',
-    subjectXp: {'Accounting': 320, 'Business Law': 300, 'Business Economics': 280, 'Quantitative Aptitude': 290},
-    baseXp: 260,
-    referralCount: 1,
-    previousRank: 27,
-    achievementBadges: ['First Solve'],
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-    createdAt: '2026-09-11T13:30:00.000Z'
-  },
-  {
     id: 'usr-student-27',
     name: 'Vicky Jain',
     username: 'vicky_jain',
@@ -1851,7 +1828,11 @@ class AppStore {
       localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(DEFAULT_USERS));
     } else {
       // Ensure admin password and username/email are updated and teachers exist
-      const users = JSON.parse(existingUsers);
+      let users = JSON.parse(existingUsers);
+      
+      // Force Purge problematic account @divya_nair if present in localStorage
+      users = users.filter(u => u.id !== 'usr-student-26' && u.username !== 'divya_nair' && u.email !== 'divya.nair@castudent.in');
+      
       const admin = users.find(u => u.role === 'admin');
       if (admin) {
         admin.password = 'eliterulebrker@220709';
@@ -1863,6 +1844,14 @@ class AppStore {
         users.push(DEFAULT_USERS[4], DEFAULT_USERS[5]);
       }
       localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+
+      // Also clean from current user if logged in as divya_nair
+      try {
+        const cu = JSON.parse(localStorage.getItem(STORAGE_KEYS.CURRENT_USER) || 'null');
+        if (cu && (cu.id === 'usr-student-26' || cu.username === 'divya_nair' || cu.email === 'divya.nair@castudent.in')) {
+          localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+        }
+      } catch (e) {}
     }
 
     // Ensure subjects are seeded once with default subjects, preserving custom subjects
@@ -2054,7 +2043,14 @@ class AppStore {
     const index = users.findIndex(u => u.id === user.id);
     let updated;
     if (index !== -1) {
-      users[index] = { ...users[index], ...user };
+      const existing = users[index];
+      // Security Policy: Student username cannot be modified once set unless by admin
+      const isAdmin = (window.auth && typeof window.auth.isAdmin === 'function') ? window.auth.isAdmin() : false;
+      let finalUsername = existing.username;
+      if (isAdmin && user.username) {
+        finalUsername = user.username;
+      }
+      users[index] = { ...existing, ...user, username: finalUsername };
       updated = users[index];
     } else {
       users.unshift(user);
@@ -2073,10 +2069,21 @@ class AppStore {
     return updated;
   }
   deleteUser(id) {
+    const user = this.getUserById(id);
     const users = this.getUsers().filter(u => u.id !== id);
     this.saveUsers(users);
     if (window.firebaseSync && typeof window.firebaseSync.deleteUser === 'function') {
       window.firebaseSync.deleteUser(id);
+    }
+    // Call backend API to permanently remove student, wipe attempts/submissions, and sync deletion to Firebase
+    if (typeof fetch !== 'undefined') {
+      const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+      const token = currentUser ? (currentUser.token || currentUser.email) : '';
+      fetch('/api/admin/users/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ studentId: id, username: user ? user.username : undefined, email: user ? user.email : undefined })
+      }).catch(err => console.warn('Backend user deletion error:', err));
     }
   }
   toggleUserStatus(id) {
@@ -3011,6 +3018,56 @@ class AppStore {
     }
 
     return { success: true, previousXp: prevXp, newXp, user };
+  }
+
+  adminBulkSetStudentXp(amount, reason, adminUser) {
+    const targetXp = Math.max(0, parseInt(amount, 10) || 0);
+    const users = this.getUsers();
+    const students = users.filter(u => u.role === 'student');
+    const now = new Date().toISOString();
+
+    students.forEach(st => {
+      const prevXp = Number(st.totalXp !== undefined ? st.totalXp : (st.baseXp || 0));
+      st.totalXp = targetXp;
+      st.baseXp = targetXp;
+
+      this.recordXpTransaction({
+        userId: st.id,
+        studentName: st.name || 'Student',
+        studentUsername: st.username || 'Not set',
+        points: targetXp - prevXp,
+        sourceType: 'admin_bulk_set',
+        source: 'admin_bulk_set',
+        action: 'bulk_set',
+        activityName: `Bulk Set XP: ${targetXp} XP`,
+        description: reason || `Admin bulk set XP to ${targetXp}`,
+        reason: reason || `Admin bulk set XP to ${targetXp}`,
+        adminUser: adminUser || 'admin',
+        previousXp: prevXp,
+        newXp: targetXp,
+        skipUserAdjustment: true,
+        createdAt: now
+      });
+
+      if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
+        window.firebaseSync.saveUser(st);
+      }
+    });
+
+    this.saveUsers(users);
+
+    // Call backend API
+    if (typeof fetch !== 'undefined') {
+      const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+      const token = currentUser ? (currentUser.token || currentUser.email) : '';
+      fetch('/api/admin/xp/bulk-set', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ amount: targetXp, reason: reason || 'Admin bulk set' })
+      }).catch(err => console.warn('Backend bulk-set sync error:', err));
+    }
+
+    return { success: true, count: students.length, targetXp };
   }
 
 }

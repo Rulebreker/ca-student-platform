@@ -344,6 +344,9 @@ class AuthManager {
         (u.username && u.username.replace(/^@+/, '').toLowerCase() === cleanReferredBy) ||
         (u.id && u.id.toLowerCase() === cleanReferredBy)
       );
+      if (!referrer) {
+        return { success: false, error: 'Invalid referral code. Please enter a valid referral code or leave the field blank.' };
+      }
     }
 
     const hashedPassword = this.hashPassword(password);

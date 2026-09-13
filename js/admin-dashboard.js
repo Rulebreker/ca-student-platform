@@ -303,11 +303,11 @@ class AdminDashboard {
         </div>
         <div class="flex items-center gap-2">
           <button 
-            onclick="window.adminDashboard.togglePasswordVisibility()"
-            class="px-3 py-2 text-xs font-semibold rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-1.5 cursor-pointer"
+            onclick="window.adminDashboard.syncBackendUsers(() => window.adminDashboard.renderStudents(true))"
+            class="px-3 py-2 text-xs font-semibold rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-1.5 cursor-pointer shadow-xs"
+            title="Reload directory from server"
           >
-            <i data-lucide="${this.showStudentPasswords ? 'eye-off' : 'eye'}" class="w-4 h-4"></i>
-            ${this.showStudentPasswords ? 'Hide Passwords' : 'Show Passwords'}
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
           </button>
           <button 
             onclick="window.adminDashboard.openAddStudentModal()"
@@ -490,7 +490,7 @@ class AdminDashboard {
           <thead>
             <tr class="border-b border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-500 uppercase tracking-wider">
               <th class="py-3 px-4">Student</th>
-              <th class="py-3 px-4">Password</th>
+              <th class="py-3 px-4">Account Security</th>
               <th class="py-3 px-4">CA Level & Reg No</th>
               <th class="py-3 px-4">Activity</th>
               <th class="py-3 px-4">Account Status</th>
@@ -508,7 +508,6 @@ class AdminDashboard {
             ` : paginated.map(st => {
               const studentAttempts = attempts.filter(a => a.userId === st.id).length;
               const studentSubs = submissions.filter(s => s.studentId === st.id).length;
-              const plainPwd = st.password || '••••••••';
               const isDeactivated = st.isActive === false;
 
               return `
@@ -530,18 +529,19 @@ class AdminDashboard {
                     </div>
                   </td>
 
-                  <!-- Student Password (Revealable for Admin) -->
+                  <!-- Student Security & Password -->
                   <td class="py-3.5 px-4">
                     <div class="flex items-center gap-2">
-                      <span class="font-mono text-xs px-2 py-1 rounded bg-slate-100 border border-slate-200 text-slate-800 select-all">
-                        ${this.showStudentPasswords ? plainPwd : '••••••••'}
+                      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                        <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-600"></i>
+                        Protected
                       </span>
                       <button 
                         onclick="window.adminDashboard.openResetPasswordModal('${st.id}')"
-                        class="text-[11px] text-blue-600 hover:text-blue-800 font-semibold cursor-pointer underline"
+                        class="px-2.5 py-1 text-xs font-semibold text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded border border-blue-200 flex items-center gap-1 cursor-pointer transition-colors"
                         title="Change / Reset Password"
                       >
-                        Reset
+                        <i data-lucide="key-round" class="w-3 h-3"></i> Reset Password
                       </button>
                     </div>
                   </td>
@@ -700,15 +700,19 @@ class AdminDashboard {
     this.renderStudents();
   }
 
-  deleteStudent(studentId) {
+  confirmRemoveStudent(studentId) {
     const student = window.store.getUserById(studentId);
     if (!student) return;
 
-    if (confirm(`Are you sure you want to permanently remove student "${student.name}"?`)) {
+    if (confirm(`Permanently remove student "${student.name}" (@${student.username || studentId})?\n\nThis will delete their account, quiz attempts, and paper submissions permanently from the server and database.`)) {
       window.store.deleteUser(studentId);
-      window.app.showToast(`Student ${student.name} deleted.`, 'info');
-      this.renderStudents();
+      window.app.showToast(`Student ${student.name} permanently removed.`, 'info');
+      this.renderStudents(true);
     }
+  }
+
+  deleteStudent(studentId) {
+    this.confirmRemoveStudent(studentId);
   }
 
   openAddStudentModal() {
@@ -3727,27 +3731,8 @@ This will remove the question paper, attached answer keys, and student submissio
       const res = await window.secureBackend.importMCQFromPdf(file, testId, rawText, pointsPerQ);
 
       if (res.success && res.questions && res.questions.length > 0) {
-        // Add extracted questions to store as DRAFT
-        const existingQs = window.store.getQuestionsByTestId(testId);
-
-        res.questions.forEach((q, idx) => {
-          q.id = 'q-' + Date.now() + '-' + idx;
-          q.testId = testId;
-          q.number = existingQs.length + idx + 1;
-          q.marks = pointsPerQ;
-          q.isDraft = true; // MANDATORY DRAFT
-          window.store.addQuestion(q);
-        });
-
-        if (test) {
-          const allQs = window.store.getQuestionsByTestId(testId);
-          test.totalQuestions = allQs.length;
-          test.maximumMarks = allQs.reduce((sum, q) => sum + (typeof q.marks === 'number' ? q.marks : pointsPerQ), 0);
-          window.store.updateTest(test);
-        }
-
-        window.app.showToast(`Successfully extracted ${res.questions.length} questions into Draft Review!`, 'success');
-        this.openQuestionBuilder(testId);
+        window.app.showToast(`Extracted ${res.questions.length} questions. Please review them below.`, 'info');
+        this.openExtractedMcqsReviewModal(testId, res.questions, pointsPerQ);
       } else {
         if (btn) {
           btn.disabled = false;
@@ -3772,6 +3757,272 @@ This will remove the question paper, attached answer keys, and student submissio
       if (currentBtn && currentBtn.disabled) {
         currentBtn.disabled = false;
         currentBtn.innerHTML = '<i data-lucide="sparkles" class="w-4 h-4"></i> Extract & Review Questions';
+        if (window.lucide) window.lucide.createIcons();
+      }
+    }
+  }
+
+  // --- INTERACTIVE REVIEW & VERIFICATION MODAL FOR EXTRACTED MCQs ---
+  openExtractedMcqsReviewModal(testId, extractedQuestions, defaultPoints) {
+    const test = window.store.getTestById(testId);
+    this._pendingImportQuestions = (extractedQuestions || []).map((q, idx) => {
+      let opts = q.options || {};
+      if (Array.isArray(opts)) {
+        opts = {
+          A: opts[0] || '',
+          B: opts[1] || '',
+          C: opts[2] || '',
+          D: opts[3] || ''
+        };
+      }
+      return {
+        tempId: 'temp-q-' + idx,
+        text: q.text || q.question || '',
+        options: {
+          A: (opts.A || '').toString().trim(),
+          B: (opts.B || '').toString().trim(),
+          C: (opts.C || '').toString().trim(),
+          D: (opts.D || '').toString().trim()
+        },
+        correctOption: (q.correctOption || q.correctAnswer || q.suggestedAnswer || 'A').toString().trim().toUpperCase(),
+        marks: parseFloat(q.marks || defaultPoints || (test ? test.marksPerCorrect : 2.0) || 2.0),
+        explanation: q.explanation || ''
+      };
+    });
+
+    this.renderExtractedMcqsReviewModalHtml(testId);
+  }
+
+  renderExtractedMcqsReviewModalHtml(testId) {
+    const test = window.store.getTestById(testId);
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    const questions = this._pendingImportQuestions || [];
+
+    modalContent.innerHTML = `
+      <div class="p-6 max-h-[85vh] flex flex-col">
+        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-4 flex-shrink-0">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="px-2.5 py-0.5 text-xs font-bold rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
+                Step 2 of 2: Review & Verification
+              </span>
+              <h3 class="text-base font-bold text-slate-900">Extracted MCQs (${questions.length})</h3>
+            </div>
+            <p class="text-xs text-slate-500 mt-0.5">Review question wording, options, and correct answers. You can edit any field or remove malformed questions before saving.</p>
+          </div>
+          <button onclick="window.adminDashboard.openPdfImportModal('${testId}')" class="text-slate-400 hover:text-slate-600 cursor-pointer">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <!-- Scrollable Questions List -->
+        <div class="flex-1 overflow-y-auto space-y-4 pr-1 mb-4" id="extracted-mcqs-list">
+          ${questions.length === 0 ? `
+            <div class="p-8 text-center text-slate-400">
+              <i data-lucide="help-circle" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
+              No questions in list. <button onclick="window.adminDashboard.openPdfImportModal('${testId}')" class="text-indigo-600 font-bold underline cursor-pointer">Re-upload PDF</button>
+            </div>
+          ` : questions.map((q, qIndex) => `
+            <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 relative" id="card-${q.tempId}">
+              <div class="flex items-center justify-between mb-2">
+                <span class="font-bold text-xs text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-md border border-indigo-200">
+                  Question #${qIndex + 1}
+                </span>
+                <div class="flex items-center gap-3">
+                  <div class="flex items-center gap-1.5">
+                    <label class="text-[11px] font-bold text-slate-600">Marks:</label>
+                    <input 
+                      type="number" 
+                      min="0.25" 
+                      step="0.25" 
+                      value="${q.marks}" 
+                      onchange="window.adminDashboard.updatePendingQField(${qIndex}, 'marks', this.value)"
+                      class="w-16 px-2 py-1 text-xs border border-slate-300 rounded bg-white font-bold"
+                    />
+                  </div>
+                  <button 
+                    onclick="window.adminDashboard.removePendingQuestion(${qIndex}, '${testId}')"
+                    class="text-rose-600 hover:text-rose-800 text-xs font-semibold flex items-center gap-1 p-1 hover:bg-rose-50 rounded cursor-pointer"
+                    title="Remove this question"
+                  >
+                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Remove
+                  </button>
+                </div>
+              </div>
+
+              <!-- Question Text -->
+              <div class="mb-3">
+                <label class="block text-[11px] font-bold text-slate-700 mb-1">Question Text</label>
+                <textarea 
+                  rows="2" 
+                  onchange="window.adminDashboard.updatePendingQField(${qIndex}, 'text', this.value)"
+                  class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-medium focus:ring-2 focus:ring-indigo-400"
+                >${q.text}</textarea>
+              </div>
+
+              <!-- Options A, B, C, D -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-3">
+                ${['A', 'B', 'C', 'D'].map(letter => `
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-6 text-center text-xs font-black rounded ${q.correctOption === letter ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-700'} py-1 flex-shrink-0">
+                      ${letter}
+                    </span>
+                    <input 
+                      type="text" 
+                      value="${(q.options[letter] || '').replace(/"/g, '&quot;')}" 
+                      onchange="window.adminDashboard.updatePendingQOption(${qIndex}, '${letter}', this.value)"
+                      class="flex-1 px-2.5 py-1 text-xs border border-slate-300 rounded bg-white font-medium"
+                      placeholder="Option ${letter}"
+                    />
+                  </div>
+                `).join('')}
+              </div>
+
+              <!-- Correct Option & Explanation -->
+              <div class="flex flex-col sm:flex-row gap-3 items-start sm:items-center bg-white p-2.5 rounded-lg border border-slate-200 text-xs">
+                <div class="flex items-center gap-2">
+                  <label class="font-bold text-emerald-800 flex items-center gap-1">
+                    <i data-lucide="check-circle-2" class="w-3.5 h-3.5 text-emerald-600"></i> Correct Answer:
+                  </label>
+                  <select 
+                    onchange="window.adminDashboard.updatePendingQField(${qIndex}, 'correctOption', this.value); window.adminDashboard.renderExtractedMcqsReviewModalHtml('${testId}');"
+                    class="px-2.5 py-1 text-xs border border-emerald-300 rounded-md bg-emerald-50 text-emerald-900 font-bold cursor-pointer"
+                  >
+                    ${['A', 'B', 'C', 'D'].map(opt => `
+                      <option value="${opt}" ${q.correctOption === opt ? 'selected' : ''}>Option ${opt}</option>
+                    `).join('')}
+                  </select>
+                </div>
+                <div class="flex-1 w-full">
+                  <input 
+                    type="text" 
+                    value="${(q.explanation || '').replace(/"/g, '&quot;')}" 
+                    onchange="window.adminDashboard.updatePendingQField(${qIndex}, 'explanation', this.value)"
+                    placeholder="Explanation / Answer Key Reference (optional)"
+                    class="w-full px-2.5 py-1 text-xs border border-slate-200 rounded text-slate-600 italic bg-slate-50/50"
+                  />
+                </div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+
+        <!-- Action Footer -->
+        <div class="pt-4 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 flex-shrink-0">
+          <div class="flex items-center gap-2">
+            <input type="checkbox" id="chk-publish-immediately" checked class="w-4 h-4 text-emerald-600 rounded cursor-pointer" />
+            <label for="chk-publish-immediately" class="text-xs font-bold text-slate-800 cursor-pointer">
+              Publish immediately to students (Make Live in Student Portal)
+            </label>
+          </div>
+          <div class="flex items-center justify-end gap-2.5">
+            <button 
+              type="button"
+              onclick="window.adminDashboard.openPdfImportModal('${testId}')"
+              class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+            >
+              Back to Upload
+            </button>
+            <button 
+              type="button"
+              id="btn-confirm-import-mcqs"
+              onclick="window.adminDashboard.commitImportMcqs('${testId}')"
+              ${questions.length === 0 ? 'disabled' : ''}
+              class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-colors"
+            >
+              <i data-lucide="check-circle-2" class="w-4 h-4"></i> Add / Import MCQs (${questions.length})
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  updatePendingQField(idx, field, val) {
+    if (this._pendingImportQuestions && this._pendingImportQuestions[idx]) {
+      this._pendingImportQuestions[idx][field] = field === 'marks' ? (parseFloat(val) || 2.0) : val;
+    }
+  }
+
+  updatePendingQOption(idx, letter, val) {
+    if (this._pendingImportQuestions && this._pendingImportQuestions[idx] && this._pendingImportQuestions[idx].options) {
+      this._pendingImportQuestions[idx].options[letter] = val;
+    }
+  }
+
+  removePendingQuestion(idx, testId) {
+    if (this._pendingImportQuestions) {
+      this._pendingImportQuestions.splice(idx, 1);
+      this.renderExtractedMcqsReviewModalHtml(testId);
+    }
+  }
+
+  async commitImportMcqs(testId) {
+    const questions = this._pendingImportQuestions || [];
+    if (questions.length === 0) {
+      window.app.showToast('No questions to import.', 'warning');
+      return;
+    }
+
+    const publishImmediately = document.getElementById('chk-publish-immediately') ? document.getElementById('chk-publish-immediately').checked : true;
+    const btn = document.getElementById('btn-confirm-import-mcqs');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Saving to Database...';
+    }
+
+    const adminUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = adminUser ? (adminUser.token || adminUser.email) : '';
+
+    try {
+      // 1. Call Backend Bulk Import API
+      const resp = await fetch('/api/tests/questions/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          testId: testId,
+          questions: questions,
+          publishImmediately: publishImmediately
+        })
+      });
+
+      const data = await resp.json();
+
+      if (resp.ok && data.success) {
+        // 2. Also save into local window.store
+        const savedQs = data.questions || [];
+        savedQs.forEach(q => {
+          if (window.store.addQuestion) {
+            window.store.addQuestion(q);
+          }
+        });
+
+        // Update test stats
+        const test = window.store.getTestById(testId);
+        if (test) {
+          const allQs = window.store.getQuestionsByTestId(testId);
+          test.totalQuestions = allQs.length;
+          test.maximumMarks = allQs.reduce((sum, q) => sum + (typeof q.marks === 'number' ? q.marks : 2.0), 0);
+          if (publishImmediately) test.isPublished = true;
+          window.store.updateTest(test);
+        }
+
+        window.app.showToast(`Successfully imported and published ${savedQs.length} MCQs!`, 'success');
+        this._pendingImportQuestions = null;
+        this.openQuestionBuilder(testId);
+      } else {
+        throw new Error(data.error || 'Server rejected question import.');
+      }
+    } catch (err) {
+      console.error('MCQ bulk import error:', err);
+      window.app.showToast('Error saving questions: ' + err.message, 'error');
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="check-circle-2" class="w-4 h-4"></i> Add / Import MCQs (${questions.length})`;
         if (window.lucide) window.lucide.createIcons();
       }
     }
@@ -4842,6 +5093,49 @@ This will remove the question paper, attached answer keys, and student submissio
           <div id="admin-xp-student-card" class="mt-4"></div>
         </div>
 
+        <!-- Bulk Set All Students' Points Card -->
+        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
+          <div class="flex items-center justify-between gap-4 mb-3">
+            <div>
+              <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <i data-lucide="layers" class="w-4 h-4 text-indigo-600"></i> Bulk Set All Students' Points
+              </h3>
+              <p class="text-xs text-slate-500 mt-0.5">Admin feature to set points for all registered students simultaneously to any valid number (e.g. 1000 or 0).</p>
+            </div>
+            <span class="px-2.5 py-1 text-xs font-bold rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200">
+              Bulk Admin Action
+            </span>
+          </div>
+          <div class="flex flex-col sm:flex-row gap-3 items-end">
+            <div class="w-full sm:w-48">
+              <label class="block text-xs font-bold text-slate-700 mb-1">Target Points</label>
+              <input 
+                type="number" 
+                id="admin-bulk-xp-amount" 
+                min="0" 
+                value="1000" 
+                placeholder="e.g. 1000"
+                class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm font-mono focus:ring-2 focus:ring-indigo-400"
+              />
+            </div>
+            <div class="w-full sm:flex-1">
+              <label class="block text-xs font-bold text-slate-700 mb-1">Reason / Reference Note</label>
+              <input 
+                type="text" 
+                id="admin-bulk-xp-reason" 
+                placeholder="e.g. Academic cycle recalibration to 1000 XP"
+                class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400"
+              />
+            </div>
+            <button 
+              onclick="window.adminDashboard.handleBulkSetXp()"
+              class="w-full sm:w-auto px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-colors whitespace-nowrap"
+            >
+              <i data-lucide="zap" class="w-4 h-4"></i> Apply Bulk Set
+            </button>
+          </div>
+        </div>
+
         <!-- XP Adjust Form (hidden until student found) -->
         <div id="admin-xp-adjust-panel" class="hidden bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
           <h3 class="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
@@ -5078,6 +5372,27 @@ This will remove the question paper, attached answer keys, and student submissio
     } else {
       window.app.showToast(`Error: ${result.error}`, 'error');
     }
+  }
+
+  handleBulkSetXp() {
+    const amountInput = document.getElementById('admin-bulk-xp-amount');
+    const reasonInput = document.getElementById('admin-bulk-xp-reason');
+    if (!amountInput) return;
+    const amount = parseInt(amountInput.value, 10);
+    if (isNaN(amount) || amount < 0) {
+      window.app.showToast('Please enter a valid non-negative XP number.', 'error');
+      return;
+    }
+    const reason = (reasonInput ? reasonInput.value.trim() : '') || `Admin bulk set XP to ${amount}`;
+    const allStudents = window.store.getStudents();
+    if (!confirm(`Are you sure you want to set points for ALL ${allStudents.length} registered students to ${amount} XP?\n\nReason: ${reason}\n\nThis will apply immediately across the leaderboard, student profiles, and server.`)) {
+      return;
+    }
+    const adminUser = window.auth ? window.auth.getCurrentUser() : null;
+    const adminName = adminUser ? (adminUser.name || adminUser.username || 'admin') : 'admin';
+    const res = window.store.adminBulkSetStudentXp(amount, reason, adminName);
+    window.app.showToast(`Successfully set ${amount} points for all ${res.count} students!`, 'success');
+    this.renderXpManagement();
   }
 
   // --- 11. XP RESET SETTINGS ---

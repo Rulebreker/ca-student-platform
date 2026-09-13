@@ -782,6 +782,23 @@ class App {
     window.auth.currentUser = user;
     window.auth.onAuthChange();
 
+    // Sync profile updates to backend server
+    if (typeof fetch !== 'undefined') {
+      const token = user.token || user.email;
+      fetch('/api/user/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          name: user.name,
+          phone: user.phone,
+          caLevel: user.caLevel,
+          state: user.state,
+          district: user.district,
+          city: user.city
+        })
+      }).catch(err => console.warn('Backend profile sync error:', err));
+    }
+
     // Update display name in profile modal header and dashboard
     const pName = document.getElementById('profile-display-name');
     if (pName) pName.textContent = name;
@@ -939,6 +956,23 @@ class App {
     window.store.updateUser(user);
     window.auth.currentUser = user;
     window.auth.onAuthChange();
+
+    // Sync profile updates to backend server
+    if (typeof fetch !== 'undefined') {
+      const token = user.token || user.email;
+      fetch('/api/user/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          name: user.name,
+          phone: user.phone,
+          caLevel: user.caLevel,
+          state: user.state,
+          district: user.district,
+          city: user.city
+        })
+      }).catch(err => console.warn('Backend profile sync error:', err));
+    }
 
     this.renderProfilePage();
     this.showToast('Profile information updated successfully!', 'success');

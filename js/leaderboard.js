@@ -498,7 +498,14 @@ class LeaderboardManager {
       baseXp = Number(student.baseXp || 0);
     }
 
-    const totalXp = mcqXp + descriptiveXp + referralXp + baseXp;
+    let totalXp = mcqXp + descriptiveXp + referralXp + baseXp;
+
+    // Hard Fix: If overall view (not subject or level filtered) and student.totalXp is explicitly defined
+    // (e.g. after an admin point reset, point deduction, or bulk-set),
+    // student.totalXp is authoritative so points never resurrect from historical attempts.
+    if (!isSubjectFiltered && !isLevelFiltered && student.totalXp !== undefined && student.totalXp !== null) {
+      totalXp = Number(student.totalXp);
+    }
 
     return {
       totalXp: Math.max(0, totalXp),

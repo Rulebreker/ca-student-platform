@@ -47,6 +47,35 @@
     }
   </script>
 
+  <!-- Anti-FOUC (Flash of Unauthenticated Content) Inline Pre-paint Script & CSS -->
+  <script>
+    (function() {
+      try {
+        var cu = localStorage.getItem('excellenceca_current_user') || localStorage.getItem('ca_platform_current_user');
+        if (cu && cu !== 'null' && cu !== '{}') {
+          var u = JSON.parse(cu);
+          if (u && (u.id || u.token)) {
+            document.documentElement.classList.add('user-is-authenticated');
+          }
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    html.user-is-authenticated #nav-guest-actions,
+    html.user-is-authenticated #hero-signin-btn,
+    html.user-is-authenticated #hero-register-btn,
+    html.user-is-authenticated #mobile-nav-register {
+      display: none !important;
+    }
+    html.user-is-authenticated #nav-user-container {
+      display: flex !important;
+    }
+    html.user-is-authenticated #hero-dashboard-btn {
+      display: inline-flex !important;
+    }
+  </style>
+
   <!-- Custom Styles -->
   <link rel="stylesheet" href="css/styles.css">
 </head>
@@ -977,8 +1006,12 @@
                 CA INTERMEDIATE
               </span>
             </div>
-            <h1 id="profile-page-name" class="text-2xl sm:text-3xl font-black tracking-tight text-white">Student Name</h1>
-            <span id="profile-page-username" class="text-xs text-blue-300 font-mono font-bold block mt-0.5">@username</span>
+            <div class="flex items-center justify-center sm:justify-start gap-2 mt-1">
+              <span id="profile-page-username" class="text-xs text-blue-300 font-mono font-bold">@username</span>
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/10 text-white/90 border border-white/20" title="Student usernames are permanent and cannot be modified">
+                <i data-lucide="lock" class="w-3 h-3 text-amber-300"></i> Permanent ICAI Identifier
+              </span>
+            </div>
             <p class="text-xs text-slate-300 mt-2 max-w-xl">
               Account actively enrolled in ICAI curriculum mock series. All evaluated submissions and private rankings are strictly confidential.
             </p>

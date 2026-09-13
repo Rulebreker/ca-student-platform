@@ -303,6 +303,11 @@ def load_backend_data():
                             u['referralPoints'] = 0
                         if 'referralCount' not in u:
                             u['referralCount'] = 0
+                # Force purge problematic duplicate @divya_nair account from database records
+                divya_keys = [k for k, u in list(d.get('users', {}).items()) if (u.get('username') or '').lower().lstrip('@') == 'divya_nair' or u.get('id') == 'usr-student-26' or (u.get('email') or '').lower() == 'divya.nair@castudent.in']
+                for k in divya_keys:
+                    del d['users'][k]
+                    sync_to_firebase("users/usr-student-26", None, method='DELETE')
                 sync_historical_xp(d)
                 return d
         except Exception:
@@ -428,16 +433,34 @@ def xp_reset_background_worker():
                         next_reset_dt = datetime.fromisoformat(next_reset_str.replace('Z', '+00:00'))
                         now_utc = datetime.now(timezone.utc)
                         if now_utc >= next_reset_dt:
-                            # Idempotency guard: prevent duplicate runs within 30 seconds
-                            if _last_checked_schedule_time and (now_utc - _last_checked_schedule_time).total_seconds() < 30:
+                            event_id = f"evt_{next_reset_str}"
+                            if reset_settings.get('lastExecutedEventId') == event_id:
+                                continue
+                            if _last_checked_schedule_time and (now_utc - _last_checked_schedule_time).total_seconds() < 15:
                                 continue
                             _last_checked_schedule_time = now_utc
-                            print(f"[XP Reset Engine] Scheduled automatic reset triggering at {now_utc.isoformat()}")
-                            execute_xp_reset(data, triggered_by='scheduled')
+                            reset_settings['lastExecutedEventId'] = event_id
+                            print(f"[XP Reset Engine] Scheduled automatic reset triggering at {now_utc.isoformat()} for event {event_id}")
+                            
+                            try:
+                                event = execute_xp_reset(data, triggered_by='scheduled')
+                                reset_settings['lastExecutionStatus'] = 'success'
+                                reset_settings['lastExecutionTime'] = now_utc.isoformat()
+                                reset_settings['lastExecutionError'] = None
+                                print(f"[XP Reset Engine] Automatic reset completed successfully: {event.get('studentsReset', 0)} students reset")
+                            except Exception as exec_err:
+                                print(f"[XP Reset Engine] ERROR during reset execution: {exec_err}")
+                                reset_settings['lastExecutionStatus'] = 'failed'
+                                reset_settings['lastExecutionTime'] = now_utc.isoformat()
+                                reset_settings['lastExecutionError'] = str(exec_err)
+
+                            data['xp_reset_settings'] = reset_settings
+                            save_backend_data(data)
+                            sync_to_firebase("xp_reset_settings", reset_settings, method='PUT')
                     except Exception as ex:
-                        pass
+                        print(f"[XP Reset Engine] Schedule check parse exception: {ex}")
         except Exception as e:
-            pass
+            print(f"[XP Reset Engine] Worker loop error: {e}")
 
 def authenticate_token(token_or_email):
     if not token_or_email:
@@ -729,11 +752,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             users_list = []
             for u in data.get('users', {}).values():
                 u_copy = dict(u)
-                pwd = u.get('password', '')
-                if pwd and str(pwd).startswith('sha256:'):
-                    u_copy['password'] = pwd
-                else:
-                    u_copy['password'] = 'sha256:protected:secured'
+                u_copy.pop('password', None)
+                u_copy['hasPassword'] = bool(u.get('password'))
+                u_copy['passwordProtected'] = True
                 users_list.append(u_copy)
             self.send_json(200, {'users': users_list, 'total': len(users_list)})
             return
@@ -1217,33 +1238,55 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     'role': 'student',
                     'token': new_token,
                     'isActive': True,
+                    'totalXp': 0,
+                    'baseXp': 0,
+                    'referralPoints': 0,
+                    'referralCount': 0,
                     'createdAt': datetime.now(timezone.utc).isoformat()
                 }
 
-                users_dict[raw_email] = new_user
-                data['users'] = users_dict
-
-                # 4 & 5. Dynamic Referral Reward Engine (Referrer & Referred Student Rewards)
+                # 4 & 5. Server-Side Referral Code Validation & Dynamic Reward Engine
                 raw_ref = str(post_data.get('referralCode') or post_data.get('ref') or '').strip().lstrip('@').lower()
                 ref_settings = data.get('referral_settings', {'referrerReward': 100, 'newStudentReward': 100})
                 referrer_reward = int(ref_settings.get('referrerReward', 100))
                 new_student_reward = int(ref_settings.get('newStudentReward', 100))
 
+                referrer = None
                 if raw_ref:
-                    referrer = next((u for u in users_dict.values() if (u.get('username') or '').lower() == raw_ref or (u.get('email') or '').lower() == raw_ref or u.get('id') == raw_ref), None)
-                    # Abuse prevention: prevent self-referral and ensure referrer exists
-                    if referrer and referrer.get('id') != user_id:
-                        if 'referrals' not in data:
-                            data['referrals'] = []
-                        
-                        # Abuse prevention: check if this referred account was already rewarded
-                        already_rewarded = any(
-                            r.get('referredId') == user_id or 
-                            (r.get('referredUsername') and r.get('referredUsername').lower() == raw_uname)
-                            for r in data['referrals']
-                        )
+                    referrer = next((u for u in users_dict.values() if 
+                        (u.get('username') or '').lower().lstrip('@') == raw_ref or 
+                        (u.get('email') or '').lower() == raw_ref or 
+                        u.get('id') == raw_ref or 
+                        (u.get('referralCode') or '').lower().lstrip('@') == raw_ref
+                    ), None)
+                    if not referrer or not referrer.get('isActive') or referrer.get('role') != 'student':
+                        self.send_json(400, {
+                            'success': False,
+                            'error': 'Invalid referral code. Please enter a valid referral code or leave the field blank.'
+                        })
+                        return
+                    if referrer.get('id') == user_id or (referrer.get('email') or '').lower() == raw_email:
+                        self.send_json(400, {
+                            'success': False,
+                            'error': 'Security Policy: Self-referrals are not permitted.'
+                        })
+                        return
 
-                        if not already_rewarded:
+                users_dict[raw_email] = new_user
+                data['users'] = users_dict
+
+                if referrer and referrer.get('id') != user_id:
+                    if 'referrals' not in data:
+                        data['referrals'] = []
+                    
+                    # Abuse prevention: check if this referred account was already rewarded
+                    already_rewarded = any(
+                        r.get('referredId') == user_id or 
+                        (r.get('referredUsername') and r.get('referredUsername').lower() == raw_uname)
+                        for r in data['referrals']
+                    )
+
+                    if not already_rewarded:
                             # 1. Credit Referrer Points & Count
                             referrer['referralPoints'] = int(referrer.get('referralPoints', 0)) + referrer_reward
                             referrer['referralCount'] = int(referrer.get('referralCount', 0)) + 1
@@ -1773,6 +1816,143 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(500, {'error': f'Admin XP adjust error: {str(e)}', 'code': 500})
                 return
 
+        # 2c-v-b. Admin Bulk Set Student XP
+        if path == '/api/admin/xp/bulk-set':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                req_data = json.loads(body.decode('utf-8'))
+                target_xp = max(0, int(req_data.get('amount', 0)))
+                reason = req_data.get('reason') or f"Admin bulk set all students to {target_xp} XP"
+                admin_name = user.get('name') or user.get('username') or 'admin'
+
+                data = load_backend_data()
+                users = data.get('users', {})
+                if 'xp_transactions' not in data:
+                    data['xp_transactions'] = []
+
+                affected = 0
+                now_iso = datetime.now(timezone.utc).isoformat()
+                now_ts = int(datetime.now().timestamp() * 1000)
+
+                for u in users.values():
+                    if u.get('role') == 'student':
+                        old_xp = int(u.get('totalXp', 0))
+                        diff = target_xp - old_xp
+                        u['totalXp'] = target_xp
+                        u['baseXp'] = 0
+                        affected += 1
+
+                        tx_id = f"tx-bulk-{now_ts}-{uuid.uuid4().hex[:6]}"
+                        tx = {
+                            'id': tx_id,
+                            'idempotencyKey': f"bulk_set_{u.get('id')}_{now_ts}",
+                            'userId': u.get('id'),
+                            'studentName': u.get('name') or 'Student',
+                            'studentUsername': u.get('username') or 'Not set',
+                            'sourceType': 'admin_adjustment',
+                            'source': 'admin_set',
+                            'sourceId': user.get('id'),
+                            'action': 'set',
+                            'activityName': f"Admin Bulk Set: {target_xp} XP",
+                            'description': reason,
+                            'points': diff,
+                            'previousXp': old_xp,
+                            'newXp': target_xp,
+                            'adminUser': admin_name,
+                            'resultStatus': f"Previous: {old_xp} XP → New: {target_xp} XP",
+                            'metadata': {'action': 'bulk_set', 'amount': target_xp, 'reason': reason},
+                            'createdAt': now_iso
+                        }
+                        data['xp_transactions'].insert(0, tx)
+                        sync_to_firebase(f"users/{u.get('id')}", {'totalXp': target_xp, 'baseXp': 0}, method='PATCH')
+                        sync_to_firebase(f"xp_transactions/{tx_id}", tx, method='PUT')
+
+                save_backend_data(data)
+                self.send_json(200, {
+                    'success': True,
+                    'count': affected,
+                    'amount': target_xp,
+                    'studentsAffected': affected,
+                    'message': f"All {affected} students' points have been set to {target_xp}."
+                })
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Bulk set error: {str(e)}', 'code': 500})
+                return
+
+        # 2c-v-c. Admin Remove Student (Hard-Fix End-to-End)
+        if path == '/api/admin/users/delete':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                req_data = json.loads(body.decode('utf-8'))
+                student_id = req_data.get('studentId') or req_data.get('id')
+                username = req_data.get('username')
+                email = req_data.get('email')
+
+                data = load_backend_data()
+                users = data.get('users', {})
+                target_key = None
+                target_student = None
+
+                for k, u in list(users.items()):
+                    if (student_id and u.get('id') == student_id) or \
+                       (username and (u.get('username') or '').lower().lstrip('@') == str(username).lower().lstrip('@')) or \
+                       (email and (u.get('email') or '').lower() == str(email).lower()):
+                        target_key = k
+                        target_student = u
+                        break
+
+                if not target_student:
+                    self.send_json(404, {'error': 'Student not found.', 'code': 404})
+                    return
+
+                # Prevent deleting administrators
+                if target_student.get('role') == 'admin':
+                    self.send_json(403, {'error': 'Security Policy: Administrator accounts cannot be deleted.', 'code': 403})
+                    return
+
+                # Permanently remove student
+                del users[target_key]
+                st_id = target_student.get('id')
+
+                # Clean up associated student records
+                if 'submissions' in data:
+                    data['submissions'] = [s for s in data['submissions'] if s.get('studentId') != st_id and s.get('userId') != st_id]
+                if 'test_attempts' in data:
+                    data['test_attempts'] = [a for a in data['test_attempts'] if a.get('userId') != st_id]
+                if 'notifications' in data:
+                    data['notifications'] = [n for n in data['notifications'] if n.get('userId') != st_id]
+                if 'bookmarks' in data:
+                    data['bookmarks'] = [b for b in data['bookmarks'] if b.get('userId') != st_id]
+
+                save_backend_data(data)
+
+                # Delete from Firebase Realtime Database
+                if st_id:
+                    sync_to_firebase(f"users/{st_id}", None, method='DELETE')
+
+                self.send_json(200, {
+                    'success': True,
+                    'message': f"Student account for {target_student.get('name')} (@{target_student.get('username')}) permanently deleted.",
+                    'deletedId': st_id
+                })
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Delete error: {str(e)}', 'code': 500})
+                return
+
         # 2c-vi. XP Reset Settings (Save schedule)
         if path == '/api/admin/xp-reset/settings':
             token = self.get_auth_token()
@@ -2251,6 +2431,158 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             except Exception as e:
                 self.send_json(500, {'error': f'Question delete error: {str(e)}', 'code': 500})
+                return
+
+        # 8b. Bulk Import MCQs (Save to database and Firebase)
+        if path == '/api/tests/questions/bulk':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                req_data = json.loads(body.decode('utf-8'))
+                test_id = req_data.get('testId')
+                incoming_questions = req_data.get('questions', [])
+                publish_immediately = bool(req_data.get('publishImmediately', False))
+
+                if not test_id or not incoming_questions:
+                    self.send_json(400, {'error': 'Missing testId or questions array', 'code': 400})
+                    return
+
+                data = load_backend_data()
+                tests = data.get('tests', [])
+                target_test = next((t for t in tests if t.get('id') == test_id), None)
+                if not target_test:
+                    self.send_json(404, {'error': f'Test with ID {test_id} not found', 'code': 404})
+                    return
+
+                if 'questions' not in data:
+                    data['questions'] = []
+
+                existing_qs = [q for q in data['questions'] if q.get('testId') == test_id]
+                next_number = len(existing_qs) + 1
+                saved_questions = []
+                now_ts = int(datetime.now().timestamp() * 1000)
+
+                for idx, in_q in enumerate(incoming_questions):
+                    q_text = str(in_q.get('text') or in_q.get('question') or '').strip()
+                    if not q_text:
+                        continue
+
+                    opts = in_q.get('options')
+                    if isinstance(opts, list):
+                        opt_dict = {}
+                        letters = ['A', 'B', 'C', 'D']
+                        for i, opt in enumerate(opts):
+                            if i < len(letters):
+                                opt_dict[letters[i]] = str(opt).strip()
+                        opts = opt_dict
+                    elif not isinstance(opts, dict):
+                        opts = {'A': '', 'B': '', 'C': '', 'D': ''}
+
+                    correct_opt = str(in_q.get('correctOption') or in_q.get('correctAnswer') or in_q.get('suggestedAnswer') or 'A').strip().upper()
+                    if correct_opt not in ['A', 'B', 'C', 'D']:
+                        correct_opt = 'A'
+
+                    marks = float(in_q.get('marks') or target_test.get('marksPerCorrect') or 2.0)
+                    q_id = in_q.get('id') or f"q-{now_ts}-{idx+1}"
+
+                    q_obj = {
+                        'id': q_id,
+                        'testId': test_id,
+                        'subjectId': target_test.get('subjectId', ''),
+                        'number': next_number,
+                        'text': q_text,
+                        'options': opts,
+                        'correctOption': correct_opt,
+                        'marks': marks,
+                        'negativeMarks': float(in_q.get('negativeMarks') or target_test.get('negativeMarkPerWrong') or 0.5),
+                        'explanation': str(in_q.get('explanation') or ''),
+                        'isDraft': not publish_immediately,
+                        'createdAt': datetime.now(timezone.utc).isoformat()
+                    }
+                    data['questions'].append(q_obj)
+                    saved_questions.append(q_obj)
+                    sync_to_firebase(f"questions/{q_id}", q_obj, method='PUT')
+                    next_number += 1
+
+                # Update target test question count & marks
+                all_test_qs = [q for q in data['questions'] if q.get('testId') == test_id]
+                target_test['totalQuestions'] = len(all_test_qs)
+                target_test['maximumMarks'] = sum(float(q.get('marks', 2.0)) for q in all_test_qs)
+                if publish_immediately:
+                    target_test['isPublished'] = True
+                save_backend_data(data)
+                sync_to_firebase(f"tests/{test_id}", target_test, method='PUT')
+
+                self.send_json(200, {
+                    'success': True,
+                    'count': len(saved_questions),
+                    'questions': saved_questions,
+                    'test': target_test
+                })
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Bulk question import error: {str(e)}', 'code': 500})
+                return
+
+        # 8c. Student Profile Update (Enforcing Username Immutability Server-Side)
+        if path == '/api/user/profile':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user:
+                self.send_json(401, {'error': 'Authentication required.', 'code': 401})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                req_data = json.loads(body.decode('utf-8'))
+
+                # IMMUTABILITY CHECK FOR STUDENTS:
+                req_username = req_data.get('username')
+                if user.get('role') == 'student' and req_username:
+                    current_uname = (user.get('username') or '').strip().lower().lstrip('@')
+                    clean_req_uname = str(req_username).strip().lower().lstrip('@')
+                    if clean_req_uname != current_uname:
+                        self.send_json(403, {
+                            'success': False,
+                            'error': 'Security Policy: Student username is permanent and cannot be modified after registration.'
+                        })
+                        return
+
+                data = load_backend_data()
+                users = data.get('users', {})
+                target_u = next((u for u in users.values() if u.get('id') == user.get('id')), None)
+                if not target_u:
+                    self.send_json(404, {'error': 'User not found.', 'code': 404})
+                    return
+
+                # Allowed updates for students
+                if 'name' in req_data and req_data['name'].strip():
+                    target_u['name'] = req_data['name'].strip()
+                if 'phone' in req_data:
+                    target_u['phone'] = str(req_data['phone']).strip()
+                if 'caLevel' in req_data:
+                    target_u['caLevel'] = str(req_data['caLevel']).strip()
+                if 'state' in req_data:
+                    target_u['state'] = str(req_data['state']).strip()
+                if 'district' in req_data:
+                    target_u['district'] = str(req_data['district']).strip()
+                    target_u['city'] = str(req_data['district']).strip()
+
+                save_backend_data(data)
+
+                sanitized = dict(target_u)
+                sanitized.pop('password', None)
+                sync_to_firebase(f"users/{target_u.get('id')}", sanitized, method='PATCH')
+
+                self.send_json(200, {'success': True, 'user': sanitized})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Profile update error: {str(e)}', 'code': 500})
                 return
 
         # 9. IMPORT MCQs FROM PDF
