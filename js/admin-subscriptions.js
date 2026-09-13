@@ -16,40 +16,146 @@
     return;
   }
 
-  // --- TAB 1: SUBSCRIPTIONS & MANUAL GRANTS ---
+  // --- CORE RESILIENCE & NETWORKING HELPERS ---
 
-  AdminDashboard.prototype.renderSubscriptions = async function() {
-    const container = document.getElementById('admin-content-area');
+  async function adminFetch(url, options = {}, timeoutMs = 10000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    const token = user ? (user.token || user.email) : '';
+
+    const headers = {
+      'Authorization': `Bearer ${token}`,
+      ...(options.headers || {})
+    };
+
+    try {
+      const resp = await fetch(url, {
+        ...options,
+        headers,
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (!resp.ok) {
+        let errDetail = `Server returned HTTP ${resp.status}`;
+        try {
+          const j = await resp.json();
+          if (j && (j.error || j.message)) errDetail = j.error || j.message;
+        } catch (_) {}
+        const error = new Error(errDetail);
+        error.status = resp.status;
+        throw error;
+      }
+      return await resp.json();
+    } catch (err) {
+      clearTimeout(timer);
+      if (err.name === 'AbortError') {
+        throw new Error(`Request to ${url} timed out after ${timeoutMs / 1000}s. Please verify backend server is running.`);
+      }
+      throw err;
+    }
+  }
+
+  function renderAdminError(containerId, title, errorMsg, retryFnName) {
+    const container = document.getElementById(containerId);
     if (!container) return;
-
-    // Show loading skeleton
     container.innerHTML = `
-      <div class="p-8 text-center text-slate-500">
-        <i data-lucide="loader-2" class="w-8 h-8 animate-spin mx-auto mb-2 text-rose-600"></i>
-        <p class="text-xs font-bold">Loading Subscriptions & Grants...</p>
+      <div class="p-8 my-8 text-center bg-white border border-rose-200 rounded-2xl shadow-xs max-w-lg mx-auto animate-in fade-in duration-150">
+        <div class="w-12 h-12 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-3 border border-rose-100">
+          <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+        </div>
+        <h3 class="text-base font-bold text-slate-900 mb-1">${title}</h3>
+        <p class="text-xs text-slate-500 mb-5 leading-relaxed">${errorMsg || 'Failed to load data from server.'}</p>
+        <button 
+          type="button"
+          onclick="window.adminDashboard.${retryFnName}()"
+          class="px-5 py-2.5 bg-rose-700 hover:bg-rose-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+        >
+          <i data-lucide="refresh-cw" class="w-4 h-4"></i> Retry Connection
+        </button>
       </div>
     `;
     if (window.lucide) window.lucide.createIcons();
+  }
 
-    // Fetch subscriptions & students
+  function normalizeSubsMap(data) {
+    let subs = {};
+    if (!data) return subs;
+    if (data.subscriptions && typeof data.subscriptions === 'object' && !Array.isArray(data.subscriptions)) {
+      return data.subscriptions;
+    }
+    const list = data.subscriptionsList || data.subscriptions || [];
+    if (Array.isArray(list)) {
+      list.forEach(item => {
+        const s = item.subscription || item;
+        const uid = s.userId || (item.student && item.student.id);
+        if (uid) subs[uid] = s;
+      });
+    }
+    return subs;
+  }
+
+  AdminDashboard.prototype.startTabPolling = function(tabName, callback, intervalMs = 7000) {
+    this.stopTabPolling();
+    this._activePollingTab = tabName;
+    this._pollingIntervalId = setInterval(async () => {
+      if (document.hidden) return;
+      if (this.currentTab !== tabName) {
+        this.stopTabPolling();
+        return;
+      }
+      try {
+        await callback();
+      } catch (err) {
+        console.warn(`[AdminPolling] Tab ${tabName} poll error:`, err);
+      }
+    }, intervalMs);
+  };
+
+  AdminDashboard.prototype.stopTabPolling = function() {
+    if (this._pollingIntervalId) {
+      clearInterval(this._pollingIntervalId);
+      this._pollingIntervalId = null;
+    }
+  };
+
+  // --- TAB 1: SUBSCRIPTIONS & MANUAL GRANTS ---
+
+  AdminDashboard.prototype.renderSubscriptions = async function(isSilent = false) {
+    const container = document.getElementById('admin-content-area');
+    if (!container) return;
+
+    if (!isSilent) {
+      container.innerHTML = `
+        <div class="p-8 text-center text-slate-500">
+          <i data-lucide="loader-2" class="w-8 h-8 animate-spin mx-auto mb-2 text-rose-600"></i>
+          <p class="text-xs font-bold">Loading Subscriptions & Grants...</p>
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    // Fetch subscriptions from backend
     let subs = {};
     try {
-      const user = window.auth ? window.auth.getCurrentUser() : null;
-      const token = user ? (user.token || user.email) : '';
-      const resp = await fetch('/api/admin/subscriptions', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.success && data.subscriptions) {
-          subs = data.subscriptions;
-          if (window.store) window.store.saveSubscriptions(subs);
-        }
+      const data = await adminFetch('/api/admin/subscriptions');
+      if (data && data.success) {
+        subs = normalizeSubsMap(data);
+        if (window.store) window.store.saveSubscriptions(subs);
       }
     } catch (e) {
-      console.warn('[AdminSubscriptions] Backend fetch failed, using store:', e);
-      if (window.store) subs = window.store.getSubscriptions();
+      console.warn('[AdminSubscriptions] Backend fetch failed, falling back to store:', e);
+      if (window.store) subs = window.store.getSubscriptions() || {};
+      if (Object.keys(subs).length === 0 && !isSilent) {
+        renderAdminError('admin-content-area', 'Unable to Load Subscriptions', e.message, 'renderSubscriptions');
+        return;
+      }
     }
+
+    // Start background live polling (refreshes silently every 7s)
+    this.startTabPolling('subscriptions', async () => {
+      await this.renderSubscriptions(true);
+    });
 
     const students = (window.store ? window.store.getStudents() : []) || [];
     const plans = (window.store ? window.store.getSubscriptionPlans() : {}) || {};
@@ -98,14 +204,16 @@
       if (tierFilter === 'plus' && (!isSubActive || tier !== 'plus')) return false;
       if (tierFilter === 'core' && (!isSubActive || tier !== 'core')) return false;
       if (tierFilter === 'trial' && (!isSubActive || !isTrial)) return false;
-      if (tierFilter === 'expired' && (!sub || sub.status !== 'expired' && (!sub.expiresAt || new Date(sub.expiresAt) >= now))) return false;
+      if (tierFilter === 'expired' && (!sub || (sub.status !== 'expired' && (!sub.expiresAt || new Date(sub.expiresAt) >= now)))) return false;
 
       if (search) {
         const name = (st.name || '').toLowerCase();
         const email = (st.email || '').toLowerCase();
         const phone = (st.phone || '').toLowerCase();
+        const uid = (st.id || '').toLowerCase();
+        const uname = (st.username || '').toLowerCase();
         const planName = (sub && sub.planName ? sub.planName : '').toLowerCase();
-        if (!name.includes(search) && !email.includes(search) && !phone.includes(search) && !planName.includes(search)) {
+        if (!name.includes(search) && !email.includes(search) && !phone.includes(search) && !uid.includes(search) && !uname.includes(search) && !planName.includes(search)) {
           return false;
         }
       }
@@ -117,7 +225,12 @@
         <!-- Header & Action Row -->
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h2 class="text-xl font-black text-slate-900 tracking-tight">Student Subscriptions & Pass Grants</h2>
+            <div class="flex items-center gap-2">
+              <h2 class="text-xl font-black text-slate-900 tracking-tight">Student Subscriptions & Pass Grants</h2>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Live Sync
+              </span>
+            </div>
             <p class="text-xs text-slate-500 mt-0.5">Manage active memberships, extend validity, grant complimentary passes, and monitor expiry schedules.</p>
           </div>
           <div class="flex items-center gap-2">
@@ -176,13 +289,35 @@
           </div>
         </div>
 
+        <!-- Bulk Actions Sticky Bar (Shows when checkboxes are selected) -->
+        <div id="admin-sub-bulk-bar" class="hidden items-center justify-between bg-rose-50 border border-rose-200 p-3.5 rounded-xl shadow-xs">
+          <div class="text-xs font-bold text-rose-900 flex items-center gap-2">
+            <i data-lucide="check-square" class="w-4 h-4 text-rose-600"></i>
+            <span><span id="admin-sub-selected-count">0</span> students selected</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button 
+              onclick="window.adminDashboard.openBulkSubscriptionModal()" 
+              class="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white font-bold text-xs rounded-lg shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <i data-lucide="layers" class="w-4 h-4"></i> Bulk Update Passes
+            </button>
+            <button 
+              onclick="window.adminDashboard.clearSubSelection()" 
+              class="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-lg transition-colors cursor-pointer"
+            >
+              Clear Selection
+            </button>
+          </div>
+        </div>
+
         <!-- Filter & Search Controls -->
         <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3.5 border border-slate-200 rounded-xl shadow-2xs">
           <div class="relative flex-1">
             <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3"></i>
             <input 
               type="text" 
-              placeholder="Search by student name, email, phone or pass..."
+              placeholder="Search by student name, email, phone, ID or pass tier..."
               value="${this.subSearch || ''}"
               oninput="window.adminDashboard.subSearch = this.value; window.adminDashboard.renderSubscriptions();"
               class="w-full pl-9 pr-3.5 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500 bg-slate-50 focus:bg-white transition-colors"
@@ -212,6 +347,15 @@
             <table class="w-full text-left text-sm">
               <thead>
                 <tr class="border-b border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  <th class="py-3 px-3 w-8">
+                    <input 
+                      type="checkbox" 
+                      id="admin-sub-select-all" 
+                      onchange="window.adminDashboard.toggleSelectAllSubs(this.checked)" 
+                      class="rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer"
+                      title="Select all"
+                    />
+                  </th>
                   <th class="py-3 px-4">Student</th>
                   <th class="py-3 px-4">Current Pass</th>
                   <th class="py-3 px-4">SLA / Quota</th>
@@ -223,7 +367,7 @@
               <tbody class="divide-y divide-slate-100">
                 ${filteredStudents.length === 0 ? `
                   <tr>
-                    <td colspan="6" class="py-12 text-center text-slate-400">
+                    <td colspan="7" class="py-12 text-center text-slate-400">
                       <i data-lucide="users" class="w-8 h-8 mx-auto mb-2 opacity-40"></i>
                       <p class="text-xs font-bold">No students found matching current filters.</p>
                     </td>
@@ -284,6 +428,14 @@
 
                   return `
                     <tr class="hover:bg-slate-50/70 transition-colors">
+                      <td class="py-3 px-3">
+                        <input 
+                          type="checkbox" 
+                          value="${st.id}" 
+                          onchange="window.adminDashboard.onSubRowCheckboxChange()" 
+                          class="admin-sub-select-user rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer"
+                        />
+                      </td>
                       <td class="py-3 px-4">
                         <span class="font-bold text-slate-900 block">${st.name || 'Unnamed Student'}</span>
                         <span class="text-xs text-slate-500 font-mono">${st.email || st.phone || '@' + (st.username || 'student')}</span>
@@ -294,12 +446,22 @@
                       <td class="py-3 px-4">${validityDisplay}</td>
                       <td class="py-3 px-4">${statusBadge}</td>
                       <td class="py-3 px-4 text-right">
-                        <button 
-                          onclick="window.adminDashboard.openManageSubscriptionModal('${st.id}')"
-                          class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-lg transition-colors cursor-pointer"
-                        >
-                          Manage Pass
-                        </button>
+                        <div class="inline-flex items-center gap-1.5">
+                          <button 
+                            onclick="window.adminDashboard.openManageSubscriptionModal('${st.id}')"
+                            class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                            title="Manage pass tier & expiry"
+                          >
+                            <i data-lucide="settings" class="w-3.5 h-3.5"></i> Manage Pass
+                          </button>
+                          <button 
+                            onclick="window.adminDashboard.openUserAuditTrailModal('${st.id}')"
+                            class="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                            title="View Lifecycle Audit Trail"
+                          >
+                            <i data-lucide="history" class="w-4 h-4"></i>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   `;
@@ -316,6 +478,238 @@
       </div>
     `;
 
+    if (window.lucide) window.lucide.createIcons();
+  };
+
+  // --- SELECTION & BULK ACTIONS FOR SUBSCRIPTIONS ---
+
+  AdminDashboard.prototype.toggleSelectAllSubs = function(checked) {
+    const boxes = document.querySelectorAll('.admin-sub-select-user');
+    boxes.forEach(b => b.checked = checked);
+    this.onSubRowCheckboxChange();
+  };
+
+  AdminDashboard.prototype.onSubRowCheckboxChange = function() {
+    const checked = document.querySelectorAll('.admin-sub-select-user:checked');
+    const bulkBar = document.getElementById('admin-sub-bulk-bar');
+    const countSpan = document.getElementById('admin-sub-selected-count');
+    if (bulkBar && countSpan) {
+      if (checked.length > 0) {
+        bulkBar.classList.remove('hidden');
+        bulkBar.classList.add('flex');
+        countSpan.textContent = checked.length;
+      } else {
+        bulkBar.classList.add('hidden');
+        bulkBar.classList.remove('flex');
+      }
+    }
+    const allBoxes = document.querySelectorAll('.admin-sub-select-user');
+    const selectAll = document.getElementById('admin-sub-select-all');
+    if (selectAll && allBoxes.length > 0) {
+      selectAll.checked = (checked.length === allBoxes.length);
+    }
+  };
+
+  AdminDashboard.prototype.clearSubSelection = function() {
+    this.toggleSelectAllSubs(false);
+  };
+
+  AdminDashboard.prototype.openBulkSubscriptionModal = function() {
+    const selectedBoxes = document.querySelectorAll('.admin-sub-select-user:checked');
+    const userIds = Array.from(selectedBoxes).map(b => b.value);
+    if (userIds.length === 0) {
+      window.app.showToast('Please select at least one student checkbox.', 'warning');
+      return;
+    }
+
+    const plans = (window.store ? window.store.getSubscriptionPlans() : {}) || {};
+    const planOptions = Object.values(plans).map(p => `
+      <option value="${p.id}">${p.name} (${p.tier.toUpperCase()} • ${p.durationDays}d • ₹${p.price})</option>
+    `).join('');
+
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    modalContent.innerHTML = `
+      <div class="p-6 space-y-5">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div>
+            <span class="text-xs font-bold text-rose-700 uppercase tracking-wider">Bulk Operation</span>
+            <h3 class="text-lg font-black text-slate-900 mt-0.5">Bulk Update Passes (${userIds.length} Students Selected)</h3>
+            <p class="text-xs text-slate-500">Apply plan tier changes or validity extensions to all selected students simultaneously.</p>
+          </div>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <form onsubmit="window.adminDashboard.submitBulkSubscription(event)" class="space-y-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Bulk Action Type <span class="text-rose-600">*</span></label>
+            <select id="admin-bulk-action-type" onchange="document.getElementById('bulk-plan-container').style.display = (this.value === 'grant' ? 'block' : 'none'); document.getElementById('bulk-days-container').style.display = (this.value === 'extend' ? 'block' : 'none');" class="w-full px-3.5 py-2.5 text-xs font-bold border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white">
+              <option value="grant">Grant / Change Pass Tier</option>
+              <option value="extend">Extend Subscription Expiry (+Days)</option>
+              <option value="suspend">Suspend Passes</option>
+              <option value="reactivate">Reactivate Passes</option>
+            </select>
+          </div>
+
+          <div id="bulk-plan-container">
+            <label class="block text-xs font-bold text-slate-700 mb-1">Select Pass Plan <span class="text-rose-600">*</span></label>
+            <select id="admin-bulk-plan" class="w-full px-3.5 py-2.5 text-xs font-bold border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white">
+              ${planOptions}
+            </select>
+          </div>
+
+          <div id="bulk-days-container" style="display:none;">
+            <label class="block text-xs font-bold text-slate-700 mb-1">Extension Days <span class="text-rose-600">*</span></label>
+            <select id="admin-bulk-days" class="w-full px-3.5 py-2.5 text-xs font-bold border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white">
+              <option value="7">+7 Days</option>
+              <option value="15">+15 Days</option>
+              <option value="30" selected>+30 Days (1 Month)</option>
+              <option value="60">+60 Days (2 Months)</option>
+              <option value="120">+120 Days (4 Months)</option>
+              <option value="365">+365 Days (1 Year)</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Administrative Reason / Note <span class="text-rose-600">*</span></label>
+            <textarea id="admin-bulk-reason" required rows="2" placeholder="e.g. Batch promotion, scholarship grant, term extension..." class="w-full px-3.5 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white"></textarea>
+          </div>
+
+          <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+            <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer">
+              Cancel
+            </button>
+            <button type="submit" id="admin-bulk-submit-btn" class="px-5 py-2 text-xs font-bold text-white bg-rose-700 hover:bg-rose-800 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer">
+              <i data-lucide="layers" class="w-4 h-4"></i> Apply to ${userIds.length} Students
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+    window.app.openModal('admin-generic-modal');
+    if (window.lucide) window.lucide.createIcons();
+  };
+
+  AdminDashboard.prototype.submitBulkSubscription = async function(event) {
+    event.preventDefault();
+    const selectedBoxes = document.querySelectorAll('.admin-sub-select-user:checked');
+    const userIds = Array.from(selectedBoxes).map(b => b.value);
+    const action = document.getElementById('admin-bulk-action-type').value;
+    const planId = document.getElementById('admin-bulk-plan') ? document.getElementById('admin-bulk-plan').value : '';
+    const days = document.getElementById('admin-bulk-days') ? document.getElementById('admin-bulk-days').value : 30;
+    const reason = document.getElementById('admin-bulk-reason').value.trim();
+
+    const submitBtn = document.getElementById('admin-bulk-submit-btn');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Processing...';
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    try {
+      const data = await adminFetch('/api/admin/subscriptions/manage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userIds: userIds,
+          action: action,
+          planId: planId,
+          days: parseInt(days, 10),
+          extensionDays: parseInt(days, 10),
+          reason: reason
+        })
+      });
+      window.app.showToast(`Successfully updated ${userIds.length} student passes!`, 'success');
+      window.app.closeModal('admin-generic-modal');
+      this.clearSubSelection();
+      this.renderSubscriptions();
+    } catch (err) {
+      console.error('[AdminSubscriptions] Bulk update error:', err);
+      window.app.showToast(err.message || 'Bulk update failed.', 'error');
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = `<i data-lucide="layers" class="w-4 h-4"></i> Apply to ${userIds.length} Students`;
+        if (window.lucide) window.lucide.createIcons();
+      }
+    }
+  };
+
+  // --- PER-USER AUDIT TRAIL MODAL ---
+
+  AdminDashboard.prototype.openUserAuditTrailModal = async function(studentId) {
+    const student = window.store ? window.store.getUserById(studentId) : null;
+    const sub = (window.store ? window.store.getUserSubscription(studentId) : null) || {};
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    let auditLogs = [];
+    try {
+      const data = await adminFetch('/api/admin/audit-logs');
+      if (data && data.logs) {
+        auditLogs = data.logs.filter(l => l.targetId === studentId || (l.details && l.details.includes(studentId)));
+      }
+    } catch (e) {
+      console.warn('[AdminSubscriptions] Audit log fetch failed:', e);
+    }
+
+    const historyItems = (sub.history || []).slice().reverse();
+
+    modalContent.innerHTML = `
+      <div class="p-6 space-y-5">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div>
+            <span class="text-xs font-bold text-rose-700 uppercase tracking-wider">Per-User Audit Trail</span>
+            <h3 class="text-lg font-black text-slate-900 mt-0.5">Subscription Lifecycle: ${student ? student.name : studentId}</h3>
+            <p class="text-xs text-slate-500">${student ? (student.email || student.phone || student.username || student.id) : studentId}</p>
+          </div>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="max-h-96 overflow-y-auto space-y-3 pr-1">
+          ${historyItems.length === 0 && auditLogs.length === 0 ? `
+            <div class="text-center py-8 text-slate-400 text-xs">
+              <i data-lucide="file-clock" class="w-8 h-8 mx-auto mb-2 opacity-40"></i>
+              No historical subscription audit records found for this student.
+            </div>
+          ` : `
+            <div class="space-y-2.5">
+              ${historyItems.map(h => `
+                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs space-y-1">
+                  <div class="flex items-center justify-between">
+                    <span class="font-bold text-slate-800 uppercase text-[10px] bg-slate-200 px-2 py-0.5 rounded">${(h.action || 'Action').replace(/_/g, ' ')}</span>
+                    <span class="text-[10px] text-slate-400 font-mono">${new Date(h.timestamp).toLocaleString('en-IN')}</span>
+                  </div>
+                  <p class="text-slate-700 font-medium">${h.details || 'Subscription updated'}</p>
+                  <span class="text-[10px] text-slate-400 block">By: ${h.adminName || h.adminId || 'Administrator'}</span>
+                </div>
+              `).join('')}
+              ${auditLogs.map(a => `
+                <div class="bg-blue-50/50 p-3 rounded-xl border border-blue-100 text-xs space-y-1">
+                  <div class="flex items-center justify-between">
+                    <span class="font-bold text-blue-900 uppercase text-[10px] bg-blue-100 px-2 py-0.5 rounded">${(a.action || 'Audit').replace(/_/g, ' ')}</span>
+                    <span class="text-[10px] text-slate-400 font-mono">${new Date(a.timestamp).toLocaleString('en-IN')}</span>
+                  </div>
+                  <p class="text-slate-700">${a.details || ''}</p>
+                  <span class="text-[10px] text-slate-400 block">Admin: ${a.adminEmail || a.adminId || 'Admin'}</span>
+                </div>
+              `).join('')}
+            </div>
+          `}
+        </div>
+
+        <div class="flex justify-end pt-3 border-t border-slate-100">
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer">
+            Close
+          </button>
+        </div>
+      </div>
+    `;
+    window.app.openModal('admin-generic-modal');
     if (window.lucide) window.lucide.createIcons();
   };
 
@@ -359,7 +753,7 @@
             <span class="text-xs font-semibold text-slate-500 block">Current Status</span>
             <span class="text-sm font-black text-slate-900 block mt-0.5">
               ${sub.planName || 'Free Basic Tier'} 
-              <span class="text-xs font-bold px-2 py-0.5 rounded-full ${sub.status === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}">
+              <span class="text-xs font-bold px-2 py-0.5 rounded-full ${sub.status === 'active' || sub.status === 'manually_granted' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}">
                 ${sub.status || 'free'}
               </span>
             </span>
@@ -489,22 +883,29 @@
 
     const payload = {
       studentId: studentId,
+      userId: studentId,
       action: action,
       reason: reason
     };
 
     if (action === 'extend' || action === 'shorten') {
-      payload.extensionDays = parseInt(document.getElementById('admin-sub-days-select').value, 10);
+      const days = parseInt(document.getElementById('admin-sub-days-select').value, 10);
+      payload.extensionDays = days;
+      payload.days = days;
     } else if (action === 'grant') {
       payload.planId = document.getElementById('admin-sub-plan-select').value;
-      payload.extensionDays = parseInt(document.getElementById('admin-sub-days-select').value, 10);
+      const days = parseInt(document.getElementById('admin-sub-days-select').value, 10);
+      payload.extensionDays = days;
+      payload.days = days;
     } else if (action === 'custom_expiry') {
       const dt = document.getElementById('admin-sub-custom-date').value;
       if (!dt) {
         window.app.showToast('Please select a valid expiry date.', 'error');
         return;
       }
-      payload.expiryDate = new Date(dt).toISOString();
+      const isoDate = new Date(dt).toISOString();
+      payload.expiryDate = isoDate;
+      payload.customExpiry = isoDate;
     }
 
     if (submitBtn) {
@@ -514,31 +915,15 @@
     }
 
     try {
-      const user = window.auth ? window.auth.getCurrentUser() : null;
-      const token = user ? (user.token || user.email) : '';
-      const resp = await fetch('/api/admin/subscriptions/manage', {
+      const data = await adminFetch('/api/admin/subscriptions/manage', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-
-      const data = await resp.json();
-      if (!resp.ok || !data.success) {
-        window.app.showToast(data.error || 'Failed to update subscription.', 'error');
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> Apply Changes`;
-        }
-        return;
-      }
 
       window.app.showToast(data.message || 'Subscription successfully updated!', 'success');
       window.app.closeModal('admin-generic-modal');
 
-      // Update store
       if (data.subscription && window.store) {
         window.store.saveSubscription(data.subscription);
       }
@@ -546,10 +931,11 @@
       this.renderSubscriptions();
     } catch (err) {
       console.error('[AdminSubscriptions] Manage sub error:', err);
-      window.app.showToast('Network error while updating subscription.', 'error');
+      window.app.showToast(err.message || 'Failed to update subscription.', 'error');
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> Apply Changes`;
+        if (window.lucide) window.lucide.createIcons();
       }
     }
   };
@@ -667,32 +1053,19 @@
     }
 
     try {
-      const user = window.auth ? window.auth.getCurrentUser() : null;
-      const token = user ? (user.token || user.email) : '';
-      const resp = await fetch('/api/admin/subscriptions/manage', {
+      const data = await adminFetch('/api/admin/subscriptions/manage', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           studentId: studentId,
+          userId: studentId,
           action: 'grant',
           planId: planId,
           extensionDays: days,
+          days: days,
           reason: reason
         })
       });
-
-      const data = await resp.json();
-      if (!resp.ok || !data.success) {
-        window.app.showToast(data.error || 'Failed to grant pass.', 'error');
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.innerHTML = `<i data-lucide="award" class="w-4 h-4"></i> Authorize & Grant Pass`;
-        }
-        return;
-      }
 
       window.app.showToast(data.message || 'Pass successfully granted to student!', 'success');
       window.app.closeModal('admin-generic-modal');
@@ -704,49 +1077,63 @@
       this.renderSubscriptions();
     } catch (err) {
       console.error('[AdminSubscriptions] Manual grant error:', err);
-      window.app.showToast('Network error while granting pass.', 'error');
+      window.app.showToast(err.message || 'Network error while granting pass.', 'error');
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.innerHTML = `<i data-lucide="award" class="w-4 h-4"></i> Authorize & Grant Pass`;
+        if (window.lucide) window.lucide.createIcons();
       }
     }
   };
 
   // --- TAB 2: PAYMENT VERIFICATIONS ---
 
-  AdminDashboard.prototype.renderPaymentVerifications = async function() {
+  AdminDashboard.prototype.renderPaymentVerifications = async function(isSilent = false) {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
 
-    container.innerHTML = `
-      <div class="p-8 text-center text-slate-500">
-        <i data-lucide="loader-2" class="w-8 h-8 animate-spin mx-auto mb-2 text-rose-600"></i>
-        <p class="text-xs font-bold">Loading UPI Payment Sessions...</p>
-      </div>
-    `;
-    if (window.lucide) window.lucide.createIcons();
+    this.startTabPolling('payments', async () => {
+      await this.renderPaymentVerifications(true);
+    });
+
+    if (!isSilent) {
+      container.innerHTML = `
+        <div class="p-8 text-center text-slate-500">
+          <i data-lucide="loader-2" class="w-8 h-8 animate-spin mx-auto mb-2 text-rose-600"></i>
+          <p class="text-xs font-bold">Loading UPI Payment Sessions...</p>
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+    }
 
     let payments = [];
     try {
-      const user = window.auth ? window.auth.getCurrentUser() : null;
-      const token = user ? (user.token || user.email) : '';
-      const resp = await fetch('/api/admin/payments', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.success && data.payments) {
-          payments = data.payments;
-          if (window.store) window.store.savePaymentSessions(payments);
-        }
+      const data = await adminFetch('/api/admin/payments');
+      if (data && data.payments) {
+        payments = data.payments;
+        if (window.store) window.store.savePaymentSessions(payments);
       }
     } catch (e) {
       console.warn('[AdminSubscriptions] Backend payments fetch failed, using store:', e);
       if (window.store) payments = window.store.getPaymentSessions();
+      if (!payments || payments.length === 0) {
+        this.renderAdminError(container, 'Failed to load UPI payment verification queue. The server may be restarting or unreachable.', () => this.renderPaymentVerifications());
+        return;
+      }
     }
 
-    const currentFilter = this.paymentFilter || 'pending'; // default to pending for urgent action
+    const currentFilter = this.paymentFilter || 'pending';
     const search = (this.paymentSearch || '').toLowerCase().trim();
+    const now = new Date();
+
+    // Calculate UTR frequencies for duplicate fraud detection
+    const utrCounts = {};
+    payments.forEach(p => {
+      const u = (p.utr || '').trim().toUpperCase();
+      if (u && u !== 'N/A' && u !== 'NONE') {
+        utrCounts[u] = (utrCounts[u] || 0) + 1;
+      }
+    });
 
     // Counts
     const pendingCount = payments.filter(p => p.status === 'pending_verification').length;
@@ -778,8 +1165,13 @@
         <!-- Header -->
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h2 class="text-xl font-black text-slate-900 tracking-tight">UPI Payment Proof Verifications</h2>
-            <p class="text-xs text-slate-500 mt-0.5">Inspect submitted UTR transaction codes, verify bank screenshots, activate student passes, and award instant bonus XP.</p>
+            <div class="flex items-center gap-2">
+              <h2 class="text-xl font-black text-slate-900 tracking-tight">UPI Payment Proof Verifications</h2>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Live Sync
+              </span>
+            </div>
+            <p class="text-xs text-slate-500 mt-0.5">Inspect submitted UTR transaction codes, detect duplicate fraud, verify receipts, and activate student passes.</p>
           </div>
           <div class="flex items-center gap-2">
             <button 
@@ -882,6 +1274,10 @@
                   const isPending = p.status === 'pending_verification' || p.status === 'late_payment';
                   const isLate = p.status === 'late_payment';
                   const dateStr = p.submittedAt ? new Date(p.submittedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '--';
+                  const pendingAgeDays = p.submittedAt ? (now - new Date(p.submittedAt)) / (1000 * 60 * 60 * 24) : 0;
+                  const isPendingOverdue = isPending && pendingAgeDays >= 3;
+                  const cleanUtr = (p.utr || '').trim().toUpperCase();
+                  const isDupUtr = cleanUtr && cleanUtr !== 'N/A' && (utrCounts[cleanUtr] || 0) > 1;
 
                   let statusBadge = '';
                   if (p.status === 'approved') {
@@ -918,6 +1314,11 @@
                           ` : ''}
                         </div>
                         <span class="text-[10px] text-slate-400 font-mono block mt-0.5">ID: ${p.sessionId}</span>
+                        ${isDupUtr ? `
+                          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200 mt-1 block w-fit" title="Duplicate UTR detected across ${utrCounts[cleanUtr]} sessions!">
+                            <i data-lucide="alert-octagon" class="w-3 h-3"></i> Duplicate UTR (${utrCounts[cleanUtr]}x)
+                          </span>
+                        ` : ''}
                       </td>
                       <td class="py-3 px-4 text-xs font-mono text-slate-600">
                         ${p.channelUpiId || (p.channelSnapshot ? p.channelSnapshot.upiId : 'HDFC UPI')}
@@ -928,7 +1329,7 @@
                           <button 
                             onclick="window.adminDashboard.openScreenshotModal('${p.screenshot}', 'UTR: ${p.utr || p.sessionId}')"
                             class="group relative w-10 h-10 rounded-lg overflow-hidden border border-slate-300 hover:border-rose-500 transition-colors shadow-2xs block"
-                            title="Click to zoom screenshot"
+                            title="Click to zoom & inspect screenshot"
                           >
                             <img src="${p.screenshot}" alt="Proof" class="w-full h-full object-cover group-hover:scale-110 transition-transform">
                             <div class="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors flex items-center justify-center">
@@ -937,7 +1338,14 @@
                           </button>
                         ` : '<span class="text-xs text-slate-400">No image</span>'}
                       </td>
-                      <td class="py-3 px-4">${statusBadge}</td>
+                      <td class="py-3 px-4">
+                        ${statusBadge}
+                        ${isPendingOverdue ? `
+                          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-200 mt-1 block w-fit animate-pulse" title="Submitted ${Math.floor(pendingAgeDays)} days ago - urgent attention needed">
+                            <i data-lucide="clock" class="w-3 h-3"></i> Pending &gt; 3 Days
+                          </span>
+                        ` : ''}
+                      </td>
                       <td class="py-3 px-4 text-right">
                         ${isPending ? `
                           <div class="inline-flex items-center gap-1.5">
@@ -986,31 +1394,20 @@
     }
 
     try {
-      const user = window.auth ? window.auth.getCurrentUser() : null;
-      const token = user ? (user.token || user.email) : '';
-      const resp = await fetch('/api/admin/payments/verify', {
+      const data = await adminFetch('/api/admin/payments/verify', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sessionId: sessionId,
           action: action
         })
       });
 
-      const data = await resp.json();
-      if (!resp.ok || !data.success) {
-        window.app.showToast(data.error || 'Failed to verify payment.', 'error');
-        return;
-      }
-
       window.app.showToast(data.message || 'Payment successfully verified and pass activated!', 'success');
       this.renderPaymentVerifications();
     } catch (err) {
       console.error('[AdminSubscriptions] Verify payment error:', err);
-      window.app.showToast('Network error while processing verification.', 'error');
+      window.app.showToast(err.message || 'Failed to verify payment.', 'error');
     }
   };
 
@@ -1038,8 +1435,9 @@
               <option value="Amount mismatch with bank receipt">Amount mismatch with bank receipt</option>
               <option value="Duplicate or previously submitted UTR">Duplicate or previously submitted UTR</option>
               <option value="Blurred / Illegible payment screenshot">Blurred / Illegible payment screenshot</option>
-              <option value="Session expired and payment not received">Session expired and payment not received</option>
-              <option value="Other">Custom Reason</option>
+              <option value="Payment transferred to incorrect account / UPI ID">Payment transferred to incorrect account / UPI ID</option>
+              <option value="Session expired and funds not credited">Session expired and funds not credited</option>
+              <option value="Other">Other</option>
             </select>
             <textarea 
               id="admin-reject-reason-text" 
@@ -1078,14 +1476,9 @@
     const reason = document.getElementById('admin-reject-reason-text').value.trim();
 
     try {
-      const user = window.auth ? window.auth.getCurrentUser() : null;
-      const token = user ? (user.token || user.email) : '';
-      const resp = await fetch('/api/admin/payments/verify', {
+      const data = await adminFetch('/api/admin/payments/verify', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sessionId: sessionId,
           action: 'reject',
@@ -1093,46 +1486,64 @@
         })
       });
 
-      const data = await resp.json();
-      if (!resp.ok || !data.success) {
-        window.app.showToast(data.error || 'Failed to reject payment.', 'error');
-        return;
-      }
-
       window.app.showToast('Payment rejected and student notified.', 'info');
       window.app.closeModal('admin-generic-modal');
       this.renderPaymentVerifications();
     } catch (err) {
       console.error('[AdminSubscriptions] Reject payment error:', err);
-      window.app.showToast('Network error while rejecting payment.', 'error');
+      window.app.showToast(err.message || 'Failed to reject payment.', 'error');
     }
   };
 
+  // --- ZOOMABLE / ROTATABLE SCREENSHOT MODAL ---
+
   AdminDashboard.prototype.openScreenshotModal = function(imgSrc, title) {
+    this._screenshotScale = 1.0;
+    this._screenshotRotate = 0;
     const modalContent = document.getElementById('admin-generic-modal-content');
     if (!modalContent) return;
 
     modalContent.innerHTML = `
-      <div class="p-6 space-y-4">
+      <div class="p-5 space-y-4">
         <div class="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
-            <span class="text-xs font-bold text-rose-700 uppercase tracking-wider">Payment Receipt Preview</span>
-            <h3 class="text-sm font-black text-slate-900 mt-0.5">${title}</h3>
+            <span class="text-xs font-bold text-rose-700 uppercase tracking-wider">Payment Receipt Inspection</span>
+            <h3 class="text-sm font-black text-slate-900 mt-0.5">${title || 'Bank Screenshot'}</h3>
           </div>
           <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg">
             <i data-lucide="x" class="w-5 h-5"></i>
           </button>
         </div>
 
-        <div class="max-h-[75vh] overflow-auto rounded-xl border border-slate-200 bg-slate-950 flex items-center justify-center p-2">
-          <img src="${imgSrc}" alt="Receipt Full" class="max-w-full max-h-[70vh] object-contain rounded shadow-lg">
+        <!-- Inspection Toolbar -->
+        <div class="flex items-center justify-between bg-slate-100 px-3 py-2 rounded-xl text-xs">
+          <div class="flex items-center gap-1.5">
+            <button type="button" onclick="window.adminDashboard.zoomScreenshot(0.25)" class="p-1.5 bg-white hover:bg-slate-200 rounded-lg text-slate-700 font-bold flex items-center gap-1 shadow-2xs cursor-pointer" title="Zoom In">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+            </button>
+            <button type="button" onclick="window.adminDashboard.zoomScreenshot(-0.25)" class="p-1.5 bg-white hover:bg-slate-200 rounded-lg text-slate-700 font-bold flex items-center gap-1 shadow-2xs cursor-pointer" title="Zoom Out">
+              <i data-lucide="zoom-out" class="w-4 h-4"></i>
+            </button>
+            <button type="button" onclick="window.adminDashboard.rotateScreenshot()" class="p-1.5 bg-white hover:bg-slate-200 rounded-lg text-slate-700 font-bold flex items-center gap-1 shadow-2xs cursor-pointer" title="Rotate 90°">
+              <i data-lucide="rotate-cw" class="w-4 h-4"></i> Rotate
+            </button>
+            <button type="button" onclick="window.adminDashboard.resetScreenshotZoom()" class="px-2 py-1 bg-white hover:bg-slate-200 rounded-lg text-slate-600 font-medium text-xs shadow-2xs cursor-pointer">
+              Reset
+            </button>
+          </div>
+          <span id="screenshot-zoom-level" class="font-mono text-[11px] font-bold text-slate-500">100% (0°)</span>
         </div>
 
-        <div class="flex items-center justify-between pt-2">
-          <a href="${imgSrc}" download="payment_proof.png" class="text-xs font-bold text-rose-700 hover:underline flex items-center gap-1">
-            <i data-lucide="download" class="w-3.5 h-3.5"></i> Download Original Image
+        <!-- Viewport -->
+        <div class="max-h-[65vh] overflow-auto rounded-xl border border-slate-300 bg-slate-950 flex items-center justify-center p-4 min-h-[300px]">
+          <img id="screenshot-modal-image" src="${imgSrc}" alt="Payment Proof" class="max-w-full max-h-[60vh] object-contain transition-transform duration-150 ease-out shadow-2xl origin-center" style="transform: scale(1) rotate(0deg);" />
+        </div>
+
+        <div class="flex items-center justify-between pt-2 border-t border-slate-100">
+          <a href="${imgSrc}" download="payment_proof_${Date.now()}.png" class="text-xs font-bold text-rose-700 hover:text-rose-800 flex items-center gap-1">
+            <i data-lucide="download" class="w-4 h-4"></i> Download Original
           </a>
-          <button onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg">
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg cursor-pointer">
             Close
           </button>
         </div>
@@ -1143,32 +1554,67 @@
     if (window.lucide) window.lucide.createIcons();
   };
 
+  AdminDashboard.prototype.zoomScreenshot = function(delta) {
+    this._screenshotScale = Math.max(0.5, Math.min(3.5, (this._screenshotScale || 1.0) + delta));
+    this._applyScreenshotTransform();
+  };
+
+  AdminDashboard.prototype.rotateScreenshot = function() {
+    this._screenshotRotate = ((this._screenshotRotate || 0) + 90) % 360;
+    this._applyScreenshotTransform();
+  };
+
+  AdminDashboard.prototype.resetScreenshotZoom = function() {
+    this._screenshotScale = 1.0;
+    this._screenshotRotate = 0;
+    this._applyScreenshotTransform();
+  };
+
+  AdminDashboard.prototype._applyScreenshotTransform = function() {
+    const img = document.getElementById('screenshot-modal-image');
+    const level = document.getElementById('screenshot-zoom-level');
+    if (img) {
+      img.style.transform = `scale(${this._screenshotScale}) rotate(${this._screenshotRotate}deg)`;
+    }
+    if (level) {
+      level.textContent = `${Math.round(this._screenshotScale * 100)}% (${this._screenshotRotate}°)`;
+    }
+  };
+
   // --- TAB 3: UPI CHANNELS & QR MANAGEMENT ---
 
-  AdminDashboard.prototype.renderPaymentChannels = async function() {
+  AdminDashboard.prototype.renderPaymentChannels = async function(isSilent = false) {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
 
-    container.innerHTML = `
-      <div class="p-8 text-center text-slate-500">
-        <i data-lucide="loader-2" class="w-8 h-8 animate-spin mx-auto mb-2 text-rose-600"></i>
-        <p class="text-xs font-bold">Loading UPI Payment Channels...</p>
-      </div>
-    `;
-    if (window.lucide) window.lucide.createIcons();
+    this.startTabPolling('payment-channels', async () => {
+      await this.renderPaymentChannels(true);
+    });
+
+    if (!isSilent) {
+      container.innerHTML = `
+        <div class="p-8 text-center text-slate-500">
+          <i data-lucide="loader-2" class="w-8 h-8 animate-spin mx-auto mb-2 text-rose-600"></i>
+          <p class="text-xs font-bold">Loading UPI Payment Channels...</p>
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+    }
 
     let channels = [];
     try {
-      const resp = await fetch('/api/payments/channels');
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.success && data.channels) {
-          channels = data.channels;
-          if (window.store) window.store.savePaymentChannels(channels);
-        }
+      const data = await adminFetch('/api/payments/channels');
+      if (data && data.channels) {
+        channels = data.channels;
+        if (window.store) window.store.savePaymentChannels(channels);
       }
     } catch (e) {
+      console.warn('[AdminSubscriptions] Channels fetch failed, using store:', e);
       if (window.store) channels = window.store.getPaymentChannels();
+      if (!channels || channels.length === 0) {
+        this.renderAdminError(container, 'Failed to load UPI payment channels.', () => this.renderPaymentChannels());
+        return;
+      }
     }
 
     container.innerHTML = `
@@ -1176,8 +1622,13 @@
         <!-- Header -->
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h2 class="text-xl font-black text-slate-900 tracking-tight">UPI Payment Channels & QR Setup</h2>
-            <p class="text-xs text-slate-500 mt-0.5">Configure institutional UPI virtual addresses, manage primary routing for checkouts, and upload official QR codes.</p>
+            <div class="flex items-center gap-2">
+              <h2 class="text-xl font-black text-slate-900 tracking-tight">UPI Payment Channels & QR Setup</h2>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Live Sync
+              </span>
+            </div>
+            <p class="text-xs text-slate-500 mt-0.5">Configure institutional UPI virtual addresses, manage primary routing for checkouts, and monitor channel transaction volume.</p>
           </div>
           <div class="flex items-center gap-2">
             <button 
@@ -1185,6 +1636,13 @@
               class="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               <i data-lucide="plus" class="w-4 h-4"></i> Add New Channel
+            </button>
+            <button 
+              onclick="window.adminDashboard.renderPaymentChannels()" 
+              class="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors cursor-pointer"
+              title="Refresh"
+            >
+              <i data-lucide="refresh-cw" class="w-4 h-4"></i>
             </button>
           </div>
         </div>
@@ -1197,22 +1655,51 @@
             return `
               <div class="bg-white border ${ch.isPrimary ? 'border-rose-400 ring-2 ring-rose-200' : 'border-slate-200'} rounded-2xl p-5 shadow-xs flex flex-col justify-between space-y-4">
                 <div class="flex items-start justify-between gap-3">
-                  <div>
+                  <div class="space-y-2 flex-1">
                     <div class="flex items-center gap-2 mb-1">
                       <span class="text-base font-bold text-slate-900">${ch.title || ch.name || 'UPI Channel'}</span>
                       ${ch.isPrimary ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-rose-100 text-rose-800 border border-rose-200">PRIMARY</span>' : ''}
                       ${ch.isActive ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">ACTIVE</span>' : '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">INACTIVE</span>'}
                     </div>
-                    <div class="font-mono text-xs font-black text-rose-700 bg-rose-50 px-2.5 py-1 rounded-lg inline-block border border-rose-100">
-                      ${ch.upiId}
+
+                    <div class="font-mono text-xs font-black text-rose-700 bg-rose-50 px-2.5 py-1 rounded-lg inline-flex items-center gap-2 border border-rose-100">
+                      <span>${ch.upiId}</span>
+                      <button onclick="navigator.clipboard.writeText('${ch.upiId}'); window.app.showToast('UPI ID copied!', 'info');" class="text-rose-500 hover:text-rose-800 p-0.5" title="Copy UPI ID">
+                        <i data-lucide="copy" class="w-3 h-3"></i>
+                      </button>
                     </div>
-                    <div class="text-xs text-slate-600 mt-2 font-medium">
-                      Payee Name: <strong class="text-slate-800">${ch.payeeName}</strong>
+
+                    <div class="text-xs text-slate-600 font-medium">
+                      Payee: <strong class="text-slate-800">${ch.payeeName || 'ExcellenceCA'}</strong>
+                    </div>
+
+                    <!-- Bank Details & Routing -->
+                    <div class="space-y-1 text-xs border-t border-slate-100 pt-2.5 text-slate-600">
+                      <div class="flex justify-between">
+                        <span class="text-slate-500">Bank Account:</span>
+                        <strong class="font-mono text-slate-800">${ch.bankAccountNumber || ch.accountNumber || 'Not specified'}</strong>
+                      </div>
+                      <div class="flex justify-between">
+                        <span class="text-slate-500">IFSC Code:</span>
+                        <strong class="font-mono text-slate-800">${ch.bankIfsc || ch.ifsc || 'Not specified'}</strong>
+                      </div>
+                      <div class="flex justify-between">
+                        <span class="text-slate-500">Account Holder:</span>
+                        <strong class="text-slate-800">${ch.bankAccountHolder || ch.accountHolder || ch.payeeName || 'ExcellenceCA'}</strong>
+                      </div>
+                      <div class="flex justify-between">
+                        <span class="text-slate-500">Amount Limit:</span>
+                        <strong class="text-slate-800">${ch.amountLimit ? '₹' + Number(ch.amountLimit).toLocaleString('en-IN') : 'Unlimited'}</strong>
+                      </div>
+                      <div class="flex justify-between pt-1 border-t border-slate-100 text-[11px]">
+                        <span class="text-slate-400">Activity Metrics:</span>
+                        <span class="font-bold text-slate-700">${ch.totalTransactions || 0} txns • ₹${(ch.totalVolume || 0).toLocaleString('en-IN')} volume</span>
+                      </div>
                     </div>
                   </div>
 
                   <!-- QR Thumbnail -->
-                  <div class="w-20 h-20 bg-slate-50 border border-slate-200 rounded-xl p-1 flex-shrink-0 flex items-center justify-center">
+                  <div class="w-24 h-24 bg-slate-50 border border-slate-200 rounded-xl p-1.5 flex-shrink-0 flex items-center justify-center">
                     <img src="${qrSrc}" alt="QR" class="w-full h-full object-contain">
                   </div>
                 </div>
@@ -1222,7 +1709,7 @@
                   <div class="flex items-center gap-2">
                     ${!ch.isPrimary ? `
                       <button 
-                        onclick="window.adminDashboard.setPrimaryChannel('${ch.id}')"
+                        onclick="window.adminDashboard.setPrimaryChannel('${ch.id}')" 
                         class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg transition-colors cursor-pointer"
                       >
                         Set as Primary
@@ -1230,7 +1717,7 @@
                     ` : '<span class="text-xs text-emerald-700 font-bold flex items-center gap-1"><i data-lucide="check" class="w-3.5 h-3.5"></i> Live Primary Channel</span>'}
 
                     <button 
-                      onclick="window.adminDashboard.toggleChannelActive('${ch.id}')"
+                      onclick="window.adminDashboard.toggleChannelActive('${ch.id}')" 
                       class="px-2.5 py-1 ${ch.isActive ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200'} font-bold text-xs rounded-lg transition-colors cursor-pointer"
                     >
                       ${ch.isActive ? 'Deactivate' : 'Activate'}
@@ -1239,16 +1726,16 @@
 
                   <div class="flex items-center gap-1.5">
                     <button 
-                      onclick="window.adminDashboard.openAddEditChannelModal('${ch.id}')"
-                      class="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                      onclick="window.adminDashboard.openAddEditChannelModal('${ch.id}')" 
+                      class="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer" 
                       title="Edit Channel"
                     >
                       <i data-lucide="edit-2" class="w-4 h-4"></i>
                     </button>
                     ${!ch.isPrimary ? `
                       <button 
-                        onclick="window.adminDashboard.deleteChannel('${ch.id}')"
-                        class="p-1.5 text-rose-500 hover:text-rose-800 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                        onclick="window.adminDashboard.deleteChannel('${ch.id}')" 
+                        class="p-1.5 text-rose-500 hover:text-rose-800 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer" 
                         title="Delete Channel"
                       >
                         <i data-lucide="trash-2" class="w-4 h-4"></i>
@@ -1292,9 +1779,9 @@
               type="text" 
               id="admin-channel-title" 
               required 
-              value="${channel ? channel.title : ''}"
-              placeholder="e.g. Primary HDFC Current Account, Backup ICICI QR"
-              class="w-full px-3.5 py-2.5 text-xs font-bold border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white"
+              value="${channel ? channel.title || channel.name || '' : ''}" 
+              placeholder="e.g. Primary HDFC Current Account, ICICI QR" 
+              class="w-full px-3.5 py-2.5 text-xs font-bold border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white" 
             />
           </div>
 
@@ -1304,9 +1791,9 @@
               type="text" 
               id="admin-channel-upi" 
               required 
-              value="${channel ? channel.upiId : ''}"
-              placeholder="e.g. excellenceca@hdfcbank"
-              class="w-full px-3.5 py-2.5 text-xs font-mono font-bold text-rose-800 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white"
+              value="${channel ? channel.upiId : ''}" 
+              placeholder="e.g. excellenceca@hdfcbank" 
+              class="w-full px-3.5 py-2.5 text-xs font-mono font-bold text-rose-800 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white" 
             />
           </div>
 
@@ -1316,10 +1803,57 @@
               type="text" 
               id="admin-channel-payee" 
               required 
-              value="${channel ? channel.payeeName : 'ExcellenceCA EduTech LLP'}"
-              placeholder="e.g. ExcellenceCA EduTech LLP"
-              class="w-full px-3.5 py-2.5 text-xs font-medium border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white"
+              value="${channel ? channel.payeeName : 'ExcellenceCA EduTech LLP'}" 
+              placeholder="e.g. ExcellenceCA EduTech LLP" 
+              class="w-full px-3.5 py-2.5 text-xs font-medium border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white" 
             />
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Bank Account Number</label>
+              <input 
+                type="text" 
+                id="admin-channel-bank-account" 
+                value="${channel ? channel.bankAccountNumber || channel.accountNumber || '' : ''}" 
+                placeholder="e.g. 50200012345678" 
+                class="w-full px-3.5 py-2.5 text-xs font-mono border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white" 
+              />
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Bank IFSC Code</label>
+              <input 
+                type="text" 
+                id="admin-channel-bank-ifsc" 
+                value="${channel ? channel.bankIfsc || channel.ifsc || '' : ''}" 
+                placeholder="e.g. HDFC0001234" 
+                class="w-full px-3.5 py-2.5 text-xs font-mono uppercase border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white" 
+              />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Account Holder Name</label>
+              <input 
+                type="text" 
+                id="admin-channel-bank-holder" 
+                value="${channel ? channel.bankAccountHolder || channel.accountHolder || '' : ''}" 
+                placeholder="e.g. ExcellenceCA EduTech LLP" 
+                class="w-full px-3.5 py-2.5 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white" 
+              />
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Per-Transaction Limit (₹)</label>
+              <input 
+                type="number" 
+                id="admin-channel-limit" 
+                min="0"
+                value="${channel && channel.amountLimit ? channel.amountLimit : ''}" 
+                placeholder="e.g. 50000 (leave empty for unlimited)" 
+                class="w-full px-3.5 py-2.5 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white" 
+              />
+            </div>
           </div>
 
           <div class="flex items-center gap-6 pt-1">
@@ -1327,8 +1861,8 @@
               <input 
                 type="checkbox" 
                 id="admin-channel-active" 
-                ${!channel || channel.isActive ? 'checked' : ''}
-                class="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500"
+                ${!channel || channel.isActive ? 'checked' : ''} 
+                class="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500" 
               />
               <span class="text-xs font-bold text-slate-700">Channel is Active</span>
             </label>
@@ -1337,8 +1871,8 @@
               <input 
                 type="checkbox" 
                 id="admin-channel-primary" 
-                ${channel && channel.isPrimary ? 'checked' : ''}
-                class="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500"
+                ${channel && channel.isPrimary ? 'checked' : ''} 
+                class="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500" 
               />
               <span class="text-xs font-bold text-slate-700">Set as Primary Channel</span>
             </label>
@@ -1347,13 +1881,14 @@
           <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
             <button 
               type="button" 
-              onclick="window.app.closeModal('admin-generic-modal')"
+              onclick="window.app.closeModal('admin-generic-modal')" 
               class="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button 
               type="submit" 
+              id="admin-save-channel-btn"
               class="px-5 py-2 text-xs font-bold text-white bg-rose-700 hover:bg-rose-800 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               <i data-lucide="check" class="w-4 h-4"></i> Save Channel
@@ -1372,8 +1907,19 @@
     const title = document.getElementById('admin-channel-title').value.trim();
     const upiId = document.getElementById('admin-channel-upi').value.trim();
     const payeeName = document.getElementById('admin-channel-payee').value.trim();
+    const bankAccountNumber = (document.getElementById('admin-channel-bank-account')?.value || '').trim();
+    const bankIfsc = (document.getElementById('admin-channel-bank-ifsc')?.value || '').trim().toUpperCase();
+    const bankAccountHolder = (document.getElementById('admin-channel-bank-holder')?.value || '').trim();
+    const amountLimit = parseFloat(document.getElementById('admin-channel-limit')?.value) || 0;
     const isActive = document.getElementById('admin-channel-active').checked;
     const isPrimary = document.getElementById('admin-channel-primary').checked;
+
+    const submitBtn = document.getElementById('admin-save-channel-btn');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Saving...';
+      if (window.lucide) window.lucide.createIcons();
+    }
 
     const payload = {
       action: channelId ? 'edit' : 'add',
@@ -1382,123 +1928,112 @@
         title: title,
         upiId: upiId,
         payeeName: payeeName,
+        bankAccountNumber: bankAccountNumber,
+        bankIfsc: bankIfsc,
+        bankAccountHolder: bankAccountHolder,
+        amountLimit: amountLimit,
         isActive: isActive,
         isPrimary: isPrimary
       }
     };
 
     try {
-      const user = window.auth ? window.auth.getCurrentUser() : null;
-      const token = user ? (user.token || user.email) : '';
-      const resp = await fetch('/api/admin/payment-channels', {
+      const data = await adminFetch('/api/admin/payment-channels', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-
-      const data = await resp.json();
-      if (!resp.ok || !data.success) {
-        window.app.showToast(data.error || 'Failed to save channel.', 'error');
-        return;
-      }
 
       window.app.showToast('UPI channel saved successfully!', 'success');
       window.app.closeModal('admin-generic-modal');
       this.renderPaymentChannels();
     } catch (err) {
       console.error('[AdminSubscriptions] Save channel error:', err);
-      window.app.showToast('Network error while saving channel.', 'error');
+      window.app.showToast(err.message || 'Failed to save channel.', 'error');
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Save Channel';
+        if (window.lucide) window.lucide.createIcons();
+      }
     }
   };
 
   AdminDashboard.prototype.setPrimaryChannel = async function(channelId) {
     try {
-      const user = window.auth ? window.auth.getCurrentUser() : null;
-      const token = user ? (user.token || user.email) : '';
-      const resp = await fetch('/api/admin/payment-channels', {
+      await adminFetch('/api/admin/payment-channels', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'set_primary', channelId: channelId })
       });
-      const data = await resp.json();
-      if (resp.ok && data.success) {
-        window.app.showToast('Primary channel updated!', 'success');
-        this.renderPaymentChannels();
-      }
+      window.app.showToast('Primary channel updated!', 'success');
+      this.renderPaymentChannels();
     } catch (err) {
-      window.app.showToast('Failed to set primary channel.', 'error');
+      console.error('[AdminSubscriptions] Set primary channel error:', err);
+      window.app.showToast(err.message || 'Failed to set primary channel.', 'error');
     }
   };
 
   AdminDashboard.prototype.toggleChannelActive = async function(channelId) {
     try {
-      const user = window.auth ? window.auth.getCurrentUser() : null;
-      const token = user ? (user.token || user.email) : '';
-      const resp = await fetch('/api/admin/payment-channels', {
+      await adminFetch('/api/admin/payment-channels', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'toggle_active', channelId: channelId })
       });
-      const data = await resp.json();
-      if (resp.ok && data.success) {
-        window.app.showToast('Channel status updated!', 'info');
-        this.renderPaymentChannels();
-      }
+      window.app.showToast('Channel status updated!', 'info');
+      this.renderPaymentChannels();
     } catch (err) {
-      window.app.showToast('Failed to toggle channel status.', 'error');
+      console.error('[AdminSubscriptions] Toggle channel active error:', err);
+      window.app.showToast(err.message || 'Failed to toggle channel status.', 'error');
     }
   };
 
   AdminDashboard.prototype.deleteChannel = async function(channelId) {
     if (!confirm('Are you sure you want to delete this UPI channel?')) return;
     try {
-      const user = window.auth ? window.auth.getCurrentUser() : null;
-      const token = user ? (user.token || user.email) : '';
-      const resp = await fetch('/api/admin/payment-channels', {
+      await adminFetch('/api/admin/payment-channels', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'delete', channelId: channelId })
       });
-      const data = await resp.json();
-      if (resp.ok && data.success) {
-        window.app.showToast('Channel deleted.', 'info');
-        this.renderPaymentChannels();
-      }
+      window.app.showToast('Channel deleted.', 'info');
+      this.renderPaymentChannels();
     } catch (err) {
-      window.app.showToast('Failed to delete channel.', 'error');
+      console.error('[AdminSubscriptions] Delete channel error:', err);
+      window.app.showToast(err.message || 'Failed to delete channel.', 'error');
     }
   };
 
   // --- TAB 4: PLANS & TRIAL CONFIGURATION ---
 
-  AdminDashboard.prototype.renderPlansConfig = async function() {
+  AdminDashboard.prototype.renderPlansConfig = async function(isSilent = false) {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
 
+    if (!isSilent) {
+      container.innerHTML = `
+        <div class="p-8 text-center text-slate-500">
+          <i data-lucide="loader-2" class="w-8 h-8 animate-spin mx-auto mb-2 text-rose-600"></i>
+          <p class="text-xs font-bold">Loading Subscription Plans Configuration...</p>
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+    }
+
     let plans = {};
     try {
-      const resp = await fetch('/api/subscriptions/plans');
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.success && data.plans) {
-          plans = data.plans;
-          if (window.store) window.store.saveSubscriptionPlans(plans);
-        }
+      const data = await adminFetch('/api/subscriptions/plans');
+      if (data && data.plans) {
+        plans = data.plans;
+        if (window.store) window.store.saveSubscriptionPlans(plans);
       }
     } catch (e) {
+      console.warn('[AdminSubscriptions] Plans fetch failed, using store:', e);
       if (window.store) plans = window.store.getSubscriptionPlans();
+      if (!plans || Object.keys(plans).length === 0) {
+        this.renderAdminError(container, 'Failed to load subscription plans configuration.', () => this.renderPlansConfig());
+        return;
+      }
     }
 
     const planList = Object.values(plans);
@@ -1506,9 +2041,20 @@
     container.innerHTML = `
       <div class="space-y-6 animate-in fade-in duration-150">
         <!-- Header -->
-        <div>
-          <h2 class="text-xl font-black text-slate-900 tracking-tight">Subscription Plans & Trial Configuration</h2>
-          <p class="text-xs text-slate-500 mt-0.5">Customize pricing, evaluation SLA turnaround, live MCQ limits, and instant XP points for all passes.</p>
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 class="text-xl font-black text-slate-900 tracking-tight">Subscription Plans & Trial Configuration</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Customize pricing, evaluation SLA turnaround, live MCQ limits, and instant XP points for all passes.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button 
+              onclick="window.adminDashboard.renderPlansConfig()" 
+              class="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors cursor-pointer"
+              title="Refresh"
+            >
+              <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+            </button>
+          </div>
         </div>
 
         <!-- Historical Integrity Notice -->
@@ -1538,8 +2084,8 @@
                         ${p.tier.toUpperCase()} TIER
                       </span>
                       ${p.isActive !== false 
-                        ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">Active</span>' 
-                        : '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">Inactive</span>'}
+                        ? '<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">Active</span>' 
+                        : '<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">Inactive</span>'}
                     </div>
                     <span class="text-xs font-mono font-bold text-slate-400">ID: ${p.id}</span>
                   </div>
@@ -1573,7 +2119,7 @@
 
                 <div class="pt-3 border-t border-slate-100">
                   <button 
-                    onclick="window.adminDashboard.openEditPlanModal('${p.id}')"
+                    onclick="window.adminDashboard.openEditPlanModal('${p.id}')" 
                     class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <i data-lucide="sliders" class="w-3.5 h-3.5"></i> Edit Plan Terms
@@ -1618,7 +2164,7 @@
                 id="admin-plan-name" 
                 required 
                 value="${(plan.name || '').replace(/"/g, '&quot;')}" 
-                class="w-full px-3.5 py-2.5 text-xs font-bold text-slate-900 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white"
+                class="w-full px-3.5 py-2.5 text-xs font-bold text-slate-900 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white" 
               />
             </div>
 
@@ -1626,7 +2172,7 @@
               <label class="block text-xs font-bold text-slate-700 mb-1">Status <span class="text-rose-600">*</span></label>
               <select 
                 id="admin-plan-status" 
-                class="w-full px-3.5 py-2.5 text-xs font-bold text-slate-900 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white"
+                class="w-full px-3.5 py-2.5 text-xs font-bold text-slate-900 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white" 
               >
                 <option value="true" ${plan.isActive !== false ? 'selected' : ''}>Active (Available for Purchase)</option>
                 <option value="false" ${plan.isActive === false ? 'selected' : ''}>Inactive (Hidden / Unavailable)</option>
@@ -1641,9 +2187,9 @@
                 type="number" 
                 id="admin-plan-price" 
                 required 
-                min="0"
+                min="0" 
                 value="${plan.price}" 
-                class="w-full px-3.5 py-2.5 text-xs font-black text-slate-900 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white"
+                class="w-full px-3.5 py-2.5 text-xs font-black text-slate-900 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white" 
               />
             </div>
 
@@ -1653,9 +2199,9 @@
                 type="number" 
                 id="admin-plan-duration" 
                 required 
-                min="1"
+                min="1" 
                 value="${plan.durationDays}" 
-                class="w-full px-3.5 py-2.5 text-xs font-bold border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white"
+                class="w-full px-3.5 py-2.5 text-xs font-bold border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white" 
               />
             </div>
           </div>
@@ -1667,9 +2213,9 @@
                 type="number" 
                 id="admin-plan-sla" 
                 required 
-                min="1"
+                min="1" 
                 value="${plan.copyCheckSlaHours || 24}" 
-                class="w-full px-3.5 py-2.5 text-xs font-bold border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white"
+                class="w-full px-3.5 py-2.5 text-xs font-bold border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white" 
               />
             </div>
 
@@ -1678,9 +2224,9 @@
               <input 
                 type="number" 
                 id="admin-plan-mcq-limit" 
-                min="0"
+                min="0" 
                 value="${plan.liveMcqDailyLimit || 1}" 
-                class="w-full px-3.5 py-2.5 text-xs font-bold border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white"
+                class="w-full px-3.5 py-2.5 text-xs font-bold border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white" 
               />
             </div>
           </div>
@@ -1691,9 +2237,9 @@
               type="number" 
               id="admin-plan-points" 
               required 
-              min="0"
+              min="0" 
               value="${plan.instantPoints || 0}" 
-              class="w-full px-3.5 py-2.5 text-xs font-bold text-amber-700 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white"
+              class="w-full px-3.5 py-2.5 text-xs font-bold text-amber-700 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white" 
             />
           </div>
 
@@ -1705,7 +2251,7 @@
             <textarea 
               id="admin-plan-features" 
               rows="6" 
-              class="w-full px-3.5 py-2.5 text-xs font-medium text-slate-800 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white leading-relaxed resize-y"
+              class="w-full px-3.5 py-2.5 text-xs font-medium text-slate-800 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white leading-relaxed resize-y" 
               placeholder="e.g.&#10;+500 instant bonus XP points&#10;Copy checked within 48 hours&#10;Access to premium MCQ questions"
             >${(plan.features || []).join('\n')}</textarea>
           </div>
@@ -1713,13 +2259,14 @@
           <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
             <button 
               type="button" 
-              onclick="window.app.closeModal('admin-generic-modal')"
+              onclick="window.app.closeModal('admin-generic-modal')" 
               class="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button 
               type="submit" 
+              id="admin-save-plan-btn"
               class="px-5 py-2 text-xs font-bold text-white bg-rose-700 hover:bg-rose-800 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               <i data-lucide="check" class="w-4 h-4"></i> Update Plan Terms
@@ -1749,6 +2296,13 @@
     const mcqLimit = parseInt(document.getElementById('admin-plan-mcq-limit').value, 10);
     const instantPoints = parseInt(document.getElementById('admin-plan-points').value, 10);
 
+    const submitBtn = document.getElementById('admin-save-plan-btn');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Saving...';
+      if (window.lucide) window.lucide.createIcons();
+    }
+
     const planData = {
       name: name,
       isActive: isActive,
@@ -1761,14 +2315,9 @@
     };
 
     try {
-      const user = window.auth ? window.auth.getCurrentUser() : null;
-      const token = user ? (user.token || user.email) : '';
-      const resp = await fetch('/api/admin/plans', {
+      const data = await adminFetch('/api/admin/plans', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'update_plan',
           planId: planId,
@@ -1776,12 +2325,6 @@
           updates: planData
         })
       });
-
-      const data = await resp.json();
-      if (!resp.ok || !data.success) {
-        window.app.showToast(data.error || 'Failed to update plan terms.', 'error');
-        return;
-      }
 
       window.app.showToast('Plan terms updated successfully!', 'success');
       window.app.closeModal('admin-generic-modal');
@@ -1799,40 +2342,45 @@
       this.renderPlansConfig();
     } catch (err) {
       console.error('[AdminSubscriptions] Save plan error:', err);
-      window.app.showToast('Network error while saving plan.', 'error');
+      window.app.showToast(err.message || 'Failed to save plan terms.', 'error');
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Update Plan Terms';
+        if (window.lucide) window.lucide.createIcons();
+      }
     }
   };
 
   // --- TAB 5: ADMIN AUDIT LOGS ---
 
-  AdminDashboard.prototype.renderAdminAuditLogs = async function() {
+  AdminDashboard.prototype.renderAdminAuditLogs = async function(isSilent = false) {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
 
-    container.innerHTML = `
-      <div class="p-8 text-center text-slate-500">
-        <i data-lucide="loader-2" class="w-8 h-8 animate-spin mx-auto mb-2 text-rose-600"></i>
-        <p class="text-xs font-bold">Loading Audit Trail...</p>
-      </div>
-    `;
-    if (window.lucide) window.lucide.createIcons();
+    if (!isSilent) {
+      container.innerHTML = `
+        <div class="p-8 text-center text-slate-500">
+          <i data-lucide="loader-2" class="w-8 h-8 animate-spin mx-auto mb-2 text-rose-600"></i>
+          <p class="text-xs font-bold">Loading Audit Trail...</p>
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+    }
 
     let logs = [];
     try {
-      const user = window.auth ? window.auth.getCurrentUser() : null;
-      const token = user ? (user.token || user.email) : '';
-      const resp = await fetch('/api/admin/audit-logs', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.success && data.logs) {
-          logs = data.logs;
-          if (window.store) window.store.saveAdminAuditLogs(logs);
-        }
+      const data = await adminFetch('/api/admin/audit-logs');
+      if (data && data.logs) {
+        logs = data.logs;
+        if (window.store) window.store.saveAdminAuditLogs(logs);
       }
     } catch (e) {
+      console.warn('[AdminSubscriptions] Audit logs fetch failed, using store:', e);
       if (window.store) logs = window.store.getAdminAuditLogs();
+      if (!logs || logs.length === 0) {
+        this.renderAdminError(container, 'Failed to load administrative audit logs.', () => this.renderAdminAuditLogs());
+        return;
+      }
     }
 
     const actionFilter = this.auditActionFilter || 'all';
@@ -1886,13 +2434,13 @@
               placeholder="Search audit trail by student target, admin, reason, or action..."
               value="${this.auditSearch || ''}"
               oninput="window.adminDashboard.auditSearch = this.value; window.adminDashboard.renderAdminAuditLogs();"
-              class="w-full pl-9 pr-3.5 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500 bg-slate-50 focus:bg-white transition-colors"
+              class="w-full pl-9 pr-3.5 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500 bg-slate-50 focus:bg-white transition-colors" 
             />
           </div>
 
           <div class="flex items-center gap-2">
             <select 
-              onchange="window.adminDashboard.auditActionFilter = this.value; window.adminDashboard.renderAdminAuditLogs();"
+              onchange="window.adminDashboard.auditActionFilter = this.value; window.adminDashboard.renderAdminAuditLogs();" 
               class="px-3 py-2 text-xs font-bold border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-rose-500"
             >
               <option value="all">All Action Types</option>

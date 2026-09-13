@@ -40,7 +40,7 @@
       "caLevel": "CA FOUNDATION",
       "referralPoints": 0,
       "referralCount": 0,
-      "totalXp": 0
+      "totalXp": 500
     },
     "prof.sharma@excellenceca.com": {
       "id": "usr-teacher-1",
@@ -4140,6 +4140,20 @@
   ],
   "xp_transactions": [
     {
+      "id": "tx_sub_psess_1789318707994_74363413",
+      "userId": "usr-student-2",
+      "userName": "Priya Patel",
+      "activityName": "Bonus XP: Core Pass (Monthly) Activation",
+      "points": 500,
+      "timestamp": "2026-09-13T16:58:28.208211+00:00",
+      "createdAt": "2026-09-13T16:58:28.208211+00:00",
+      "metadata": {
+        "paymentSessionId": "psess_1789318707994_74363413",
+        "planId": "core_monthly",
+        "amount": 500
+      }
+    },
+    {
       "id": "tx-bulk-1789299443262-609bc7",
       "idempotencyKey": "bulk_set_usr-student-1789299442607_1789299443262",
       "userId": "usr-student-1789299442607",
@@ -6234,7 +6248,71 @@
       "createdAt": "2026-09-12T09:39:55.101241+00:00"
     }
   ],
-  "notifications": [],
+  "notifications": [
+    {
+      "id": "notif_sub_ext_1789318714232_4634",
+      "userId": "usr-student-2",
+      "title": "Subscription Extended",
+      "message": "Your Core Pass (Monthly) has been extended by 15 days to 2026-10-28. Reason: Batch extension test",
+      "type": "subscription",
+      "createdAt": "2026-09-13T16:58:34.232362+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_ext_1789318714121_a7d9",
+      "userId": "usr-student-1",
+      "title": "Subscription Extended",
+      "message": "Your Plus Pass (Monthly) has been extended by 15 days to 2026-10-28. Reason: Batch extension test",
+      "type": "subscription",
+      "createdAt": "2026-09-13T16:58:34.121234+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_grant_1789318713827_aeb0",
+      "userId": "usr-student-1",
+      "title": "Pass Granted: Plus Pass (Monthly)",
+      "message": "An administrator has granted you the Plus Pass (Monthly) pass (valid until 2026-10-13). Reason: Test grant for Plus Pass",
+      "type": "subscription",
+      "createdAt": "2026-09-13T16:58:33.827106+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_rej_1789318708952",
+      "userId": "usr-student-2",
+      "title": "Payment Verification Failed",
+      "message": "Your payment of \u20b9149 for Elite Pass (Monthly) could not be verified: UTR not found in bank statement. Please contact faculty support.",
+      "type": "subscription",
+      "createdAt": "2026-09-13T16:58:28.952157+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_1789318708209",
+      "userId": "usr-student-2",
+      "title": "Core Pass Activated!",
+      "message": "Your payment of \u20b949 (UTR: UTR998877665544) has been verified. Welcome to Core Pass (Monthly)! You received +500 bonus XP.",
+      "type": "subscription",
+      "createdAt": "2026-09-13T16:58:28.208211+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_ext_1789318549249_bbac",
+      "userId": "usr-student-1",
+      "title": "Subscription Extended",
+      "message": "Your Plus Pass (Monthly) has been extended by 15 days to 2026-10-28. Reason: Batch extension test",
+      "type": "subscription",
+      "createdAt": "2026-09-13T16:55:49.249701+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_grant_1789318548999_2e9e",
+      "userId": "usr-student-1",
+      "title": "Pass Granted: Plus Pass (Monthly)",
+      "message": "An administrator has granted you the Plus Pass (Monthly) pass (valid until 2026-10-13). Reason: Test grant for Plus Pass",
+      "type": "subscription",
+      "createdAt": "2026-09-13T16:55:48.999248+00:00",
+      "isRead": false
+    }
+  ],
   "bookmarks": [],
   "subjects": [
     {
@@ -6455,6 +6533,68 @@
   ],
   "payment_sessions": [
     {
+      "paymentSessionId": "psess_1789318708731_5c3b7b9f",
+      "sessionId": "psess_1789318708731_5c3b7b9f",
+      "userId": "usr-student-2",
+      "userEmail": "priya.patel@castudent.in",
+      "userName": "Priya Patel",
+      "userPhone": "",
+      "caLevel": "CA FOUNDATION",
+      "planId": "elite_monthly",
+      "planName": "Elite Pass (Monthly)",
+      "planTier": "elite",
+      "amount": 149,
+      "currency": "INR",
+      "durationDays": 30,
+      "channelSnapshot": {
+        "id": "chan-primary-1",
+        "name": "Primary UPI (HDFC Bank)",
+        "upiId": "excellenceca@okhdfcbank",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR"
+      },
+      "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
+      "status": "rejected",
+      "createdAt": "2026-09-13T16:58:28.731191+00:00",
+      "expiresAt": "2026-09-13T17:03:28.731191+00:00",
+      "utr": "UTR112233445566",
+      "screenshot": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      "submittedAt": "2026-09-13T16:58:28.843734+00:00",
+      "verifiedAt": "2026-09-13T16:58:28.952157+00:00",
+      "verifiedBy": "usr-admin-1",
+      "rejectionReason": "UTR not found in bank statement"
+    },
+    {
+      "paymentSessionId": "psess_1789318707994_74363413",
+      "sessionId": "psess_1789318707994_74363413",
+      "userId": "usr-student-2",
+      "userEmail": "priya.patel@castudent.in",
+      "userName": "Priya Patel",
+      "userPhone": "",
+      "caLevel": "CA FOUNDATION",
+      "planId": "core_monthly",
+      "planName": "Core Pass (Monthly)",
+      "planTier": "core",
+      "amount": 49,
+      "currency": "INR",
+      "durationDays": 30,
+      "channelSnapshot": {
+        "id": "chan-primary-1",
+        "name": "Primary UPI (HDFC Bank)",
+        "upiId": "excellenceca@okhdfcbank",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR"
+      },
+      "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
+      "status": "approved",
+      "createdAt": "2026-09-13T16:58:27.994191+00:00",
+      "expiresAt": "2026-09-13T17:03:27.994191+00:00",
+      "utr": "UTR998877665544",
+      "screenshot": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      "submittedAt": "2026-09-13T16:58:28.101597+00:00",
+      "verifiedAt": "2026-09-13T16:58:28.208211+00:00",
+      "verifiedBy": "usr-admin-1",
+      "rejectionReason": null
+    },
+    {
       "paymentSessionId": "psess_1789311614028_2f54828f",
       "sessionId": "psess_1789311614028_2f54828f",
       "userId": "usr-student-1",
@@ -6519,18 +6659,16 @@
   ],
   "subscriptions": {
     "usr-student-1": {
-      "id": "sub_usr-student-1_1789311614",
+      "id": "sub_usr-student-1_1789318713",
       "userId": "usr-student-1",
-      "planId": "elite_trial",
-      "planName": "\u20b99 Elite 10-Day Trial",
-      "planTier": "trial",
-      "isTrial": true,
+      "planId": "plus_monthly",
+      "planName": "Plus Pass (Monthly)",
+      "planTier": "plus",
+      "isTrial": false,
       "status": "active",
-      "startedAt": "2026-09-13T15:00:14.126228+00:00",
-      "expiresAt": "2026-10-08T15:00:14.126228+00:00",
-      "purchasedAmount": 9,
-      "paymentSessionId": "psess_1789311613843_ba9f8799",
-      "utr": "UTR8F7EC80B2",
+      "startedAt": "2026-09-13T16:58:33.827106+00:00",
+      "expiresAt": "2026-10-28T16:58:33.827106+00:00",
+      "purchasedAmount": 0,
       "history": [
         {
           "action": "payment_approved",
@@ -6545,11 +6683,780 @@
           "adminId": "usr-admin-1",
           "timestamp": "2026-09-13T15:00:14.446401+00:00",
           "details": "Extended by 15 days to 2026-10-08T15:00:14.126228+00:00"
+        },
+        {
+          "action": "admin_granted",
+          "adminId": "usr-admin-1",
+          "adminName": "Administrator",
+          "timestamp": "2026-09-13T16:55:48.999248+00:00",
+          "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+        },
+        {
+          "action": "admin_extended",
+          "adminId": "usr-admin-1",
+          "timestamp": "2026-09-13T16:55:49.249701+00:00",
+          "details": "Extended by 15 days to 2026-10-28T16:55:48.999248+00:00"
+        },
+        {
+          "action": "admin_granted",
+          "adminId": "usr-admin-1",
+          "adminName": "Administrator",
+          "timestamp": "2026-09-13T16:58:33.827106+00:00",
+          "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+        },
+        {
+          "action": "admin_extended",
+          "adminId": "usr-admin-1",
+          "timestamp": "2026-09-13T16:58:34.121234+00:00",
+          "details": "Extended by 15 days to 2026-10-28T16:58:33.827106+00:00"
+        }
+      ]
+    },
+    "usr-student-2": {
+      "id": "sub_usr-student-2_1789318708",
+      "userId": "usr-student-2",
+      "planId": "core_monthly",
+      "planName": "Core Pass (Monthly)",
+      "planTier": "core",
+      "isTrial": false,
+      "status": "active",
+      "startedAt": "2026-09-13T16:58:28.208211+00:00",
+      "expiresAt": "2026-10-28T16:58:28.208211+00:00",
+      "purchasedAmount": 49,
+      "paymentSessionId": "psess_1789318707994_74363413",
+      "utr": "UTR998877665544",
+      "history": [
+        {
+          "action": "payment_approved",
+          "paymentSessionId": "psess_1789318707994_74363413",
+          "adminId": "usr-admin-1",
+          "adminName": "Administrator",
+          "timestamp": "2026-09-13T16:58:28.208211+00:00",
+          "details": "Approved payment of \u20b949 for Core Pass (Monthly)"
+        },
+        {
+          "action": "admin_extended",
+          "adminId": "usr-admin-1",
+          "timestamp": "2026-09-13T16:58:34.232362+00:00",
+          "details": "Extended by 15 days to 2026-10-28T16:58:28.208211+00:00"
         }
       ]
     }
   },
   "admin_audit_logs": [
+    {
+      "id": "audit_1789318715175_e155e2",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "DELETE_PAYMENT_CHANNEL",
+      "targetId": "chan_1789318714613_47d1",
+      "target": "chan_1789318714613_47d1",
+      "details": "Deleted channel: HDFC Premium Escrow",
+      "oldValue": {
+        "id": "chan_1789318714613_47d1",
+        "name": "HDFC Premium Escrow",
+        "title": "HDFC Premium Escrow",
+        "upiId": "hdfcescrow@hdfcbank",
+        "payeeName": "ExcellenceCA Education Pvt Ltd",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=hdfcescrow@hdfcbank%26pn=ExcellenceCA%20Education%20Pvt%20Ltd%26cu=INR",
+        "bankAccountNumber": "50200099887766",
+        "bankIfsc": "HDFC0001234",
+        "bankAccountHolder": "ExcellenceCA Education Pvt Ltd",
+        "amountLimit": 100000.0,
+        "totalTransactions": 0,
+        "totalVolume": 0.0,
+        "isPrimary": false,
+        "isActive": true,
+        "order": 3,
+        "createdAt": "2026-09-13T16:58:34.613447+00:00"
+      },
+      "newValue": null,
+      "timestamp": "2026-09-13T16:58:35.175739+00:00"
+    },
+    {
+      "id": "audit_1789318714989_de178b",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "SET_PRIMARY_CHANNEL",
+      "targetId": "chan-primary-1",
+      "target": "chan-primary-1",
+      "details": "Set primary channel: Primary UPI (HDFC Bank)",
+      "oldValue": null,
+      "newValue": {
+        "id": "chan-primary-1",
+        "title": "Primary UPI (HDFC Bank)",
+        "name": "Primary UPI (HDFC Bank)",
+        "upiId": "excellenceca@okhdfcbank",
+        "payeeName": "ExcellenceCA EduTech LLP",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
+        "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
+        "isPrimary": true,
+        "isActive": true,
+        "order": 1
+      },
+      "timestamp": "2026-09-13T16:58:34.989278+00:00"
+    },
+    {
+      "id": "audit_1789318714789_2298a9",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "SET_PRIMARY_CHANNEL",
+      "targetId": "chan_1789318714613_47d1",
+      "target": "chan_1789318714613_47d1",
+      "details": "Set primary channel: HDFC Premium Escrow",
+      "oldValue": null,
+      "newValue": {
+        "id": "chan_1789318714613_47d1",
+        "name": "HDFC Premium Escrow",
+        "title": "HDFC Premium Escrow",
+        "upiId": "hdfcescrow@hdfcbank",
+        "payeeName": "ExcellenceCA Education Pvt Ltd",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=hdfcescrow@hdfcbank%26pn=ExcellenceCA%20Education%20Pvt%20Ltd%26cu=INR",
+        "bankAccountNumber": "50200099887766",
+        "bankIfsc": "HDFC0001234",
+        "bankAccountHolder": "ExcellenceCA Education Pvt Ltd",
+        "amountLimit": 100000.0,
+        "totalTransactions": 0,
+        "totalVolume": 0.0,
+        "isPrimary": true,
+        "isActive": true,
+        "order": 3,
+        "createdAt": "2026-09-13T16:58:34.613447+00:00"
+      },
+      "timestamp": "2026-09-13T16:58:34.789896+00:00"
+    },
+    {
+      "id": "audit_1789318714613_df0fcd",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "ADD_PAYMENT_CHANNEL",
+      "targetId": "chan_1789318714613_47d1",
+      "target": "chan_1789318714613_47d1",
+      "details": "Added channel: HDFC Premium Escrow (hdfcescrow@hdfcbank)",
+      "oldValue": null,
+      "newValue": {
+        "id": "chan_1789318714613_47d1",
+        "name": "HDFC Premium Escrow",
+        "title": "HDFC Premium Escrow",
+        "upiId": "hdfcescrow@hdfcbank",
+        "payeeName": "ExcellenceCA Education Pvt Ltd",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=hdfcescrow@hdfcbank%26pn=ExcellenceCA%20Education%20Pvt%20Ltd%26cu=INR",
+        "bankAccountNumber": "50200099887766",
+        "bankIfsc": "HDFC0001234",
+        "bankAccountHolder": "ExcellenceCA Education Pvt Ltd",
+        "amountLimit": 100000.0,
+        "totalTransactions": 0,
+        "totalVolume": 0.0,
+        "isPrimary": false,
+        "isActive": true,
+        "order": 3,
+        "createdAt": "2026-09-13T16:58:34.613447+00:00"
+      },
+      "timestamp": "2026-09-13T16:58:34.613447+00:00"
+    },
+    {
+      "id": "audit_1789318714360_0fc566",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "EXTEND_SUBSCRIPTION",
+      "targetId": "usr-student-2",
+      "target": "usr-student-2",
+      "details": "Extended by 15 days",
+      "oldValue": {
+        "id": "sub_usr-student-2_1789318708",
+        "userId": "usr-student-2",
+        "planId": "core_monthly",
+        "planName": "Core Pass (Monthly)",
+        "planTier": "core",
+        "isTrial": false,
+        "status": "active",
+        "startedAt": "2026-09-13T16:58:28.208211+00:00",
+        "expiresAt": "2026-10-13T16:58:28.208211+00:00",
+        "purchasedAmount": 49,
+        "paymentSessionId": "psess_1789318707994_74363413",
+        "utr": "UTR998877665544",
+        "history": [
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789318707994_74363413",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:58:28.208211+00:00",
+            "details": "Approved payment of \u20b949 for Core Pass (Monthly)"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:58:34.232362+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:58:28.208211+00:00"
+          }
+        ]
+      },
+      "newValue": {
+        "id": "sub_usr-student-2_1789318708",
+        "userId": "usr-student-2",
+        "planId": "core_monthly",
+        "planName": "Core Pass (Monthly)",
+        "planTier": "core",
+        "isTrial": false,
+        "status": "active",
+        "startedAt": "2026-09-13T16:58:28.208211+00:00",
+        "expiresAt": "2026-10-28T16:58:28.208211+00:00",
+        "purchasedAmount": 49,
+        "paymentSessionId": "psess_1789318707994_74363413",
+        "utr": "UTR998877665544",
+        "history": [
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789318707994_74363413",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:58:28.208211+00:00",
+            "details": "Approved payment of \u20b949 for Core Pass (Monthly)"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:58:34.232362+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:58:28.208211+00:00"
+          }
+        ]
+      },
+      "timestamp": "2026-09-13T16:58:34.360063+00:00"
+    },
+    {
+      "id": "audit_1789318714121_de7e1e",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "EXTEND_SUBSCRIPTION",
+      "targetId": "usr-student-1",
+      "target": "usr-student-1",
+      "details": "Extended by 15 days",
+      "oldValue": {
+        "id": "sub_usr-student-1_1789318713",
+        "userId": "usr-student-1",
+        "planId": "plus_monthly",
+        "planName": "Plus Pass (Monthly)",
+        "planTier": "plus",
+        "isTrial": false,
+        "status": "manually_granted",
+        "startedAt": "2026-09-13T16:58:33.827106+00:00",
+        "expiresAt": "2026-10-13T16:58:33.827106+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789311613843_ba9f8799",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T15:00:14.126228+00:00",
+            "details": "Approved payment of \u20b99 for \u20b99 Elite 10-Day Trial"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T15:00:14.446401+00:00",
+            "details": "Extended by 15 days to 2026-10-08T15:00:14.126228+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:55:48.999248+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:55:49.249701+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:55:48.999248+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:58:33.827106+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:58:34.121234+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:58:33.827106+00:00"
+          }
+        ]
+      },
+      "newValue": {
+        "id": "sub_usr-student-1_1789318713",
+        "userId": "usr-student-1",
+        "planId": "plus_monthly",
+        "planName": "Plus Pass (Monthly)",
+        "planTier": "plus",
+        "isTrial": false,
+        "status": "active",
+        "startedAt": "2026-09-13T16:58:33.827106+00:00",
+        "expiresAt": "2026-10-28T16:58:33.827106+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789311613843_ba9f8799",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T15:00:14.126228+00:00",
+            "details": "Approved payment of \u20b99 for \u20b99 Elite 10-Day Trial"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T15:00:14.446401+00:00",
+            "details": "Extended by 15 days to 2026-10-08T15:00:14.126228+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:55:48.999248+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:55:49.249701+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:55:48.999248+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:58:33.827106+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:58:34.121234+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:58:33.827106+00:00"
+          }
+        ]
+      },
+      "timestamp": "2026-09-13T16:58:34.121234+00:00"
+    },
+    {
+      "id": "audit_1789318713828_efaf18",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "GRANT_SUBSCRIPTION",
+      "targetId": "usr-student-1",
+      "target": "usr-student-1",
+      "details": "Admin granted Plus Pass (Monthly) until 2026-10-13T16:58:33.827106+00:00",
+      "oldValue": {
+        "id": "sub_usr-student-1_1789318548",
+        "userId": "usr-student-1",
+        "planId": "plus_monthly",
+        "planName": "Plus Pass (Monthly)",
+        "planTier": "plus",
+        "isTrial": false,
+        "status": "active",
+        "startedAt": "2026-09-13T16:55:48.999248+00:00",
+        "expiresAt": "2026-10-28T16:55:48.999248+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789311613843_ba9f8799",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T15:00:14.126228+00:00",
+            "details": "Approved payment of \u20b99 for \u20b99 Elite 10-Day Trial"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T15:00:14.446401+00:00",
+            "details": "Extended by 15 days to 2026-10-08T15:00:14.126228+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:55:48.999248+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:55:49.249701+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:55:48.999248+00:00"
+          }
+        ]
+      },
+      "newValue": {
+        "id": "sub_usr-student-1_1789318713",
+        "userId": "usr-student-1",
+        "planId": "plus_monthly",
+        "planName": "Plus Pass (Monthly)",
+        "planTier": "plus",
+        "isTrial": false,
+        "status": "manually_granted",
+        "startedAt": "2026-09-13T16:58:33.827106+00:00",
+        "expiresAt": "2026-10-13T16:58:33.827106+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789311613843_ba9f8799",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T15:00:14.126228+00:00",
+            "details": "Approved payment of \u20b99 for \u20b99 Elite 10-Day Trial"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T15:00:14.446401+00:00",
+            "details": "Extended by 15 days to 2026-10-08T15:00:14.126228+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:55:48.999248+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:55:49.249701+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:55:48.999248+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:58:33.827106+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          }
+        ]
+      },
+      "timestamp": "2026-09-13T16:58:33.828147+00:00"
+    },
+    {
+      "id": "audit_1789318708953_d922a8",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "REJECT_PAYMENT",
+      "targetId": "usr-student-2",
+      "target": "usr-student-2",
+      "details": "Rejected payment of \u20b9149 for Elite Pass (Monthly). Reason: UTR not found in bank statement",
+      "oldValue": "rejected",
+      "newValue": "rejected",
+      "timestamp": "2026-09-13T16:58:28.953159+00:00"
+    },
+    {
+      "id": "audit_1789318708459_bf312a",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "APPROVE_PAYMENT",
+      "targetId": "usr-student-2",
+      "target": "usr-student-2",
+      "details": "Approved payment of \u20b949 for Core Pass (Monthly) (UTR: UTR998877665544)",
+      "oldValue": "approved",
+      "newValue": "approved",
+      "timestamp": "2026-09-13T16:58:28.459370+00:00"
+    },
+    {
+      "id": "audit_1789318550069_5287eb",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "DELETE_PAYMENT_CHANNEL",
+      "targetId": "chan_1789318549507_e0e4",
+      "target": "chan_1789318549507_e0e4",
+      "details": "Deleted channel: HDFC Premium Escrow",
+      "oldValue": {
+        "id": "chan_1789318549507_e0e4",
+        "name": "HDFC Premium Escrow",
+        "title": "HDFC Premium Escrow",
+        "upiId": "hdfcescrow@hdfcbank",
+        "payeeName": "ExcellenceCA Education Pvt Ltd",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=hdfcescrow@hdfcbank%26pn=ExcellenceCA%20Education%20Pvt%20Ltd%26cu=INR",
+        "bankAccountNumber": "50200099887766",
+        "bankIfsc": "HDFC0001234",
+        "bankAccountHolder": "ExcellenceCA Education Pvt Ltd",
+        "amountLimit": 100000.0,
+        "totalTransactions": 0,
+        "totalVolume": 0.0,
+        "isPrimary": false,
+        "isActive": true,
+        "order": 3,
+        "createdAt": "2026-09-13T16:55:49.507889+00:00"
+      },
+      "newValue": null,
+      "timestamp": "2026-09-13T16:55:50.069620+00:00"
+    },
+    {
+      "id": "audit_1789318549885_631a6b",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "SET_PRIMARY_CHANNEL",
+      "targetId": "chan-primary-1",
+      "target": "chan-primary-1",
+      "details": "Set primary channel: Primary UPI (HDFC Bank)",
+      "oldValue": null,
+      "newValue": {
+        "id": "chan-primary-1",
+        "title": "Primary UPI (HDFC Bank)",
+        "name": "Primary UPI (HDFC Bank)",
+        "upiId": "excellenceca@okhdfcbank",
+        "payeeName": "ExcellenceCA EduTech LLP",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
+        "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
+        "isPrimary": true,
+        "isActive": true,
+        "order": 1
+      },
+      "timestamp": "2026-09-13T16:55:49.885285+00:00"
+    },
+    {
+      "id": "audit_1789318549687_ccab3c",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "SET_PRIMARY_CHANNEL",
+      "targetId": "chan_1789318549507_e0e4",
+      "target": "chan_1789318549507_e0e4",
+      "details": "Set primary channel: HDFC Premium Escrow",
+      "oldValue": null,
+      "newValue": {
+        "id": "chan_1789318549507_e0e4",
+        "name": "HDFC Premium Escrow",
+        "title": "HDFC Premium Escrow",
+        "upiId": "hdfcescrow@hdfcbank",
+        "payeeName": "ExcellenceCA Education Pvt Ltd",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=hdfcescrow@hdfcbank%26pn=ExcellenceCA%20Education%20Pvt%20Ltd%26cu=INR",
+        "bankAccountNumber": "50200099887766",
+        "bankIfsc": "HDFC0001234",
+        "bankAccountHolder": "ExcellenceCA Education Pvt Ltd",
+        "amountLimit": 100000.0,
+        "totalTransactions": 0,
+        "totalVolume": 0.0,
+        "isPrimary": true,
+        "isActive": true,
+        "order": 3,
+        "createdAt": "2026-09-13T16:55:49.507889+00:00"
+      },
+      "timestamp": "2026-09-13T16:55:49.687350+00:00"
+    },
+    {
+      "id": "audit_1789318549507_03e126",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "ADD_PAYMENT_CHANNEL",
+      "targetId": "chan_1789318549507_e0e4",
+      "target": "chan_1789318549507_e0e4",
+      "details": "Added channel: HDFC Premium Escrow (hdfcescrow@hdfcbank)",
+      "oldValue": null,
+      "newValue": {
+        "id": "chan_1789318549507_e0e4",
+        "name": "HDFC Premium Escrow",
+        "title": "HDFC Premium Escrow",
+        "upiId": "hdfcescrow@hdfcbank",
+        "payeeName": "ExcellenceCA Education Pvt Ltd",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=hdfcescrow@hdfcbank%26pn=ExcellenceCA%20Education%20Pvt%20Ltd%26cu=INR",
+        "bankAccountNumber": "50200099887766",
+        "bankIfsc": "HDFC0001234",
+        "bankAccountHolder": "ExcellenceCA Education Pvt Ltd",
+        "amountLimit": 100000.0,
+        "totalTransactions": 0,
+        "totalVolume": 0.0,
+        "isPrimary": false,
+        "isActive": true,
+        "order": 3,
+        "createdAt": "2026-09-13T16:55:49.507889+00:00"
+      },
+      "timestamp": "2026-09-13T16:55:49.507889+00:00"
+    },
+    {
+      "id": "audit_1789318549250_c56644",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "EXTEND_SUBSCRIPTION",
+      "targetId": "usr-student-1",
+      "target": "usr-student-1",
+      "details": "Extended by 15 days",
+      "oldValue": {
+        "id": "sub_usr-student-1_1789318548",
+        "userId": "usr-student-1",
+        "planId": "plus_monthly",
+        "planName": "Plus Pass (Monthly)",
+        "planTier": "plus",
+        "isTrial": false,
+        "status": "manually_granted",
+        "startedAt": "2026-09-13T16:55:48.999248+00:00",
+        "expiresAt": "2026-10-13T16:55:48.999248+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789311613843_ba9f8799",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T15:00:14.126228+00:00",
+            "details": "Approved payment of \u20b99 for \u20b99 Elite 10-Day Trial"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T15:00:14.446401+00:00",
+            "details": "Extended by 15 days to 2026-10-08T15:00:14.126228+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:55:48.999248+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:55:49.249701+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:55:48.999248+00:00"
+          }
+        ]
+      },
+      "newValue": {
+        "id": "sub_usr-student-1_1789318548",
+        "userId": "usr-student-1",
+        "planId": "plus_monthly",
+        "planName": "Plus Pass (Monthly)",
+        "planTier": "plus",
+        "isTrial": false,
+        "status": "active",
+        "startedAt": "2026-09-13T16:55:48.999248+00:00",
+        "expiresAt": "2026-10-28T16:55:48.999248+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789311613843_ba9f8799",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T15:00:14.126228+00:00",
+            "details": "Approved payment of \u20b99 for \u20b99 Elite 10-Day Trial"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T15:00:14.446401+00:00",
+            "details": "Extended by 15 days to 2026-10-08T15:00:14.126228+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:55:48.999248+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:55:49.249701+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:55:48.999248+00:00"
+          }
+        ]
+      },
+      "timestamp": "2026-09-13T16:55:49.250206+00:00"
+    },
+    {
+      "id": "audit_1789318548999_4a6a02",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "GRANT_SUBSCRIPTION",
+      "targetId": "usr-student-1",
+      "target": "usr-student-1",
+      "details": "Admin granted Plus Pass (Monthly) until 2026-10-13T16:55:48.999248+00:00",
+      "oldValue": {
+        "id": "sub_usr-student-1_1789311614",
+        "userId": "usr-student-1",
+        "planId": "elite_trial",
+        "planName": "\u20b99 Elite 10-Day Trial",
+        "planTier": "trial",
+        "isTrial": true,
+        "status": "active",
+        "startedAt": "2026-09-13T15:00:14.126228+00:00",
+        "expiresAt": "2026-10-08T15:00:14.126228+00:00",
+        "purchasedAmount": 9,
+        "paymentSessionId": "psess_1789311613843_ba9f8799",
+        "utr": "UTR8F7EC80B2",
+        "history": [
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789311613843_ba9f8799",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T15:00:14.126228+00:00",
+            "details": "Approved payment of \u20b99 for \u20b99 Elite 10-Day Trial"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T15:00:14.446401+00:00",
+            "details": "Extended by 15 days to 2026-10-08T15:00:14.126228+00:00"
+          }
+        ]
+      },
+      "newValue": {
+        "id": "sub_usr-student-1_1789318548",
+        "userId": "usr-student-1",
+        "planId": "plus_monthly",
+        "planName": "Plus Pass (Monthly)",
+        "planTier": "plus",
+        "isTrial": false,
+        "status": "manually_granted",
+        "startedAt": "2026-09-13T16:55:48.999248+00:00",
+        "expiresAt": "2026-10-13T16:55:48.999248+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789311613843_ba9f8799",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T15:00:14.126228+00:00",
+            "details": "Approved payment of \u20b99 for \u20b99 Elite 10-Day Trial"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T15:00:14.446401+00:00",
+            "details": "Extended by 15 days to 2026-10-08T15:00:14.126228+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:55:48.999248+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          }
+        ]
+      },
+      "timestamp": "2026-09-13T16:55:48.999762+00:00"
+    },
     {
       "id": "audit_1789315291338_93fb73",
       "adminId": "usr-admin-1",

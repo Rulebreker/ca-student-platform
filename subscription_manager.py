@@ -18,6 +18,7 @@ import re
 import time
 import uuid
 import copy
+import urllib.parse
 from datetime import datetime, timezone, timedelta
 
 # Authorized Plan Definitions with Immutable IDs
@@ -797,6 +798,9 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
                 break
     old_sub_copy = dict(existing) if existing else None
 
+    if action == 'change_plan' and not existing:
+        action = 'grant'
+
     if action in ('grant', 'add_trial'):
         plan_id = params.get('planId') or ('elite_trial' if action == 'add_trial' else 'core_monthly')
         plan = get_plan_by_id(plan_id, data) or DEFAULT_PLANS.get(plan_id, {})
@@ -824,6 +828,19 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
         }
         subscriptions[user_id] = new_sub
 
+        notif = {
+            'id': f"notif_sub_grant_{int(time.time()*1000)}_{uuid.uuid4().hex[:4]}",
+            'userId': user_id,
+            'title': f"Pass Granted: {plan['name']}",
+            'message': f"An administrator has granted you the {plan['name']} pass (valid until {expires_at[:10]}). Reason: {params.get('reason', 'Administrative grant')}",
+            'type': 'subscription',
+            'createdAt': now_iso,
+            'isRead': False
+        }
+        data.setdefault('notifications', []).insert(0, notif)
+        if sync_fn:
+            sync_fn(f"notifications/{notif['id']}", notif)
+
         log_audit_action(admin_user, 'GRANT_SUBSCRIPTION', user_id, old_sub_copy, new_sub, details=f"Admin granted {plan['name']} until {expires_at}", data=data, sync_fn=sync_fn)
         if sync_fn:
             sync_fn(f"subscriptions/{user_id}", new_sub)
@@ -845,6 +862,18 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
             'timestamp': now_iso,
             'details': f"Extended by {days} days to {new_exp}"
         })
+        notif = {
+            'id': f"notif_sub_ext_{int(time.time()*1000)}_{uuid.uuid4().hex[:4]}",
+            'userId': user_id,
+            'title': "Subscription Extended",
+            'message': f"Your {existing.get('planName', 'Pass')} has been extended by {days} days to {new_exp[:10]}. Reason: {params.get('reason', 'Administrative extension')}",
+            'type': 'subscription',
+            'createdAt': now_iso,
+            'isRead': False
+        }
+        data.setdefault('notifications', []).insert(0, notif)
+        if sync_fn:
+            sync_fn(f"notifications/{notif['id']}", notif)
         log_audit_action(admin_user, 'EXTEND_SUBSCRIPTION', user_id, old_sub_copy, existing, details=f"Extended by {days} days", data=data, sync_fn=sync_fn)
         if sync_fn:
             sync_fn(f"subscriptions/{user_id}", existing)
@@ -865,6 +894,18 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
             'timestamp': now_iso,
             'details': f"Shortened by {days} days to {new_exp}"
         })
+        notif = {
+            'id': f"notif_sub_short_{int(time.time()*1000)}_{uuid.uuid4().hex[:4]}",
+            'userId': user_id,
+            'title': "Subscription Validity Adjusted",
+            'message': f"Your {existing.get('planName', 'Pass')} expiry has been adjusted to {new_exp[:10]}. Reason: {params.get('reason', 'Administrative adjustment')}",
+            'type': 'subscription',
+            'createdAt': now_iso,
+            'isRead': False
+        }
+        data.setdefault('notifications', []).insert(0, notif)
+        if sync_fn:
+            sync_fn(f"notifications/{notif['id']}", notif)
         log_audit_action(admin_user, 'SHORTEN_SUBSCRIPTION', user_id, old_sub_copy, existing, details=f"Shortened by {days} days", data=data, sync_fn=sync_fn)
         if sync_fn:
             sync_fn(f"subscriptions/{user_id}", existing)
@@ -884,6 +925,18 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
                 'timestamp': now_iso,
                 'details': f"Set custom expiry to {existing['expiresAt']}"
             })
+            notif = {
+                'id': f"notif_sub_cexp_{int(time.time()*1000)}_{uuid.uuid4().hex[:4]}",
+                'userId': user_id,
+                'title': "Subscription Expiry Updated",
+                'message': f"Your {existing.get('planName', 'Pass')} expiry has been set to {existing['expiresAt'][:10]}. Reason: {params.get('reason', 'Administrative update')}",
+                'type': 'subscription',
+                'createdAt': now_iso,
+                'isRead': False
+            }
+            data.setdefault('notifications', []).insert(0, notif)
+            if sync_fn:
+                sync_fn(f"notifications/{notif['id']}", notif)
             log_audit_action(admin_user, 'SET_CUSTOM_EXPIRY', user_id, old_sub_copy, existing, details=f"Set expiry to {existing['expiresAt']}", data=data, sync_fn=sync_fn)
             if sync_fn:
                 sync_fn(f"subscriptions/{user_id}", existing)
@@ -906,6 +959,18 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
             'timestamp': now_iso,
             'details': f"Admin switched plan to {plan['name']}"
         })
+        notif = {
+            'id': f"notif_sub_cplan_{int(time.time()*1000)}_{uuid.uuid4().hex[:4]}",
+            'userId': user_id,
+            'title': f"Subscription Updated to {plan['name']}",
+            'message': f"Your pass tier has been updated to {plan['name']}. Reason: {params.get('reason', 'Administrative plan update')}",
+            'type': 'subscription',
+            'createdAt': now_iso,
+            'isRead': False
+        }
+        data.setdefault('notifications', []).insert(0, notif)
+        if sync_fn:
+            sync_fn(f"notifications/{notif['id']}", notif)
         log_audit_action(admin_user, 'CHANGE_SUBSCRIPTION_PLAN', user_id, old_sub_copy, existing, details=f"Switched plan to {plan['name']}", data=data, sync_fn=sync_fn)
         if sync_fn:
             sync_fn(f"subscriptions/{user_id}", existing)
@@ -919,6 +984,18 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
             'timestamp': now_iso,
             'details': f"Admin suspended subscription. Reason: {params.get('reason', 'Administrative suspension')}"
         })
+        notif = {
+            'id': f"notif_sub_susp_{int(time.time()*1000)}_{uuid.uuid4().hex[:4]}",
+            'userId': user_id,
+            'title': "Subscription Suspended",
+            'message': f"Your {existing.get('planName', 'Pass')} access has been temporarily suspended. Reason: {params.get('reason', 'Administrative suspension')}",
+            'type': 'subscription',
+            'createdAt': now_iso,
+            'isRead': False
+        }
+        data.setdefault('notifications', []).insert(0, notif)
+        if sync_fn:
+            sync_fn(f"notifications/{notif['id']}", notif)
         log_audit_action(admin_user, 'SUSPEND_SUBSCRIPTION', user_id, old_sub_copy, existing, details="Suspended subscription", data=data, sync_fn=sync_fn)
         if sync_fn:
             sync_fn(f"subscriptions/{user_id}", existing)
@@ -935,6 +1012,18 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
             'timestamp': now_iso,
             'details': "Admin reactivated subscription."
         })
+        notif = {
+            'id': f"notif_sub_react_{int(time.time()*1000)}_{uuid.uuid4().hex[:4]}",
+            'userId': user_id,
+            'title': "Subscription Reactivated",
+            'message': f"Your {existing.get('planName', 'Pass')} has been reactivated.",
+            'type': 'subscription',
+            'createdAt': now_iso,
+            'isRead': False
+        }
+        data.setdefault('notifications', []).insert(0, notif)
+        if sync_fn:
+            sync_fn(f"notifications/{notif['id']}", notif)
         log_audit_action(admin_user, 'REACTIVATE_SUBSCRIPTION', user_id, old_sub_copy, existing, details="Reactivated subscription", data=data, sync_fn=sync_fn)
         if sync_fn:
             sync_fn(f"subscriptions/{user_id}", existing)
@@ -949,6 +1038,18 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
             'timestamp': now_iso,
             'details': f"Admin cancelled subscription. Reason: {params.get('reason', 'Administrative cancellation')}"
         })
+        notif = {
+            'id': f"notif_sub_canc_{int(time.time()*1000)}_{uuid.uuid4().hex[:4]}",
+            'userId': user_id,
+            'title': "Subscription Cancelled",
+            'message': f"Your subscription has been cancelled. Reason: {params.get('reason', 'Administrative cancellation')}",
+            'type': 'subscription',
+            'createdAt': now_iso,
+            'isRead': False
+        }
+        data.setdefault('notifications', []).insert(0, notif)
+        if sync_fn:
+            sync_fn(f"notifications/{notif['id']}", notif)
         log_audit_action(admin_user, 'CANCEL_SUBSCRIPTION', user_id, old_sub_copy, existing, details="Cancelled subscription", data=data, sync_fn=sync_fn)
         if sync_fn:
             sync_fn(f"subscriptions/{user_id}", existing)
@@ -964,11 +1065,12 @@ def manage_payment_channel(admin_user, action, params, data, sync_fn=None):
     now_iso = datetime.now(timezone.utc).isoformat()
 
     if action == 'add':
-        name = (params.get('name') or '').strip()
+        name = (params.get('name') or params.get('title') or '').strip()
         upi_id = (params.get('upiId') or '').strip()
+        payee_name = (params.get('payeeName') or params.get('accountHolderName') or 'ExcellenceCA').strip()
         if not name or not upi_id:
             return False, "Channel Name and UPI ID are required."
-        qr_url = params.get('qrCodeUrl') or f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa={upi_id}%26pn=ExcellenceCA%26cu=INR"
+        qr_url = params.get('qrCodeUrl') or f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa={upi_id}%26pn={urllib.parse.quote(payee_name)}%26cu=INR"
         is_primary = bool(params.get('isPrimary', False))
         if is_primary:
             for c in channels:
@@ -977,10 +1079,18 @@ def manage_payment_channel(admin_user, action, params, data, sync_fn=None):
         new_chan = {
             'id': f"chan_{int(time.time()*1000)}_{uuid.uuid4().hex[:4]}",
             'name': name,
+            'title': name,
             'upiId': upi_id,
+            'payeeName': payee_name,
             'qrCodeUrl': qr_url,
+            'bankAccountNumber': (params.get('bankAccountNumber') or params.get('accountNumber') or '').strip(),
+            'bankIfsc': (params.get('bankIfsc') or params.get('ifsc') or '').strip(),
+            'bankAccountHolder': (params.get('bankAccountHolder') or params.get('accountHolderName') or payee_name).strip(),
+            'amountLimit': float(params['amountLimit']) if params.get('amountLimit') else None,
+            'totalTransactions': int(params.get('totalTransactions') or 0),
+            'totalVolume': float(params.get('totalVolume') or 0.0),
             'isPrimary': is_primary or len(channels) == 0,
-            'isActive': True,
+            'isActive': bool(params.get('isActive', True)),
             'order': len(channels) + 1,
             'createdAt': now_iso
         }
@@ -990,7 +1100,7 @@ def manage_payment_channel(admin_user, action, params, data, sync_fn=None):
             sync_fn(f"payment_channels/{new_chan['id']}", new_chan)
         return True, new_chan
 
-    channel_id = params.get('id')
+    channel_id = params.get('id') or params.get('channelId')
     target = next((c for c in channels if c.get('id') == channel_id), None)
     if not target:
         return False, "Payment channel not found."
@@ -998,12 +1108,32 @@ def manage_payment_channel(admin_user, action, params, data, sync_fn=None):
     old_copy = dict(target)
 
     if action == 'edit':
-        if params.get('name'): target['name'] = params['name'].strip()
+        if params.get('name') or params.get('title'):
+            target['name'] = (params.get('name') or params.get('title')).strip()
+            target['title'] = target['name']
+        if params.get('payeeName'):
+            target['payeeName'] = params['payeeName'].strip()
         if params.get('upiId'):
             target['upiId'] = params['upiId'].strip()
             if not params.get('qrCodeUrl'):
-                target['qrCodeUrl'] = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa={target['upiId']}%26pn=ExcellenceCA%26cu=INR"
+                pn = target.get('payeeName', 'ExcellenceCA')
+                target['qrCodeUrl'] = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa={target['upiId']}%26pn={urllib.parse.quote(pn)}%26cu=INR"
         if params.get('qrCodeUrl'): target['qrCodeUrl'] = params['qrCodeUrl'].strip()
+        if 'bankAccountNumber' in params or 'accountNumber' in params:
+            target['bankAccountNumber'] = (params.get('bankAccountNumber') or params.get('accountNumber') or '').strip()
+        if 'bankIfsc' in params or 'ifsc' in params:
+            target['bankIfsc'] = (params.get('bankIfsc') or params.get('ifsc') or '').strip()
+        if 'bankAccountHolder' in params or 'accountHolderName' in params:
+            target['bankAccountHolder'] = (params.get('bankAccountHolder') or params.get('accountHolderName') or '').strip()
+        if 'amountLimit' in params:
+            target['amountLimit'] = float(params['amountLimit']) if params['amountLimit'] else None
+        if 'isActive' in params:
+            target['isActive'] = bool(params['isActive'])
+        if params.get('isPrimary'):
+            for c in channels:
+                c['isPrimary'] = (c.get('id') == channel_id)
+            target['isActive'] = True
+
         target['updatedAt'] = now_iso
         log_audit_action(admin_user, 'EDIT_PAYMENT_CHANNEL', channel_id, old_copy, target, details=f"Edited channel: {target['name']}", data=data, sync_fn=sync_fn)
         if sync_fn:

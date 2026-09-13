@@ -224,9 +224,10 @@ class AssignmentPortal {
       const curUserTier = curEntitlements ? curEntitlements.tier.toLowerCase() : 'free';
       const tierLevels = { free: 0, core: 1, plus: 2, elite: 3, trial: 3, admin: 99, teacher: 99 };
       const curUserLevel = curUser && (curUser.role === 'admin' || curUser.role === 'teacher') ? 99 : (tierLevels[curUserTier] ?? 0);
-      const reqTier = (asg.requiredTier || 'free').toLowerCase();
+      const rawReq = (asg.requiredTier || 'free').toString().trim().toLowerCase();
+      const reqTier = (rawReq === 'none' || rawReq === 'null' || !rawReq) ? 'free' : rawReq;
       const reqLevel = tierLevels[reqTier] ?? 0;
-      const isTierLocked = asg.isTierLocked || (curUserLevel < reqLevel);
+      const isTierLocked = (reqTier !== 'free') && (asg.isTierLocked || (curUserLevel < reqLevel));
 
       return `
         <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-xs hover:shadow-md transition-all flex flex-col h-full group box-border">
@@ -814,9 +815,10 @@ class AssignmentPortal {
     const curUserTier = curEntitlements ? curEntitlements.tier.toLowerCase() : 'free';
     const tierLevels = { free: 0, core: 1, plus: 2, elite: 3, trial: 3, admin: 99, teacher: 99 };
     const curUserLevel = user && (user.role === 'admin' || user.role === 'teacher') ? 99 : (tierLevels[curUserTier] ?? 0);
-    const paperReqTier = (asg.requiredTier || 'free').toLowerCase();
+    const rawReq = (asg.requiredTier || 'free').toString().trim().toLowerCase();
+    const paperReqTier = (rawReq === 'none' || rawReq === 'null' || !rawReq) ? 'free' : rawReq;
     const paperReqLevel = tierLevels[paperReqTier] ?? 0;
-    const isModalPaperLocked = asg.isTierLocked || (curUserLevel < paperReqLevel);
+    const isModalPaperLocked = (paperReqTier !== 'free') && (asg.isTierLocked || (curUserLevel < paperReqLevel));
 
     if (!existingSubmission && !isModalPaperLocked && !evalStatus.canAttempt && user.role === 'student') {
       window.app.showToast(`Access Denied: ${evalStatus.badgeText}. Test cannot be attempted outside the active window.`, 'error');
@@ -1211,7 +1213,8 @@ class AssignmentPortal {
     }
 
     // Security check 2b: Required Subscription Tier
-    const reqTier = (asg.requiredTier || 'free').toLowerCase();
+    const rawReq = (asg.requiredTier || 'free').toString().trim().toLowerCase();
+    const reqTier = (rawReq === 'none' || rawReq === 'null' || !rawReq) ? 'free' : rawReq;
     if (reqTier !== 'free' && user.role === 'student') {
       const entitlements = window.store ? window.store.getUserEntitlements(user.id) : null;
       const userTier = entitlements ? entitlements.tier.toLowerCase() : 'free';

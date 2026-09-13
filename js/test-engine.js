@@ -276,6 +276,27 @@ class TestEngine {
       });
     }
 
+    // 3b. Plan-based visibility filter
+    const curUser = window.auth ? window.auth.getCurrentUser() : null;
+    const isStaff = curUser && (curUser.role === 'admin' || curUser.role === 'teacher');
+    if (!isStaff) {
+      let userTier = 'free';
+      if (curUser && window.store) {
+        const sub = window.store.getUserSubscription ? window.store.getUserSubscription(curUser.id) : null;
+        const now = new Date();
+        if (sub && (sub.status === 'active' || sub.status === 'manually_granted') && (!sub.expiresAt || new Date(sub.expiresAt) > now)) {
+          userTier = (sub.planTier || 'core').toLowerCase();
+          if (sub.isTrial) userTier = 'trial';
+        }
+      }
+      list = list.filter(test => {
+        if (!test.allowedPlans || !Array.isArray(test.allowedPlans) || test.allowedPlans.length === 0) {
+          return true; // unrestricted / all plans
+        }
+        return test.allowedPlans.includes(userTier);
+      });
+    }
+
     // 4. Sort
     if (this.sortBy === 'new') {
       list.sort((a, b) => new Date(b.createdAt || b.startDate || 0).getTime() - new Date(a.createdAt || a.startDate || 0).getTime());

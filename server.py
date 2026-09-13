@@ -749,7 +749,9 @@ TIER_LEVELS = {
     'core': 1,
     'plus': 2,
     'elite': 3,
-    'trial': 3
+    'trial': 3,
+    'teacher': 99,
+    'admin': 99
 }
 
 def get_user_tier(user_id, data):
@@ -770,79 +772,99 @@ def get_user_tier(user_id, data):
     return 'free'
 
 def check_tier_access(user_tier, required_tier):
-    u_level = TIER_LEVELS.get(str(user_tier or 'free').lower(), 0)
-    r_level = TIER_LEVELS.get(str(required_tier or 'free').lower(), 0)
+    req = str(required_tier or 'free').strip().lower()
+    if req in ('none', 'null', '', 'free'):
+        return True
+    u_level = TIER_LEVELS.get(str(user_tier or 'free').strip().lower(), 0)
+    r_level = TIER_LEVELS.get(req, 0)
     return u_level >= r_level
 
-def load_backend_data():
-    if os.path.exists(DATA_STORE_FILE):
-        try:
-            with open(DATA_STORE_FILE, 'r', encoding='utf-8') as f:
-                d = json.load(f)
-        except Exception as read_err:
-            print(f"[DATA_STORE_ERROR] Failed to read {DATA_STORE_FILE}: {read_err}", flush=True)
-            d = None
+_backend_data_lock = threading.RLock()
 
-        if d is not None:
-            if 'tests' not in d: d['tests'] = []
-            if 'questions' not in d: d['questions'] = []
-            if 'test_attempts' not in d: d['test_attempts'] = []
-            if 'submissions' not in d: d['submissions'] = []
-            if 'papers' not in d: d['papers'] = []
-            if 'xp_transactions' not in d: d['xp_transactions'] = []
-            if 'notifications' not in d: d['notifications'] = []
-            if 'bookmarks' not in d: d['bookmarks'] = []
-            if 'subjects' not in d: d['subjects'] = []
-            if 'referrals' not in d: d['referrals'] = []
-            if 'referral_settings' not in d: d['referral_settings'] = {'referrerReward': 100, 'newStudentReward': 100}
-            if 'xp_reset_settings' not in d: d['xp_reset_settings'] = {'enabled': False, 'nextReset': None, 'intervalDays': 90, 'customSeconds': None, 'lastReset': None}
-            if 'xp_reset_history' not in d: d['xp_reset_history'] = []
-            # Sync seed users and hashed passwords
-            for email, init_u in INITIAL_USERS.items():
-                if email not in d.get('users', {}):
-                    d.setdefault('users', {})[email] = dict(init_u)
-                else:
-                    u = d['users'][email]
-                    if not u.get('password'):
-                        u['password'] = init_u['password']
-                    if not u.get('username') and init_u.get('username'):
-                        u['username'] = init_u['username']
-                    if not u.get('token') and init_u.get('token'):
-                        u['token'] = init_u['token']
-            for u in d.get('users', {}).values():
-                if u.get('role') == 'student':
-                    if 'referralPoints' not in u:
-                        u['referralPoints'] = 0
-                    if 'referralCount' not in u:
-                        u['referralCount'] = 0
-            try:
-                sync_historical_xp(d)
-            except Exception as xp_err:
-                print(f"[SYNC_XP_WARNING] {xp_err}", flush=True)
-            return d
-    data = {
-        'users': INITIAL_USERS,
-        'papers': INITIAL_PAPERS,
-        'submissions': [],
-        'tests': [],
-        'questions': [],
-        'test_attempts': [],
-        'xp_transactions': [],
-        'notifications': [],
-        'bookmarks': [],
-        'subjects': [],
-        'referrals': [],
-        'referral_settings': {'referrerReward': 100, 'newStudentReward': 100},
-        'xp_reset_settings': {'enabled': False, 'nextReset': None, 'intervalDays': 90, 'customSeconds': None, 'lastReset': None},
-        'xp_reset_history': []
-    }
-    sync_historical_xp(data)
-    save_backend_data(data)
-    return data
+def load_backend_data():
+    with _backend_data_lock:
+        if os.path.exists(DATA_STORE_FILE):
+            d = None
+            for attempt in range(5):
+                try:
+                    with open(DATA_STORE_FILE, 'r', encoding='utf-8') as f:
+                        d = json.load(f)
+                    break
+                except Exception as read_err:
+                    time.sleep(0.05)
+                    d = None
+
+            if d is not None:
+                if 'tests' not in d: d['tests'] = []
+                if 'questions' not in d: d['questions'] = []
+                if 'test_attempts' not in d: d['test_attempts'] = []
+                if 'submissions' not in d: d['submissions'] = []
+                if 'papers' not in d: d['papers'] = []
+                if 'xp_transactions' not in d: d['xp_transactions'] = []
+                if 'notifications' not in d: d['notifications'] = []
+                if 'bookmarks' not in d: d['bookmarks'] = []
+                if 'subjects' not in d: d['subjects'] = []
+                if 'referrals' not in d: d['referrals'] = []
+                if 'referral_settings' not in d: d['referral_settings'] = {'referrerReward': 100, 'newStudentReward': 100}
+                if 'xp_reset_settings' not in d: d['xp_reset_settings'] = {'enabled': False, 'nextReset': None, 'intervalDays': 90, 'customSeconds': None, 'lastReset': None}
+                if 'xp_reset_history' not in d: d['xp_reset_history'] = []
+                # Sync seed users and hashed passwords
+                for email, init_u in INITIAL_USERS.items():
+                    if email not in d.get('users', {}):
+                        d.setdefault('users', {})[email] = dict(init_u)
+                    else:
+                        u = d['users'][email]
+                        if not u.get('password'):
+                            u['password'] = init_u['password']
+                        if not u.get('username') and init_u.get('username'):
+                            u['username'] = init_u['username']
+                        if not u.get('token') and init_u.get('token'):
+                            u['token'] = init_u['token']
+                for u in d.get('users', {}).values():
+                    if u.get('role') == 'student':
+                        if 'referralPoints' not in u:
+                            u['referralPoints'] = 0
+                        if 'referralCount' not in u:
+                            u['referralCount'] = 0
+                try:
+                    sync_historical_xp(d)
+                except Exception as xp_err:
+                    print(f"[SYNC_XP_WARNING] {xp_err}", flush=True)
+                return d
+            else:
+                print(f"[DATA_STORE_ERROR] Failed to read {DATA_STORE_FILE} after retries. Preserving existing file contents.", flush=True)
+                return {}
+
+        data = {
+            'users': INITIAL_USERS,
+            'papers': INITIAL_PAPERS,
+            'submissions': [],
+            'tests': [],
+            'questions': [],
+            'test_attempts': [],
+            'xp_transactions': [],
+            'notifications': [],
+            'bookmarks': [],
+            'subjects': [],
+            'referrals': [],
+            'referral_settings': {'referrerReward': 100, 'newStudentReward': 100},
+            'xp_reset_settings': {'enabled': False, 'nextReset': None, 'intervalDays': 90, 'customSeconds': None, 'lastReset': None},
+            'xp_reset_history': []
+        }
+        sync_historical_xp(data)
+        save_backend_data(data)
+        return data
 
 def save_backend_data(data):
-    with open(DATA_STORE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2)
+    with _backend_data_lock:
+        tmp_file = DATA_STORE_FILE + f".tmp.{os.getpid()}"
+        with open(tmp_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+        try:
+            os.replace(tmp_file, DATA_STORE_FILE)
+        except OSError:
+            time.sleep(0.05)
+            os.replace(tmp_file, DATA_STORE_FILE)
 
 _xp_reset_lock = threading.Lock()
 
@@ -1346,10 +1368,11 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             subscriptions = data.get('subscriptions', {})
             users_dict = data.get('users', {})
             enriched = []
+            subs_map = {}
             for u_id, sub in subscriptions.items():
                 st_user = next((u for u in users_dict.values() if u.get('id') == u_id), {})
                 entitlements = subscription_manager.get_user_entitlements(u_id, data, sync_to_firebase)
-                enriched.append({
+                entry = {
                     'subscription': sub,
                     'entitlements': entitlements,
                     'student': {
@@ -1361,13 +1384,17 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         'caLevel': st_user.get('caLevel', ''),
                         'avatar': st_user.get('avatar', '')
                     }
-                })
+                }
+                enriched.append(entry)
+                subs_map[u_id] = sub
             active_count = sum(1 for s in enriched if s['subscription'].get('status') in ('active', 'manually_granted') and not s['subscription'].get('isTrial'))
             trial_count = sum(1 for s in enriched if s['subscription'].get('status') in ('active', 'manually_granted') and s['subscription'].get('isTrial'))
             expired_count = sum(1 for s in enriched if s['subscription'].get('status') == 'expired')
+            print(f"[ADMIN_SUBSCRIPTIONS] Serving {len(enriched)} subscriptions to admin {admin_u.get('email')}", flush=True)
             self.send_json(200, {
                 'success': True,
-                'subscriptions': enriched,
+                'subscriptions': subs_map,
+                'subscriptionsList': enriched,
                 'stats': {
                     'activeSubscriptions': active_count,
                     'activeTrials': trial_count,
@@ -1398,6 +1425,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 'rejected': sum(1 for s in sessions if s.get('status') == 'rejected'),
                 'totalRevenue': sum(s.get('amount', 0) for s in sessions if s.get('status') == 'approved')
             }
+            print(f"[ADMIN_PAYMENTS] Serving {len(filtered)} payment sessions to admin {admin_u.get('email')} (filter={status_filter})", flush=True)
             self.send_json(200, {
                 'success': True,
                 'payments': filtered,
@@ -1508,7 +1536,11 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 live_end = p.get('liveEndTime')
                 base_status = p.get('status', 'Published')
 
-                req_tier = str(p.get('requiredTier', 'free')).lower()
+                raw_req = p.get('requiredTier')
+                if not raw_req or str(raw_req).strip().lower() in ('none', 'null', '', 'free'):
+                    req_tier = 'free'
+                else:
+                    req_tier = str(raw_req).strip().lower()
                 p_copy['requiredTier'] = req_tier
                 has_tier = is_admin_or_teacher or check_tier_access(user_tier, req_tier)
                 p_copy['isTierLocked'] = not has_tier
@@ -1545,7 +1577,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     p_copy['effectiveStatus'] = 'Published'
                     p_copy['isAvailable'] = True
                 result.append(p_copy)
-            self.send_json(200, {'papers': result, 'userTier': user_tier})
+            self.send_json(200, {'success': True, 'papers': result, 'userTier': user_tier})
             return
 
         # Descriptive Papers Submissions
@@ -2033,16 +2065,29 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 content_length = int(self.headers.get('Content-Length', 0))
                 body = self.rfile.read(content_length) if content_length > 0 else b'{}'
                 req_data = json.loads(body.decode('utf-8')) if body else {}
-                user_id = req_data.get('userId') or req_data.get('studentId')
                 action = req_data.get('action')
                 data = load_backend_data()
-                success, res = subscription_manager.manage_subscription(admin_u, user_id, action, req_data, data, sync_to_firebase)
-                if not success:
-                    self.send_json(400, {'success': False, 'error': res})
+
+                user_ids = req_data.get('userIds')
+                if isinstance(user_ids, list) and user_ids:
+                    results = []
+                    for uid in user_ids:
+                        ok, r = subscription_manager.manage_subscription(admin_u, uid, action, req_data, data, sync_to_firebase)
+                        results.append({'userId': uid, 'success': ok, 'result': r if ok else str(r)})
+                    save_backend_data(data)
+                    print(f"[ADMIN_SUBSCRIPTIONS] Bulk {action} executed for {len(user_ids)} users by {admin_u.get('email')}", flush=True)
+                    self.send_json(200, {'success': True, 'bulk': True, 'count': len(user_ids), 'results': results})
                     return
-                save_backend_data(data)
-                self.send_json(200, {'success': True, 'subscription': res})
-                return
+                else:
+                    user_id = req_data.get('userId') or req_data.get('studentId')
+                    success, res = subscription_manager.manage_subscription(admin_u, user_id, action, req_data, data, sync_to_firebase)
+                    if not success:
+                        self.send_json(400, {'success': False, 'error': res})
+                        return
+                    save_backend_data(data)
+                    print(f"[ADMIN_SUBSCRIPTIONS] {action} executed for user {user_id} by {admin_u.get('email')}", flush=True)
+                    self.send_json(200, {'success': True, 'subscription': res})
+                    return
             except Exception as e:
                 self.send_json(500, {'success': False, 'error': f'Management error: {str(e)}'})
                 return
@@ -2060,11 +2105,19 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 req_data = json.loads(body.decode('utf-8')) if body else {}
                 action = req_data.get('action')
                 data = load_backend_data()
-                success, res = subscription_manager.manage_payment_channel(admin_u, action, req_data, data, sync_to_firebase)
+
+                combined_params = dict(req_data)
+                if isinstance(req_data.get('channelData'), dict):
+                    combined_params.update(req_data['channelData'])
+                if 'channelId' in req_data and 'id' not in combined_params:
+                    combined_params['id'] = req_data['channelId']
+
+                success, res = subscription_manager.manage_payment_channel(admin_u, action, combined_params, data, sync_to_firebase)
                 if not success:
                     self.send_json(400, {'success': False, 'error': res})
                     return
                 save_backend_data(data)
+                print(f"[ADMIN_CHANNELS] Channel action {action} succeeded by {admin_u.get('email')}", flush=True)
                 self.send_json(200, {'success': True, 'result': res})
                 return
             except Exception as e:
@@ -4012,8 +4065,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json(404, {'error': 'Endpoint not found', 'code': 404})
 
 def run_server(port=PORT):
-    socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.ThreadingTCPServer(('', port), ExcellenceCAHandler) as httpd:
+    socketserver.TCPServer.allow_reuse_address = False
+    with socketserver.ThreadingTCPServer(('127.0.0.1', port), ExcellenceCAHandler) as httpd:
         print(f'==================================================')
         print(f' ExcellenceCA Secure Server running at:')
         print(f' http://localhost:{port}')

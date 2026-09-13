@@ -2837,6 +2837,33 @@ This will remove the question paper, attached answer keys, and student submissio
             </div>
           </div>
 
+          <!-- Plan-based visibility multi-select -->
+          <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+            <label class="block font-bold text-slate-700 mb-1.5">Visible to Plan(s) <span class="text-slate-400 font-normal">(Select which student subscription tiers can access this test)</span> *</label>
+            <div class="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                <input type="checkbox" value="free" class="tst-allowed-plan rounded border-slate-300 text-blue-600 focus:ring-blue-500" ${!test || !test.allowedPlans || test.allowedPlans.includes('free') ? 'checked' : ''}>
+                <span class="text-xs font-bold text-slate-700">Free Tier</span>
+              </label>
+              <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                <input type="checkbox" value="trial" class="tst-allowed-plan rounded border-slate-300 text-amber-600 focus:ring-amber-500" ${!test || !test.allowedPlans || test.allowedPlans.includes('trial') ? 'checked' : ''}>
+                <span class="text-xs font-bold text-amber-800">₹9 Trial</span>
+              </label>
+              <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                <input type="checkbox" value="core" class="tst-allowed-plan rounded border-slate-300 text-blue-600 focus:ring-blue-500" ${!test || !test.allowedPlans || test.allowedPlans.includes('core') ? 'checked' : ''}>
+                <span class="text-xs font-bold text-blue-800">Core Pass</span>
+              </label>
+              <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                <input type="checkbox" value="plus" class="tst-allowed-plan rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" ${!test || !test.allowedPlans || test.allowedPlans.includes('plus') ? 'checked' : ''}>
+                <span class="text-xs font-bold text-indigo-800">Plus Pass</span>
+              </label>
+              <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                <input type="checkbox" value="elite" class="tst-allowed-plan rounded border-slate-300 text-purple-600 focus:ring-purple-500" ${!test || !test.allowedPlans || test.allowedPlans.includes('elite') ? 'checked' : ''}>
+                <span class="text-xs font-bold text-purple-800">Elite Pass</span>
+              </label>
+            </div>
+          </div>
+
           <div>
             <label class="block font-bold text-slate-700 mb-1">Test Description & Student Instructions *</label>
             <textarea 
@@ -2890,6 +2917,11 @@ This will remove the question paper, attached answer keys, and student submissio
     const matchedSub = allSubjs.find(s => s.id === subjectId || s.name === subjectId);
     const subjectName = matchedSub ? matchedSub.name : (document.getElementById('tst-subject').selectedOptions[0]?.text || 'Accounting');
 
+    const planCheckboxes = document.querySelectorAll('.tst-allowed-plan:checked');
+    const allowedPlans = planCheckboxes.length > 0 
+      ? Array.from(planCheckboxes).map(c => c.value) 
+      : ['free', 'trial', 'core', 'plus', 'elite'];
+
     const testPayload = {
       id: existingId || ('tst-' + Date.now()),
       title,
@@ -2907,6 +2939,7 @@ This will remove the question paper, attached answer keys, and student submissio
       maxAttempts,
       status,
       isPublished: (status === 'Published' || status === 'Live'),
+      allowedPlans,
       description,
       totalQuestions: existingId ? (window.store.getQuestionsByTestId(existingId).length) : 0,
       updatedAt: new Date().toISOString()
@@ -2933,21 +2966,36 @@ This will remove the question paper, attached answer keys, and student submissio
       console.warn('Backend sync error:', err);
     }
 
-    // Trigger notification to students matching exam level if newly created and published
+    // Trigger notification ONLY to students subscribed to allowed plans
     if (!existingId && testPayload.isPublished) {
       const allStudents = window.store.getStudents ? window.store.getStudents() : [];
+      const subs = window.store.getSubscriptions ? window.store.getSubscriptions() : {};
+      const now = new Date();
       allStudents.forEach(st => {
         const stLevel = (st.caLevel || '').toUpperCase();
         const tLevel = (examLevel || '').toUpperCase();
-        if (!tLevel || stLevel.includes('FOUNDATION') && tLevel.includes('FOUNDATION') ||
-            stLevel.includes('INTER') && tLevel.includes('INTER') ||
-            stLevel.includes('FINAL') && tLevel.includes('FINAL') ||
-            !st.caLevel) {
+        const levelMatches = !tLevel ||
+          (stLevel.includes('FOUNDATION') && tLevel.includes('FOUNDATION')) ||
+          (stLevel.includes('INTER') && tLevel.includes('INTER')) ||
+          (stLevel.includes('FINAL') && tLevel.includes('FINAL')) ||
+          !st.caLevel;
+        if (!levelMatches) return;
+
+        // Check active subscription tier
+        const sub = subs[st.id];
+        const isSubActive = sub && (sub.status === 'active' || sub.status === 'manually_granted') && (!sub.expiresAt || new Date(sub.expiresAt) > now);
+        let studentTier = 'free';
+        if (isSubActive) {
+          studentTier = (sub.planTier || 'core').toLowerCase();
+          if (sub.isTrial) studentTier = 'trial';
+        }
+
+        if (testPayload.allowedPlans.includes(studentTier)) {
           window.store.addNotification({
             userId: st.id,
             type: 'new_test',
             title: 'New MCQ Test Published!',
-            message: `${testPayload.title} (${testPayload.subject}) is now live.`,
+            message: `${testPayload.title} (${testPayload.subject}) is now live for your ${studentTier.toUpperCase()} pass tier.`,
             link: 'tests',
             metadata: { testId: testPayload.id }
           });
