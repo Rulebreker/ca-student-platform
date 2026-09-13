@@ -1,3 +1,4 @@
+import subscription_manager
 import http.server
 import socketserver
 import os
@@ -891,6 +892,19 @@ def execute_xp_reset(data, triggered_by='scheduled', admin_user=None):
 
 _last_checked_schedule_time = None
 
+
+def subscription_background_worker():
+    """Background thread that automatically expires subscriptions and timed-out payment sessions."""
+    while True:
+        try:
+            time.sleep(30)
+            data = load_backend_data()
+            modified = subscription_manager.auto_expire_worker(data, sync_to_firebase)
+            if modified:
+                save_backend_data(data)
+        except Exception as e:
+            print(f"[SUBSCRIPTION_WORKER_EXCEPTION] {e}", flush=True)
+
 def xp_reset_background_worker():
     global _last_checked_schedule_time
     while True:
@@ -1242,6 +1256,139 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             sanitized = dict(matched)
             sanitized.pop('password', None)
             self.send_json(200, {'authenticated': True, 'user': sanitized})
+            return
+
+
+        # ================================================================
+        # SUBSCRIPTION, PAYMENT & ENTITLEMENT GET ENDPOINTS
+        # ================================================================
+
+        # 1. Public Plan Catalog
+        if path == '/api/subscriptions/plans':
+            data = load_backend_data()
+            plans = subscription_manager.get_all_plans(data)
+            self.send_json(200, {'success': True, 'plans': plans})
+            return
+
+        # 2. Active Payment Channels (for student checkout)
+        if path in ('/api/payments/channels', '/api/admin/payment-channels'):
+            data = load_backend_data()
+            channels = subscription_manager.get_payment_channels(data)
+            save_backend_data(data)
+            self.send_json(200, {'success': True, 'channels': channels})
+            return
+
+        # 3. Authenticated Student Current Subscription, Entitlements & Payment History
+        if path == '/api/subscriptions/my':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user:
+                self.send_json(401, {'success': False, 'error': 'Authentication required to view subscription details.', 'code': 401})
+                return
+            data = load_backend_data()
+            sub = subscription_manager.get_user_subscription(user['id'], data, sync_to_firebase)
+            entitlements = subscription_manager.get_user_entitlements(user['id'], data, sync_to_firebase)
+            user_sessions = [s for s in data.get('payment_sessions', []) if s.get('userId') == user['id']]
+            self.send_json(200, {
+                'success': True,
+                'subscription': sub,
+                'entitlements': entitlements,
+                'paymentHistory': user_sessions
+            })
+            return
+
+        # 4. Admin Subscriptions List & KPIs
+        if path == '/api/admin/subscriptions':
+            token = self.get_auth_token()
+            admin_u = authenticate_token(token)
+            if not admin_u or admin_u.get('role') != 'admin':
+                self.send_json(403, {'success': False, 'error': 'Administrator authorization required.', 'code': 403})
+                return
+            data = load_backend_data()
+            subscriptions = data.get('subscriptions', {})
+            users_dict = data.get('users', {})
+            enriched = []
+            for u_id, sub in subscriptions.items():
+                st_user = next((u for u in users_dict.values() if u.get('id') == u_id), {})
+                entitlements = subscription_manager.get_user_entitlements(u_id, data, sync_to_firebase)
+                enriched.append({
+                    'subscription': sub,
+                    'entitlements': entitlements,
+                    'student': {
+                        'id': u_id,
+                        'name': st_user.get('name', 'Student'),
+                        'email': st_user.get('email', ''),
+                        'phone': st_user.get('phone', ''),
+                        'username': st_user.get('username', ''),
+                        'caLevel': st_user.get('caLevel', ''),
+                        'avatar': st_user.get('avatar', '')
+                    }
+                })
+            active_count = sum(1 for s in enriched if s['subscription'].get('status') in ('active', 'manually_granted') and not s['subscription'].get('isTrial'))
+            trial_count = sum(1 for s in enriched if s['subscription'].get('status') in ('active', 'manually_granted') and s['subscription'].get('isTrial'))
+            expired_count = sum(1 for s in enriched if s['subscription'].get('status') == 'expired')
+            self.send_json(200, {
+                'success': True,
+                'subscriptions': enriched,
+                'stats': {
+                    'activeSubscriptions': active_count,
+                    'activeTrials': trial_count,
+                    'expiredSubscriptions': expired_count,
+                    'totalSubscribers': len(enriched)
+                }
+            })
+            return
+
+        # 5. Admin Payments List & Stats
+        if path == '/api/admin/payments':
+            token = self.get_auth_token()
+            admin_u = authenticate_token(token)
+            if not admin_u or admin_u.get('role') != 'admin':
+                self.send_json(403, {'success': False, 'error': 'Administrator authorization required.', 'code': 403})
+                return
+            data = load_backend_data()
+            sessions = data.get('payment_sessions', [])
+            status_filter = query.get('status', [None])[0]
+            if status_filter and status_filter != 'all':
+                filtered = [s for s in sessions if s.get('status') == status_filter]
+            else:
+                filtered = sessions
+            stats = {
+                'total': len(sessions),
+                'pending': sum(1 for s in sessions if s.get('status') in ('pending_verification', 'late_payment')),
+                'approved': sum(1 for s in sessions if s.get('status') == 'approved'),
+                'rejected': sum(1 for s in sessions if s.get('status') == 'rejected'),
+                'totalRevenue': sum(s.get('amount', 0) for s in sessions if s.get('status') == 'approved')
+            }
+            self.send_json(200, {
+                'success': True,
+                'payments': filtered,
+                'stats': stats
+            })
+            return
+
+        # 6. Admin Plan Catalog
+        if path == '/api/admin/plans':
+            token = self.get_auth_token()
+            admin_u = authenticate_token(token)
+            if not admin_u or admin_u.get('role') != 'admin':
+                self.send_json(403, {'success': False, 'error': 'Administrator authorization required.', 'code': 403})
+                return
+            data = load_backend_data()
+            plans = subscription_manager.get_all_plans(data)
+            self.send_json(200, {'success': True, 'plans': plans})
+            return
+
+        # 7. Admin Audit Logs
+        if path == '/api/admin/audit-logs':
+            token = self.get_auth_token()
+            admin_u = authenticate_token(token)
+            if not admin_u or admin_u.get('role') != 'admin':
+                self.send_json(403, {'success': False, 'error': 'Administrator authorization required.', 'code': 403})
+                return
+            data = load_backend_data()
+            logs = data.get('admin_audit_logs', [])
+            self.send_json(200, {'success': True, 'logs': logs})
             return
 
         # Check Username Availability & Format (Alphanumeric, max 10 chars, case-insensitive uniqueness)
@@ -1681,6 +1828,183 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             except Exception as e:
                 self.send_json(500, {'error': str(e)})
+                return
+
+
+        # ================================================================
+        # SUBSCRIPTION & PAYMENT POST ENDPOINTS
+        # ================================================================
+
+        # 1. Create 5-Minute Payment Session
+        if path == '/api/payments/create-session':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user:
+                self.send_json(401, {'success': False, 'error': 'Authentication required to initiate payment.', 'code': 401})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+                plan_id = req_data.get('planId')
+                data = load_backend_data()
+                success, res = subscription_manager.create_payment_session(user, plan_id, data, sync_to_firebase)
+                if not success:
+                    self.send_json(400, {'success': False, 'error': res})
+                    return
+                save_backend_data(data)
+                self.send_json(200, {'success': True, 'session': res})
+                return
+            except Exception as e:
+                self.send_json(500, {'success': False, 'error': f'Failed to create payment session: {str(e)}'})
+                return
+
+        # 2. Cancel In-Flight Payment Session
+        if path == '/api/payments/cancel-session':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user:
+                self.send_json(401, {'success': False, 'error': 'Authentication required.', 'code': 401})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+                session_id = req_data.get('paymentSessionId') or req_data.get('sessionId')
+                data = load_backend_data()
+                success, res = subscription_manager.cancel_payment_session(user['id'], session_id, data, sync_to_firebase)
+                save_backend_data(data)
+                self.send_json(200, {'success': success, 'session': res if success else None})
+                return
+            except Exception as e:
+                self.send_json(500, {'success': False, 'error': f'Failed to cancel session: {str(e)}'})
+                return
+
+        # 3. Submit Payment UTR & Screenshot
+        if path == '/api/payments/submit-payment':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user:
+                self.send_json(401, {'success': False, 'error': 'Authentication required.', 'code': 401})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+                session_id = req_data.get('paymentSessionId') or req_data.get('sessionId')
+                utr = req_data.get('utr')
+                screenshot = req_data.get('screenshot')
+                data = load_backend_data()
+                success, res = subscription_manager.submit_payment(user['id'], session_id, utr, screenshot, data, sync_to_firebase)
+                if not success:
+                    self.send_json(400, {'success': False, 'error': res})
+                    return
+                save_backend_data(data)
+                self.send_json(200, {'success': True, 'session': res})
+                return
+            except Exception as e:
+                self.send_json(500, {'success': False, 'error': f'Payment submission error: {str(e)}'})
+                return
+
+        # 4. Admin Payment Verification (Approve / Reject)
+        if path == '/api/admin/payments/verify':
+            token = self.get_auth_token()
+            admin_u = authenticate_token(token)
+            if not admin_u or admin_u.get('role') != 'admin':
+                self.send_json(403, {'success': False, 'error': 'Administrator authorization required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+                session_id = req_data.get('paymentSessionId') or req_data.get('sessionId')
+                action = req_data.get('action') # 'approve' or 'reject'
+                reason = req_data.get('rejectionReason', '')
+                data = load_backend_data()
+                success, res = subscription_manager.verify_payment(admin_u, session_id, action, reason, data, sync_to_firebase)
+                if not success:
+                    self.send_json(400, {'success': False, 'error': res})
+                    return
+                save_backend_data(data)
+                user_sub = data.get('subscriptions', {}).get(res.get('userId')) if isinstance(res, dict) else None
+                self.send_json(200, {'success': True, 'session': res, 'subscription': user_sub})
+                return
+            except Exception as e:
+                self.send_json(500, {'success': False, 'error': f'Verification error: {str(e)}'})
+                return
+
+        # 5. Admin Subscription Management (Grant / Extend / Shorten / Suspend / Reactivate / Cancel)
+        if path == '/api/admin/subscriptions/manage':
+            token = self.get_auth_token()
+            admin_u = authenticate_token(token)
+            if not admin_u or admin_u.get('role') != 'admin':
+                self.send_json(403, {'success': False, 'error': 'Administrator authorization required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+                user_id = req_data.get('userId') or req_data.get('studentId')
+                action = req_data.get('action')
+                data = load_backend_data()
+                success, res = subscription_manager.manage_subscription(admin_u, user_id, action, req_data, data, sync_to_firebase)
+                if not success:
+                    self.send_json(400, {'success': False, 'error': res})
+                    return
+                save_backend_data(data)
+                self.send_json(200, {'success': True, 'subscription': res})
+                return
+            except Exception as e:
+                self.send_json(500, {'success': False, 'error': f'Management error: {str(e)}'})
+                return
+
+        # 6. Admin Payment Channels Management (Add / Edit / Delete / Toggle / Set Primary)
+        if path == '/api/admin/payment-channels':
+            token = self.get_auth_token()
+            admin_u = authenticate_token(token)
+            if not admin_u or admin_u.get('role') != 'admin':
+                self.send_json(403, {'success': False, 'error': 'Administrator authorization required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+                action = req_data.get('action')
+                data = load_backend_data()
+                success, res = subscription_manager.manage_payment_channel(admin_u, action, req_data, data, sync_to_firebase)
+                if not success:
+                    self.send_json(400, {'success': False, 'error': res})
+                    return
+                save_backend_data(data)
+                self.send_json(200, {'success': True, 'result': res})
+                return
+            except Exception as e:
+                self.send_json(500, {'success': False, 'error': f'Channel management error: {str(e)}'})
+                return
+
+        # 7. Admin Plan Configuration (Pricing, Features, Limits, Trial)
+        if path == '/api/admin/plans':
+            token = self.get_auth_token()
+            admin_u = authenticate_token(token)
+            if not admin_u or admin_u.get('role') != 'admin':
+                self.send_json(403, {'success': False, 'error': 'Administrator authorization required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+                plan_id = req_data.get('planId')
+                updates = req_data.get('updates', {})
+                data = load_backend_data()
+                success, res = subscription_manager.manage_plans_config(admin_u, plan_id, updates, data, sync_to_firebase)
+                if not success:
+                    self.send_json(400, {'success': False, 'error': res})
+                    return
+                save_backend_data(data)
+                self.send_json(200, {'success': True, 'plan': res})
+                return
+            except Exception as e:
+                self.send_json(500, {'success': False, 'error': f'Plan config error: {str(e)}'})
                 return
 
         # 0. User Login with Secure Password Verification
@@ -2937,6 +3261,15 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 data = load_backend_data()
                 tests = data.get('tests', [])
                 target = next((t for t in tests if t.get('id') == test_id), None)
+                if target:
+                    entitlements = subscription_manager.get_user_entitlements(user['id'], data, sync_to_firebase)
+                    if target.get('isPremium') and not entitlements['permissions'].get('premium_mcq_access'):
+                        self.send_json(403, {
+                            'error': 'Access Denied: This is a premium test requiring an active Core, Plus, or Elite Pass.',
+                            'code': 403,
+                            'isPremiumLocked': True
+                        })
+                        return
                 if not target:
                     self.send_json(404, {'error': 'Test not found', 'code': 404})
                     return
@@ -3330,6 +3663,15 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 data = load_backend_data()
                 tests = data.get('tests', [])
                 target = next((t for t in tests if t.get('id') == test_id), None)
+                if target:
+                    entitlements = subscription_manager.get_user_entitlements(user['id'], data, sync_to_firebase)
+                    if target.get('isPremium') and not entitlements['permissions'].get('premium_mcq_access'):
+                        self.send_json(403, {
+                            'error': 'Access Denied: This is a premium test requiring an active Core, Plus, or Elite Pass.',
+                            'code': 403,
+                            'isPremiumLocked': True
+                        })
+                        return
                 if not target:
                     # If test was created on client, allow attempt with default 3 attempts
                     self.send_json(200, {
@@ -3563,6 +3905,8 @@ def run_server(port=PORT):
         # Start scheduled background XP reset worker
         worker_thread = threading.Thread(target=xp_reset_background_worker, daemon=True)
         worker_thread.start()
+        sub_worker_thread = threading.Thread(target=subscription_background_worker, daemon=True)
+        sub_worker_thread.start()
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:

@@ -55,10 +55,12 @@ class StudentDashboard {
     if (metricRank) metricRank.textContent = rankDisplay;
 
     // Render Sub-sections
+    this.renderPassBadge();
     this.renderAvailableTests();
     // Video lectures hidden from student dashboard
     this.renderPendingAssignments();
     this.renderRecentAttempts(userAttempts);
+    this.renderPaymentHistory();
   }
 
   renderAvailableTests() {
@@ -310,6 +312,196 @@ class StudentDashboard {
                     >
                       View Report & Solutions →
                     </button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  renderPassBadge() {
+    const container = document.getElementById('dashboard-subscription-card');
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    if (!user) return;
+
+    const ent = window.store ? window.store.getUserEntitlements(user.id) : null;
+    if (!ent) return;
+
+    const sub = window.store ? window.store.getUserSubscription(user.id) : null;
+
+    if (container) {
+      if (ent.isSubscribed) {
+        const isTrial = ent.isTrial;
+        const expiryDateStr = sub && sub.expiresAt 
+          ? new Date(sub.expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+          : 'Active';
+
+        container.innerHTML = `
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div class="flex items-start sm:items-center gap-3.5">
+              <div class="w-12 h-12 rounded-2xl ${isTrial ? 'bg-amber-100 text-amber-700 border border-amber-300' : (ent.tier === 'elite' ? 'bg-purple-100 text-purple-700 border border-purple-300' : (ent.tier === 'plus' ? 'bg-indigo-100 text-indigo-700 border border-indigo-300' : 'bg-blue-100 text-blue-700 border border-blue-300'))} flex items-center justify-center flex-shrink-0 shadow-xs">
+                <i data-lucide="${isTrial ? 'sparkles' : 'badge-check'}" class="w-6 h-6"></i>
+              </div>
+              <div>
+                <div class="flex flex-wrap items-center gap-2 mb-1">
+                  <span class="px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider ${ent.badgeClass || 'bg-blue-100 text-blue-800'}">
+                    ${ent.badge || ent.planName}
+                  </span>
+                  <span class="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Active
+                  </span>
+                  <span class="text-xs text-slate-500 font-medium">
+                    • Expires: ${expiryDateStr} (${ent.remainingDays} day${ent.remainingDays === 1 ? '' : 's'} left)
+                  </span>
+                </div>
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
+                  <span class="flex items-center gap-1 font-semibold text-slate-800">
+                    <i data-lucide="clock" class="w-3.5 h-3.5 text-blue-600"></i> ${ent.copyCheckSlaHours || (sub ? sub.copyCheckSlaHours : 24)}h SLA Copy Check
+                  </span>
+                  <span class="flex items-center gap-1 font-semibold text-slate-800">
+                    <i data-lucide="check-square" class="w-3.5 h-3.5 text-emerald-600"></i> ${ent.permissions && ent.permissions.live_mcq_daily_limit ? ent.permissions.live_mcq_daily_limit + ' Live MCQs/Day' : 'Daily MCQs'}
+                  </span>
+                  ${ent.permissions && ent.permissions.weekly_full_exam_access ? '<span class="flex items-center gap-1 font-semibold text-purple-700"><i data-lucide="award" class="w-3.5 h-3.5"></i> Weekly Mocks Included</span>' : ''}
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2.5 self-start md:self-center flex-shrink-0">
+              <button 
+                onclick="window.subscriptionManager && window.subscriptionManager.openPricingModal()"
+                class="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <i data-lucide="sparkles" class="w-3.5 h-3.5"></i> Upgrade / Extend Pass
+              </button>
+            </div>
+          </div>
+        `;
+      } else {
+        // Free Basic Tier
+        container.innerHTML = `
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div class="flex items-start sm:items-center gap-3.5">
+              <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-600 border border-slate-200 flex items-center justify-center flex-shrink-0">
+                <i data-lucide="shield" class="w-6 h-6"></i>
+              </div>
+              <div>
+                <div class="flex flex-wrap items-center gap-2 mb-1">
+                  <span class="px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200">
+                    Free Basic Tier
+                  </span>
+                  <span class="text-xs text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                    Standard 72h+ SLA
+                  </span>
+                </div>
+                <p class="text-xs text-slate-600">
+                  Upgrade your membership for priority 12-24h answer copy evaluations, daily live MCQ drills, and instant XP boosts!
+                </p>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2.5 self-start md:self-center flex-shrink-0">
+              <button 
+                onclick="window.subscriptionManager && window.subscriptionManager.startCheckout('elite_trial')"
+                class="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-black text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer animate-pulse"
+              >
+                <i data-lucide="zap" class="w-3.5 h-3.5"></i> Try Elite for ₹9
+              </button>
+              <button 
+                onclick="window.subscriptionManager && window.subscriptionManager.openPricingModal()"
+                class="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                View Passes
+              </button>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    // Also update pass badge on user nav container if present
+    const userRoleBadge = document.getElementById('user-role-badge');
+    if (userRoleBadge && ent.isSubscribed) {
+      userRoleBadge.textContent = ent.badge || ent.planName;
+      userRoleBadge.className = `px-1.5 py-0.2 text-[10px] font-bold rounded-full ${ent.badgeClass || 'bg-blue-100 text-blue-800'} uppercase`;
+    }
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  renderPaymentHistory() {
+    const container = document.getElementById('dashboard-payment-history');
+    if (!container) return;
+
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    if (!user) return;
+
+    const sessions = window.store ? (window.store.getPaymentSessions(user.id) || []) : [];
+
+    if (sessions.length === 0) {
+      container.innerHTML = `
+        <div class="text-center py-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+          <i data-lucide="receipt" class="w-8 h-8 text-slate-400 mx-auto mb-2"></i>
+          <p class="text-sm font-semibold text-slate-700">No payment transactions recorded yet</p>
+          <p class="text-xs text-slate-400 mt-0.5">Your UPI payment verifications and pass activation receipts will show here.</p>
+          <button onclick="window.subscriptionManager && window.subscriptionManager.openPricingModal()" class="mt-3.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-xs transition-colors cursor-pointer">
+            Explore Passes & Plans
+          </button>
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
+
+    container.innerHTML = `
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead>
+            <tr class="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
+              <th class="py-3 px-4">Plan / Pass</th>
+              <th class="py-3 px-4">Amount</th>
+              <th class="py-3 px-4">UTR / Ref #</th>
+              <th class="py-3 px-4">UPI Channel</th>
+              <th class="py-3 px-4">Submitted At</th>
+              <th class="py-3 px-4">Status</th>
+              <th class="py-3 px-4 text-right">Details</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            ${sessions.map(s => {
+              const dateStr = s.submittedAt 
+                ? new Date(s.submittedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                : (s.createdAt ? new Date(s.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '--');
+
+              let statusBadge = '';
+              if (s.status === 'approved') {
+                statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200"><i data-lucide="check-circle" class="w-3 h-3"></i> Approved</span>';
+              } else if (s.status === 'pending_verification') {
+                statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200"><i data-lucide="clock" class="w-3 h-3 animate-spin"></i> Verifying</span>';
+              } else if (s.status === 'late_payment') {
+                statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-orange-100 text-orange-800 border border-orange-200"><i data-lucide="alert-triangle" class="w-3 h-3"></i> Late Payment (In Review)</span>';
+              } else if (s.status === 'rejected') {
+                statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200"><i data-lucide="x-circle" class="w-3 h-3"></i> Rejected</span>';
+              } else {
+                statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">Expired / Cancelled</span>';
+              }
+
+              return `
+                <tr class="hover:bg-slate-50 transition-colors">
+                  <td class="py-3 px-4">
+                    <span class="font-bold text-slate-900 block">${s.planName || s.planId}</span>
+                    <span class="text-[11px] text-slate-500">${s.billingCycle === '4_months' ? '4-Month Cycle' : (s.billingCycle === 'trial' ? '10-Day Trial' : 'Monthly')}</span>
+                  </td>
+                  <td class="py-3 px-4 font-black text-slate-900">₹${s.amount}</td>
+                  <td class="py-3 px-4 font-mono text-xs font-bold text-slate-700">${s.utr || '<span class="text-slate-400">Not submitted</span>'}</td>
+                  <td class="py-3 px-4 text-xs text-slate-600 font-mono">${s.channelUpiId || (s.channelSnapshot ? s.channelSnapshot.upiId : 'HDFC UPI')}</td>
+                  <td class="py-3 px-4 text-xs text-slate-500">${dateStr}</td>
+                  <td class="py-3 px-4">${statusBadge}</td>
+                  <td class="py-3 px-4 text-right">
+                    ${s.rejectionReason ? `<span class="text-xs text-rose-600 font-semibold" title="${s.rejectionReason}">Reason: ${s.rejectionReason}</span>` : (s.status === 'approved' ? '<span class="text-xs text-emerald-700 font-semibold">Pass Activated</span>' : '<span class="text-xs text-slate-400">--</span>')}
                   </td>
                 </tr>
               `;

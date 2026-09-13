@@ -34,6 +34,11 @@ class AdminDashboard {
     if (this.currentTab === 'overview') this.renderOverview();
     else if (this.currentTab === 'banners') this.renderBanners();
     else if (this.currentTab === 'students') this.renderStudents();
+    else if (this.currentTab === 'subscriptions') this.renderSubscriptions();
+    else if (this.currentTab === 'payments') this.renderPaymentVerifications();
+    else if (this.currentTab === 'payment-channels') this.renderPaymentChannels();
+    else if (this.currentTab === 'plans-config') this.renderPlansConfig();
+    else if (this.currentTab === 'audit-logs') this.renderAdminAuditLogs();
     else if (this.currentTab === 'teachers') this.renderTeachers();
     else if (this.currentTab === 'papers') this.renderTestPapers();
     else if (this.currentTab === 'grading') this.renderGradingCenter();
@@ -53,6 +58,16 @@ class AdminDashboard {
       this.studentSearch = '';
       this.studentStatusFilter = 'all';
       this.studentLevelFilter = 'all';
+    } else if (tab === 'subscriptions') {
+      this.subSearch = '';
+      this.subTierFilter = 'all';
+      this.subPage = 1;
+    } else if (tab === 'payments') {
+      this.paymentFilter = 'all';
+      this.paymentSearch = '';
+    } else if (tab === 'audit-logs') {
+      this.auditActionFilter = 'all';
+      this.auditSearch = '';
     }
     this.render();
   }
@@ -63,6 +78,11 @@ class AdminDashboard {
 
     const tabs = [
       { id: 'overview', name: 'Overview & KPIs', icon: 'layout-dashboard' },
+      { id: 'subscriptions', name: 'Subscriptions & Grants', icon: 'credit-card' },
+      { id: 'payments', name: 'Payment Verifications', icon: 'badge-check' },
+      { id: 'payment-channels', name: 'UPI Channels & QR', icon: 'qr-code' },
+      { id: 'plans-config', name: 'Plan & Trial Config', icon: 'sliders' },
+      { id: 'audit-logs', name: 'Admin Audit Logs', icon: 'shield-alert' },
       { id: 'banners', name: 'Website Updates Banner', icon: 'image' },
       { id: 'students', name: 'Students & Passwords', icon: 'users' },
       { id: 'teachers', name: 'Teachers & Privileges', icon: 'user-check' },

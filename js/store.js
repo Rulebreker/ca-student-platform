@@ -3072,6 +3072,257 @@ class AppStore {
     return { success: true, count: students.length, targetXp };
   }
 
+  // --- SUBSCRIPTIONS & ENTITLEMENTS ---
+
+  getSubscriptions() {
+    return this.get('subscriptions', {});
+  }
+
+  saveSubscriptions(subscriptions) {
+    this.set('subscriptions', subscriptions);
+  }
+
+  getUserSubscription(userId) {
+    if (!userId) return null;
+    const subs = this.getSubscriptions();
+    return subs[userId] || null;
+  }
+
+  saveSubscription(subscription) {
+    if (!subscription || !subscription.userId) return;
+    const subs = this.getSubscriptions();
+    subs[subscription.userId] = subscription;
+    this.saveSubscriptions(subs);
+    if (window.firebaseSync && typeof window.firebaseSync.saveSubscription === 'function') {
+      window.firebaseSync.saveSubscription(subscription);
+    }
+  }
+
+  // --- PAYMENT SESSIONS ---
+
+  getPaymentSessions(userId = null) {
+    const sessions = this.get('payment_sessions', []);
+    if (userId) {
+      return sessions.filter(s => s.userId === userId);
+    }
+    return sessions;
+  }
+
+  savePaymentSessions(sessions) {
+    this.set('payment_sessions', sessions);
+  }
+
+  addPaymentSession(session) {
+    if (!session || !session.paymentSessionId) return;
+    const sessions = this.getPaymentSessions();
+    const idx = sessions.findIndex(s => s.paymentSessionId === session.paymentSessionId);
+    if (idx !== -1) {
+      sessions[idx] = session;
+    } else {
+      sessions.unshift(session);
+    }
+    this.savePaymentSessions(sessions);
+    if (window.firebaseSync && typeof window.firebaseSync.savePaymentSession === 'function') {
+      window.firebaseSync.savePaymentSession(session);
+    }
+  }
+
+  updatePaymentSession(session) {
+    this.addPaymentSession(session);
+  }
+
+  // --- PAYMENT CHANNELS ---
+
+  getPaymentChannels() {
+    return this.get('payment_channels', [
+      {
+        id: 'chan-primary-1',
+        name: 'Primary UPI (HDFC Bank)',
+        upiId: 'excellenceca@okhdfcbank',
+        qrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR',
+        isPrimary: true,
+        isActive: true,
+        order: 1
+      }
+    ]);
+  }
+
+  savePaymentChannels(channels) {
+    this.set('payment_channels', channels);
+    if (window.firebaseSync && typeof window.firebaseSync.savePaymentChannels === 'function') {
+      window.firebaseSync.savePaymentChannels(channels);
+    }
+  }
+
+  // --- SUBSCRIPTION PLANS CATALOG ---
+
+  getSubscriptionPlans() {
+    return this.get('subscription_plans', null);
+  }
+
+  saveSubscriptionPlans(plans) {
+    this.set('subscription_plans', plans);
+    if (window.firebaseSync && typeof window.firebaseSync.saveSubscriptionPlans === 'function') {
+      window.firebaseSync.saveSubscriptionPlans(plans);
+    }
+  }
+
+  // --- ADMIN AUDIT LOGS ---
+
+  getAdminAuditLogs() {
+    return this.get('admin_audit_logs', []);
+  }
+
+  saveAdminAuditLogs(logs) {
+    this.set('admin_audit_logs', logs);
+  }
+
+  addAdminAuditLog(log) {
+    if (!log) return;
+    const logs = this.getAdminAuditLogs();
+    logs.unshift(log);
+    if (logs.length > 500) logs.splice(500);
+    this.saveAdminAuditLogs(logs);
+    if (window.firebaseSync && typeof window.firebaseSync.saveAdminAuditLog === 'function') {
+      window.firebaseSync.saveAdminAuditLog(log);
+    }
+  }
+
+  // --- CLIENT ENTITLEMENT RESOLVER ---
+
+  getUserEntitlements(userId) {
+    const user = userId ? this.getUserById(userId) : this.getCurrentUser();
+    if (!user) {
+      return {
+        tier: 'free',
+        planId: 'free',
+        planName: 'Free Tier',
+        isSubscribed: false,
+        isTrial: false,
+        badge: 'Free Tier',
+        badgeClass: 'bg-slate-100 text-slate-700 border-slate-200',
+        permissions: {
+          premium_mcq_access: false,
+          premium_test_paper_access: false,
+          live_mcq_daily_limit: 0,
+          copy_check_sla_hours: 72,
+          monthly_full_exam_access: false,
+          weekly_full_exam_access: false,
+          teacher_review_access: false
+        },
+        remainingDays: 0
+      };
+    }
+
+    if (user.role === 'admin' || user.role === 'teacher') {
+      return {
+        tier: user.role,
+        planId: `${user.role}_unlimited`,
+        planName: user.role === 'admin' ? 'Administrator' : 'Faculty',
+        isSubscribed: true,
+        isTrial: false,
+        badge: user.role === 'admin' ? 'Administrator' : 'Faculty',
+        badgeClass: user.role === 'admin' ? 'bg-rose-100 text-rose-800 border-rose-200' : 'bg-amber-100 text-amber-800 border-amber-200',
+        permissions: {
+          premium_mcq_access: true,
+          premium_test_paper_access: true,
+          live_mcq_daily_limit: 999,
+          copy_check_sla_hours: 1,
+          monthly_full_exam_access: true,
+          weekly_full_exam_access: true,
+          teacher_review_access: true
+        },
+        remainingDays: 999
+      };
+    }
+
+    const sub = this.getUserSubscription(user.id);
+    if (!sub || (sub.status !== 'active' && sub.status !== 'manually_granted')) {
+      return {
+        tier: 'free',
+        planId: 'free',
+        planName: 'Free Tier',
+        status: sub ? sub.status : 'none',
+        isSubscribed: false,
+        isTrial: false,
+        badge: 'Free Tier',
+        badgeClass: 'bg-slate-100 text-slate-700 border-slate-200',
+        permissions: {
+          premium_mcq_access: false,
+          premium_test_paper_access: false,
+          live_mcq_daily_limit: 0,
+          copy_check_sla_hours: 72,
+          monthly_full_exam_access: false,
+          weekly_full_exam_access: false,
+          teacher_review_access: false
+        },
+        remainingDays: 0
+      };
+    }
+
+    // Check expiry
+    const now = new Date();
+    let remainingDays = 0;
+    if (sub.expiresAt) {
+      const exp = new Date(sub.expiresAt);
+      if (now >= exp) {
+        return {
+          tier: 'free',
+          planId: sub.planId,
+          planName: sub.planName || 'Expired Plan',
+          status: 'expired',
+          isSubscribed: false,
+          isTrial: false,
+          badge: 'Expired Pass',
+          badgeClass: 'bg-rose-50 text-rose-700 border-rose-200',
+          permissions: {
+            premium_mcq_access: false,
+            premium_test_paper_access: false,
+            live_mcq_daily_limit: 0,
+            copy_check_sla_hours: 72,
+            monthly_full_exam_access: false,
+            weekly_full_exam_access: false,
+            teacher_review_access: false
+          },
+          remainingDays: 0
+        };
+      }
+      remainingDays = Math.max(0, Math.ceil((exp - now) / (1000 * 60 * 60 * 24)));
+    }
+
+    const plans = this.getSubscriptionPlans() || {};
+    const plan = plans[sub.planId] || {};
+    const tier = sub.planTier || plan.tier || 'core';
+    const isTrial = tier === 'trial' || sub.isTrial === true;
+
+    return {
+      tier: tier,
+      planId: sub.planId,
+      planName: sub.planName || plan.name || 'Active Pass',
+      status: sub.status,
+      isSubscribed: true,
+      isTrial: isTrial,
+      badge: isTrial ? 'Trial Pass' : (tier === 'elite' ? 'Elite Pass' : tier === 'plus' ? 'Plus Pass' : 'Core Pass'),
+      badgeClass: isTrial ? 'bg-amber-100 text-amber-800 border-amber-200' :
+                  (tier === 'elite' ? 'bg-purple-100 text-purple-800 border-purple-200' :
+                   tier === 'plus' ? 'bg-indigo-100 text-indigo-800 border-indigo-200' :
+                   'bg-blue-100 text-blue-800 border-blue-200'),
+      copyCheckSlaHours: plan.copyCheckSlaHours || (tier === 'elite' ? 12 : tier === 'plus' ? 24 : 48),
+      permissions: plan.permissions || {
+        premium_mcq_access: true,
+        premium_test_paper_access: tier !== 'core',
+        live_mcq_daily_limit: tier === 'elite' || isTrial ? 3 : tier === 'plus' ? 2 : 1,
+        copy_check_sla_hours: tier === 'elite' || isTrial ? 12 : tier === 'plus' ? 24 : 48,
+        monthly_full_exam_access: tier !== 'core',
+        weekly_full_exam_access: tier === 'elite' || isTrial,
+        teacher_review_access: true
+      },
+      startedAt: sub.startedAt,
+      expiresAt: sub.expiresAt,
+      remainingDays: remainingDays,
+      subscriptionId: sub.id
+    };
+  }
 }
 
 

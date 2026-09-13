@@ -182,6 +182,9 @@
           <button data-nav="leaderboard" class="px-3 py-2 text-xs font-semibold rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors flex items-center gap-1.5">
             <i data-lucide="award" class="w-4 h-4"></i> Leaderboard
           </button>
+          <button id="nav-pricing-btn" onclick="window.subscriptionManager && window.subscriptionManager.openPricingModal()" class="px-3 py-2 text-xs font-semibold rounded-lg text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors flex items-center gap-1.5 cursor-pointer">
+            <i data-lucide="sparkles" class="w-4 h-4 text-amber-500"></i> Passes & Pricing
+          </button>
           <button id="nav-teacher" data-nav="teacher" class="px-3 py-2 text-xs font-semibold rounded-lg text-amber-800 bg-amber-50 hover:bg-amber-100 transition-colors flex items-center gap-1.5" style="display: none;">
             <i data-lucide="user-check" class="w-4 h-4 text-amber-700"></i> Teacher Portal
           </button>
@@ -300,6 +303,9 @@
       </button>
       <button data-nav="leaderboard" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
         <i data-lucide="award" class="w-4 h-4 text-slate-500"></i> Leaderboard
+      </button>
+      <button id="mobile-nav-pricing" onclick="window.subscriptionManager && window.subscriptionManager.openPricingModal(); window.app.toggleMobileMenu(false);" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-amber-800 bg-amber-50 flex items-center gap-2.5 transition-colors cursor-pointer">
+        <i data-lucide="sparkles" class="w-4 h-4 text-amber-600"></i> Passes & Pricing
       </button>
       <button id="mobile-nav-teacher" data-nav="teacher" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-amber-800 bg-amber-50 flex items-center gap-2.5 transition-colors" style="display: none;">
         <i data-lucide="user-check" class="w-4 h-4 text-amber-700"></i> Teacher Portal
@@ -502,6 +508,11 @@
         </div>
       </div>
 
+      <!-- ACTIVE MEMBERSHIP / PASS STATUS BANNER -->
+      <div id="dashboard-subscription-card" class="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs transition-all">
+        <!-- Rendered dynamically by student-dashboard.js -->
+      </div>
+
       <!-- Key Performance Metrics (5 Cards) -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
         <div class="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs flex items-center gap-4">
@@ -601,6 +612,22 @@
         </div>
         <div id="dashboard-recent-attempts">
           <!-- Table populated by student-dashboard.js -->
+        </div>
+      </div>
+
+      <!-- SECTION: PAYMENT & MEMBERSHIP TRANSACTIONS -->
+      <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-xs">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Payment & Membership History</h3>
+            <p class="text-xs text-slate-500">Your UPI transactions, verification status, and active plan terms</p>
+          </div>
+          <button onclick="window.subscriptionManager && window.subscriptionManager.openPricingModal()" class="px-3.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs rounded-xl border border-amber-200 transition-colors flex items-center gap-1.5 self-start sm:self-auto cursor-pointer">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-500"></i> Upgrade / Extend Pass
+          </button>
+        </div>
+        <div id="dashboard-payment-history">
+          <!-- Populated by student-dashboard.js -->
         </div>
       </div>
     </section>
@@ -1718,6 +1745,20 @@
     </div>
   </div>
 
+  <!-- Modal 7: Subscription & Pricing Modal -->
+  <div id="pricing-modal" class="modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-3 sm:p-4">
+    <div class="relative w-full max-w-5xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
+      <div id="pricing-modal-content" class="overflow-y-auto p-4 sm:p-8 flex-1"></div>
+    </div>
+  </div>
+
+  <!-- Modal 8: Payment Checkout Modal -->
+  <div id="payment-checkout-modal" class="modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-3 sm:p-4">
+    <div class="relative w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[95vh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
+      <div id="payment-checkout-content" class="overflow-y-auto p-5 sm:p-7 flex-1"></div>
+    </div>
+  </div>
+
   <!-- TOAST NOTIFICATIONS CONTAINER -->
   <div id="toast-container"></div>
 
@@ -1731,6 +1772,7 @@
   <script src="js/store.js?v=20260913_2"></script>
   <script src="js/auth.js?v=20260913_2"></script>
   <script src="js/secure-backend.js?v=20260913_2"></script>
+  <script src="js/subscription.js?v=20260913_2"></script>
   <script src="js/student-dashboard.js?v=20260913_2"></script>
   <script src="js/lecture-player.js?v=20260913_2"></script>
   <script src="js/test-engine.js?v=20260913_2"></script>
@@ -1738,6 +1780,7 @@
   <script src="js/assignment-portal.js?v=20260913_2"></script>
   <script src="js/teacher-portal.js?v=20260913_2"></script>
   <script src="js/admin-dashboard.js?v=20260913_2"></script>
+  <script src="js/admin-subscriptions.js?v=20260913_2"></script>
   <script src="js/banner-manager.js?v=20260913_2"></script>
   <script src="js/app.js?v=20260913_2"></script>
 

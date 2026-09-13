@@ -304,6 +304,73 @@ class FirebaseSyncManager {
         }
       }
     });
+
+    // --- SUBSCRIPTIONS REALTIME LISTENER ---
+    this.db.ref('subscriptions').on('value', snap => {
+      const val = snap.val();
+      if (val && window.store) {
+        window.store.saveSubscriptions(val);
+        if (window.subscriptionManager && typeof window.subscriptionManager.onSubscriptionUpdate === 'function') {
+          window.subscriptionManager.onSubscriptionUpdate();
+        }
+        if (window.studentDashboard && typeof window.studentDashboard.renderPassBadge === 'function') {
+          window.studentDashboard.renderPassBadge();
+        }
+        if (window.adminDashboard && window.adminDashboard.currentTab === 'subscriptions') {
+          window.adminDashboard.renderSubscriptions();
+        }
+      }
+    });
+
+    // --- PAYMENT SESSIONS REALTIME LISTENER ---
+    this.db.ref('payment_sessions').on('value', snap => {
+      const val = snap.val();
+      if (val && window.store) {
+        const sessions = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
+        window.store.savePaymentSessions(sessions);
+        if (window.subscriptionManager && typeof window.subscriptionManager.onPaymentSessionsUpdate === 'function') {
+          window.subscriptionManager.onPaymentSessionsUpdate();
+        }
+        if (window.adminDashboard && window.adminDashboard.currentTab === 'payments') {
+          window.adminDashboard.renderPaymentVerifications();
+        }
+      }
+    });
+
+    // --- PAYMENT CHANNELS REALTIME LISTENER ---
+    this.db.ref('payment_channels').on('value', snap => {
+      const val = snap.val();
+      if (val && window.store) {
+        const channels = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
+        window.store.savePaymentChannels(channels);
+        if (window.adminDashboard && window.adminDashboard.currentTab === 'payment-channels') {
+          window.adminDashboard.renderPaymentChannels();
+        }
+      }
+    });
+
+    // --- SUBSCRIPTION PLANS REALTIME LISTENER ---
+    this.db.ref('subscription_plans').on('value', snap => {
+      const val = snap.val();
+      if (val && window.store) {
+        window.store.saveSubscriptionPlans(val);
+        if (window.adminDashboard && window.adminDashboard.currentTab === 'plans-config') {
+          window.adminDashboard.renderPlanConfig();
+        }
+      }
+    });
+
+    // --- ADMIN AUDIT LOGS REALTIME LISTENER ---
+    this.db.ref('admin_audit_logs').on('value', snap => {
+      const val = snap.val();
+      if (val && window.store) {
+        const logs = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
+        window.store.saveAdminAuditLogs(logs);
+        if (window.adminDashboard && window.adminDashboard.currentTab === 'audit-logs') {
+          window.adminDashboard.renderAuditLogs();
+        }
+      }
+    });
   }
 
   mergeRemoteUsers(remoteUsers) {
@@ -1160,6 +1227,43 @@ class FirebaseSyncManager {
     if (!this.db || !bookmarkId) return Promise.resolve();
     return this.db.ref('bookmarks/' + bookmarkId).remove().catch(err => {
       console.warn('[FirebaseSync] deleteBookmark error:', err);
+    });
+  }
+
+  saveSubscription(sub) {
+    if (!this.db || !sub || !sub.userId) return Promise.resolve();
+    return this.db.ref('subscriptions/' + sub.userId).set(sub).catch(err => {
+      console.warn('[FirebaseSync] saveSubscription error:', err);
+    });
+  }
+
+  savePaymentSession(session) {
+    if (!this.db || !session || !session.paymentSessionId) return Promise.resolve();
+    return this.db.ref('payment_sessions/' + session.paymentSessionId).set(session).catch(err => {
+      console.warn('[FirebaseSync] savePaymentSession error:', err);
+    });
+  }
+
+  savePaymentChannels(channels) {
+    if (!this.db || !channels) return Promise.resolve();
+    const map = {};
+    channels.forEach(c => { if (c && c.id) map[c.id] = c; });
+    return this.db.ref('payment_channels').set(map).catch(err => {
+      console.warn('[FirebaseSync] savePaymentChannels error:', err);
+    });
+  }
+
+  saveSubscriptionPlans(plans) {
+    if (!this.db || !plans) return Promise.resolve();
+    return this.db.ref('subscription_plans').set(plans).catch(err => {
+      console.warn('[FirebaseSync] saveSubscriptionPlans error:', err);
+    });
+  }
+
+  saveAdminAuditLog(log) {
+    if (!this.db || !log || !log.id) return Promise.resolve();
+    return this.db.ref('admin_audit_logs/' + log.id).set(log).catch(err => {
+      console.warn('[FirebaseSync] saveAdminAuditLog error:', err);
     });
   }
 }
