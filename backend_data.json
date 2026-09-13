@@ -6780,7 +6780,7 @@
         "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR"
       },
       "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
-      "status": "pending",
+      "status": "expired",
       "createdAt": "2026-09-13T19:55:17.258901+00:00",
       "expiresAt": "2026-09-13T20:05:17.258901+00:00",
       "utr": null,
@@ -6788,7 +6788,7 @@
       "submittedAt": null,
       "verifiedAt": null,
       "verifiedBy": null,
-      "rejectionReason": null
+      "rejectionReason": "Payment session timed out (5 minutes)."
     },
     {
       "paymentSessionId": "psess_1789322999583_816459fa",
