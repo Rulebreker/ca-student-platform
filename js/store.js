@@ -1838,10 +1838,12 @@ class AppStore {
         admin.password = 'eliterulebrker@220709';
         admin.email = 'adminrulebreker@rulebrekerdothunter.com';
         admin.username = 'adminrulebreker@rulebrekerdothunter.com';
+        if (!admin.token) admin.token = 'token_admin_excellenceca_secret';
       }
       // Ensure teachers exist
       if (!users.some(u => u.role === 'teacher')) {
-        users.push(DEFAULT_USERS[4], DEFAULT_USERS[5]);
+        const teachers = DEFAULT_USERS.filter(u => u.role === 'teacher');
+        users.push(...teachers);
       }
       localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
 

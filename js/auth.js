@@ -279,11 +279,26 @@ class AuthManager {
           };
         }
 
+        if (resp.status === 404) {
+          return {
+            success: false,
+            error: (data && data.error) || 'Authentication endpoint not found (404). Please ensure the backend server is running on port 8000.'
+          };
+        }
+
+        if (resp.status >= 500) {
+          return {
+            success: false,
+            error: (data && data.error) || 'Authentication server encountered an internal error. Please try again in a moment.'
+          };
+        }
+
         if (resp.ok && data && data.success && data.user) {
           const authUser = data.user;
           if (data.token) {
             authUser.token = data.token;
           }
+          this._watchdogFailCount = 0;
 
           // Merge / update into local store
           if (window.store) {
@@ -423,9 +438,14 @@ class AuthManager {
         data = JSON.parse(text);
       } catch (jsonErr) {
         console.error('[AuthManager] Non-JSON response from registration server:', text);
+        const detailMsg = resp.status === 404 ? 
+          'Registration service endpoint not found (404). Please ensure the backend server is running on port 8000.' :
+          resp.status >= 500 ? 
+          'Registration server encountered an internal error. Please try again.' :
+          'Registration service error: Unexpected response from server. Please try again in a moment.';
         return { 
           success: false, 
-          error: 'Registration service error: Unexpected response from server. Please try again in a moment.' 
+          error: detailMsg 
         };
       }
 
@@ -585,6 +605,8 @@ class AuthManager {
     this.stopSessionWatchdog();
     if (!user || user.role === 'admin') return;
 
+    this._watchdogFailCount = 0;
+
     const checkSession = async () => {
       if (!this.currentUser) return;
       try {
@@ -597,20 +619,27 @@ class AuthManager {
         });
 
         if (res.status === 403) {
+          // Deactivation is definitive — revoke immediately
           this.handleSessionRevoked('Your account has been deactivated by the administrator.');
           return;
         }
 
         if (res.status === 401 || res.status === 404) {
-          const text = await res.text();
-          let data = null;
-          try { data = JSON.parse(text); } catch (e) {}
-          const msg = (data && data.error) ? data.error : 'Your account has been deleted or deactivated by the administrator.';
-          this.handleSessionRevoked(msg);
+          // Use 2-strike grace period: only revoke after 2 consecutive failures
+          // This prevents false logouts from transient server restarts
+          this._watchdogFailCount = (this._watchdogFailCount || 0) + 1;
+          if (this._watchdogFailCount >= 2) {
+            const text = await res.text();
+            let data = null;
+            try { data = JSON.parse(text); } catch (e) {}
+            const msg = (data && data.error) ? data.error : 'Your account has been deleted or deactivated by the administrator.';
+            this.handleSessionRevoked(msg);
+          }
           return;
         }
 
         if (res.ok) {
+          this._watchdogFailCount = 0; // Reset on success
           const text = await res.text();
           let data = null;
           try { data = JSON.parse(text); } catch (e) {}
@@ -619,11 +648,12 @@ class AuthManager {
           }
         }
       } catch (err) {
-        // Network offline, skip
+        // Network offline — don't count as failure, skip silently
       }
     };
 
-    this._sessionWatchdogTimer = setInterval(checkSession, 3000);
+    // Use 30s interval instead of 3s — aggressive 3s polling caused false session revocations
+    this._sessionWatchdogTimer = setInterval(checkSession, 30000);
 
     this._visibilityHandler = () => {
       if (document.visibilityState === 'visible') {
@@ -634,6 +664,7 @@ class AuthManager {
   }
 
   stopSessionWatchdog() {
+    this._watchdogFailCount = 0;
     if (this._sessionWatchdogTimer) {
       clearInterval(this._sessionWatchdogTimer);
       this._sessionWatchdogTimer = null;

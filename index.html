@@ -13,7 +13,27 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-  
+  <!-- Universal Backend API Router: Ensures seamless communication with port 8000 across all origins/hosts -->
+  <script>
+    (function() {
+      const origFetch = window.fetch;
+      const BACKEND_PORT = '8000';
+      const BACKEND_ORIGIN = 'http://127.0.0.1:8000';
+      window.fetch = function(resource, init) {
+        if (typeof resource === 'string' && resource.startsWith('/api/')) {
+          if (window.location.port !== BACKEND_PORT || window.location.protocol === 'file:') {
+            resource = BACKEND_ORIGIN + resource;
+          }
+        } else if (resource && typeof resource.url === 'string' && resource.url.startsWith('/api/')) {
+          if (window.location.port !== BACKEND_PORT || window.location.protocol === 'file:') {
+            resource = new Request(BACKEND_ORIGIN + resource.url, resource);
+          }
+        }
+        return origFetch.call(this, resource, init);
+      };
+    })();
+  </script>
+
   <!-- Tailwind CSS via CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
