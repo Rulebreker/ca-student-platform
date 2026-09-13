@@ -39,6 +39,14 @@
   <!-- Lucide Icons via CDN -->
   <script src="https://unpkg.com/lucide@latest"></script>
 
+  <!-- Mozilla PDF.js via CDN for Client-Side PDF MCQ Text Extraction -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
+
   <!-- Custom Styles -->
   <link rel="stylesheet" href="css/styles.css">
 </head>
@@ -1047,7 +1055,7 @@
             <div class="bg-white border-2 border-dashed border-blue-300 rounded-2xl p-4 text-center space-y-2">
               <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Share Code with Friends</span>
               <div id="profile-page-referral-code" class="text-2xl font-black text-blue-700 tracking-wider font-mono select-all">
-                @username
+                username
               </div>
               <button 
                 type="button" 

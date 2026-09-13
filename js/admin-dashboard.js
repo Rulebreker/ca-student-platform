@@ -2607,6 +2607,7 @@ This will remove the question paper, attached answer keys, and student submissio
                     ` : ''}
                     ${hasQImage ? `<span class="px-2 py-0.5 text-[10px] font-semibold rounded bg-purple-50 text-purple-700">Image Prompt</span>` : ''}
                     ${hasOptImages ? `<span class="px-2 py-0.5 text-[10px] font-semibold rounded bg-indigo-50 text-indigo-700">Image Options</span>` : ''}
+                    <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-50 text-emerald-700 border border-emerald-200">+${typeof q.marks === 'number' ? q.marks : 2.0} Pts</span>
                   </div>
 
                   <!-- Reorder & Action Controls -->
@@ -2897,6 +2898,27 @@ This will remove the question paper, attached answer keys, and student submissio
             </div>
           </div>
 
+          <!-- Points / Marks for this MCQ -->
+          <div class="bg-blue-50/70 border border-blue-200 rounded-xl p-4 space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="font-bold text-blue-950 text-sm">Points Awarded for Correct Answer *</label>
+              <span class="text-[10px] font-bold text-blue-700 bg-white px-2 py-0.5 rounded border border-blue-200">
+                Score Weight
+              </span>
+            </div>
+            <p class="text-[11px] text-blue-800">Specify score points to award when the student selects the correct option.</p>
+            <input 
+              type="number" 
+              id="q-marks" 
+              value="${existingQ && typeof existingQ.marks === 'number' ? existingQ.marks : (test && typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0)}" 
+              min="0.25" 
+              step="0.25" 
+              required
+              class="w-full sm:w-44 px-3 py-2 border border-blue-300 rounded-lg text-xs font-bold bg-white text-slate-800"
+              placeholder="e.g. 2.0"
+            >
+          </div>
+
           <!-- Explanation / ICAI Standard Reference -->
           <div>
             <label class="block font-bold text-slate-700 mb-1">ICAI Solution Explanation & Conceptual Reference</label>
@@ -3037,6 +3059,9 @@ This will remove the question paper, attached answer keys, and student submissio
     }
 
     const explanation = document.getElementById('q-explanation').value.trim();
+    const marksInput = document.getElementById('q-marks');
+    const marksVal = marksInput ? parseFloat(marksInput.value) : null;
+    const qMarks = (marksVal && !isNaN(marksVal) && marksVal > 0) ? marksVal : (test && typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0);
 
     const qPayload = {
       id: existingQId || ('q-' + Date.now()),
@@ -3062,7 +3087,7 @@ This will remove the question paper, attached answer keys, and student submissio
         D: optDImg || null
       },
       correctOption,
-      marks: test ? (test.marksPerCorrect || 2.0) : 2.0,
+      marks: qMarks,
       explanation: explanation || 'Refer to ICAI Module.',
       isDraft: false, // Explicit admin authoring is verified
       isDuplicate: false
@@ -3077,7 +3102,7 @@ This will remove the question paper, attached answer keys, and student submissio
     if (test) {
       const allQs = window.store.getQuestionsByTestId(testId);
       test.totalQuestions = allQs.length;
-      test.maximumMarks = allQs.length * (test.marksPerCorrect || 2.0);
+      test.maximumMarks = allQs.reduce((sum, q) => sum + (typeof q.marks === 'number' ? q.marks : (test.marksPerCorrect || 2.0)), 0);
       window.store.updateTest(test);
     }
 
@@ -3153,7 +3178,7 @@ This will remove the question paper, attached answer keys, and student submissio
     if (test) {
       const remaining = window.store.getQuestionsByTestId(testId);
       test.totalQuestions = remaining.length;
-      test.maximumMarks = remaining.length * (test.marksPerCorrect || 2.0);
+      test.maximumMarks = remaining.reduce((sum, q) => sum + (typeof q.marks === 'number' ? q.marks : (test.marksPerCorrect || 2.0)), 0);
       window.store.updateTest(test);
     }
 
@@ -3190,6 +3215,7 @@ This will remove the question paper, attached answer keys, and student submissio
 
   // --- PDF MCQ IMPORT MODAL ---
   openPdfImportModal(testId) {
+    const test = window.store ? window.store.getTestById(testId) : null;
     const modalContent = document.getElementById('admin-generic-modal-content');
     if (!modalContent) return;
 
@@ -3227,6 +3253,24 @@ This will remove the question paper, attached answer keys, and student submissio
               id="pdf-import-file" 
               accept=".pdf,application/pdf"
               class="text-xs file:mr-3 file:py-1.5 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 cursor-pointer"
+            >
+          </div>
+
+          <!-- Points Per Question Input -->
+          <div class="bg-indigo-50/60 border border-indigo-200 rounded-xl p-3.5 space-y-1.5">
+            <div class="flex items-center justify-between">
+              <label class="font-bold text-indigo-950 text-xs">Points Awarded per Correct MCQ Answer *</label>
+              <span class="text-[10px] font-bold text-indigo-700 bg-white px-2 py-0.5 rounded border border-indigo-200">Per Extracted Question</span>
+            </div>
+            <p class="text-[11px] text-indigo-800">Specify score points to assign to every extracted question.</p>
+            <input 
+              type="number" 
+              id="pdf-import-points" 
+              value="${(test && typeof test.marksPerCorrect === 'number') ? test.marksPerCorrect : 2.0}" 
+              min="0.25" 
+              step="0.25"
+              class="w-full sm:w-44 px-3 py-1.5 border border-indigo-300 rounded-lg text-xs font-bold bg-white text-slate-800"
+              placeholder="e.g. 2.0"
             >
           </div>
 
@@ -3269,9 +3313,13 @@ This will remove the question paper, attached answer keys, and student submissio
 
   async executePdfImport(testId) {
     const fileInput = document.getElementById('pdf-import-file');
-    const rawText = document.getElementById('pdf-raw-text').value.trim();
+    const rawText = document.getElementById('pdf-raw-text') ? document.getElementById('pdf-raw-text').value.trim() : '';
     const statusBox = document.getElementById('pdf-import-status');
     const btn = document.getElementById('btn-run-pdf-import');
+    const pointsInput = document.getElementById('pdf-import-points');
+
+    const test = window.store ? window.store.getTestById(testId) : null;
+    const pointsPerQ = pointsInput ? (parseFloat(pointsInput.value) || (test && test.marksPerCorrect ? test.marksPerCorrect : 2.0)) : 2.0;
 
     const file = fileInput && fileInput.files ? fileInput.files[0] : null;
     if (!file && !rawText) {
@@ -3279,41 +3327,67 @@ This will remove the question paper, attached answer keys, and student submissio
       return;
     }
 
-    btn.disabled = true;
-    btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Processing & Parsing...';
-    statusBox.className = 'p-3 rounded-lg text-xs bg-blue-50 text-blue-800 border border-blue-200 block';
-    statusBox.innerHTML = 'Analyzing document structure, extracting questions and identifying answer patterns...';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Processing & Parsing...';
+    }
+    if (statusBox) {
+      statusBox.className = 'p-3 rounded-lg text-xs bg-blue-50 text-blue-800 border border-blue-200 block';
+      statusBox.innerHTML = 'Analyzing document structure, extracting questions and identifying answer patterns...';
+    }
     if (window.lucide) window.lucide.createIcons();
 
-    const res = await window.secureBackend.importMCQFromPdf(file, testId, rawText);
+    try {
+      const res = await window.secureBackend.importMCQFromPdf(file, testId, rawText, pointsPerQ);
 
-    if (res.success && res.questions && res.questions.length > 0) {
-      // Add extracted questions to store as DRAFT
-      const test = window.store.getTestById(testId);
-      const existingQs = window.store.getQuestionsByTestId(testId);
+      if (res.success && res.questions && res.questions.length > 0) {
+        // Add extracted questions to store as DRAFT
+        const existingQs = window.store.getQuestionsByTestId(testId);
 
-      res.questions.forEach((q, idx) => {
-        q.id = 'q-' + Date.now() + '-' + idx;
-        q.testId = testId;
-        q.number = existingQs.length + idx + 1;
-        q.isDraft = true; // MANDATORY DRAFT
-        window.store.addQuestion(q);
-      });
+        res.questions.forEach((q, idx) => {
+          q.id = 'q-' + Date.now() + '-' + idx;
+          q.testId = testId;
+          q.number = existingQs.length + idx + 1;
+          q.marks = pointsPerQ;
+          q.isDraft = true; // MANDATORY DRAFT
+          window.store.addQuestion(q);
+        });
 
-      if (test) {
-        test.totalQuestions = (existingQs.length + res.questions.length);
-        test.maximumMarks = test.totalQuestions * (test.marksPerCorrect || 2.0);
-        window.store.updateTest(test);
+        if (test) {
+          const allQs = window.store.getQuestionsByTestId(testId);
+          test.totalQuestions = allQs.length;
+          test.maximumMarks = allQs.reduce((sum, q) => sum + (typeof q.marks === 'number' ? q.marks : pointsPerQ), 0);
+          window.store.updateTest(test);
+        }
+
+        window.app.showToast(`Successfully extracted ${res.questions.length} questions into Draft Review!`, 'success');
+        this.openQuestionBuilder(testId);
+      } else {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<i data-lucide="sparkles" class="w-4 h-4"></i> Extract & Review Questions';
+        }
+        if (statusBox) {
+          statusBox.className = 'p-3 rounded-lg text-xs bg-rose-50 text-rose-800 border border-rose-200 block';
+          statusBox.innerHTML = res.error || 'Could not parse questions from document. Please check PDF content format.';
+        }
+        if (window.lucide) window.lucide.createIcons();
       }
-
-      window.app.showToast(`Successfully extracted ${res.questions.length} questions into Draft Review!`, 'success');
-      this.openQuestionBuilder(testId);
-    } else {
-      btn.disabled = false;
-      btn.innerHTML = '<i data-lucide="sparkles" class="w-4 h-4"></i> Extract & Review Questions';
-      statusBox.className = 'p-3 rounded-lg text-xs bg-rose-50 text-rose-800 border border-rose-200 block';
-      statusBox.innerHTML = res.error || 'Could not parse questions from document. Please check PDF content format.';
-      if (window.lucide) window.lucide.createIcons();
+    } catch (err) {
+      console.error('PDF import execution error:', err);
+      if (statusBox) {
+        statusBox.className = 'p-3 rounded-lg text-xs bg-rose-50 text-rose-800 border border-rose-200 block';
+        statusBox.innerHTML = 'An unexpected error occurred during PDF processing: ' + (err.message || 'Unknown error');
+      }
+      window.app.showToast('PDF import failed: ' + (err.message || 'Parsing error'), 'error');
+    } finally {
+      // GUARANTEE button is re-enabled if question builder was not opened
+      const currentBtn = document.getElementById('btn-run-pdf-import');
+      if (currentBtn && currentBtn.disabled) {
+        currentBtn.disabled = false;
+        currentBtn.innerHTML = '<i data-lucide="sparkles" class="w-4 h-4"></i> Extract & Review Questions';
+        if (window.lucide) window.lucide.createIcons();
+      }
     }
   }
 

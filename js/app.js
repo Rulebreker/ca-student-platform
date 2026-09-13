@@ -667,13 +667,14 @@ class App {
     }
 
     // 4. Referral Section
+    const cleanUsername = (user.username || user.id).replace(/^@+/, '');
     const refCodeEl = document.getElementById('profile-page-referral-code');
-    if (refCodeEl) refCodeEl.textContent = '@' + (user.username || user.id);
+    if (refCodeEl) refCodeEl.textContent = cleanUsername;
 
     const allReferrals = window.store && window.store.getReferrals ? window.store.getReferrals() : [];
     const myReferrals = allReferrals.filter(r => 
       r.referrerId === user.id || 
-      (r.referrerUsername && r.referrerUsername.toLowerCase() === (user.username || '').toLowerCase())
+      (r.referrerUsername && r.referrerUsername.replace(/^@+/, '').toLowerCase() === cleanUsername.toLowerCase())
     );
 
     const refCountEl = document.getElementById('profile-page-referral-count');
@@ -692,18 +693,19 @@ class App {
             <td colspan="3" class="px-3 py-6 text-center text-slate-400">
               <i data-lucide="gift" class="w-6 h-6 mx-auto mb-1 text-slate-300"></i>
               No students have registered using your code yet.<br>
-              Share your referral code <strong>@${user.username}</strong> to earn 100 bonus points!
+              Share your referral code <strong>${cleanUsername}</strong> to earn 100 bonus points!
             </td>
           </tr>
         `;
       } else {
         tbody.innerHTML = myReferrals.map(r => {
           const dateStr = r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Verified';
+          const studentCleanUsername = (r.referredUsername || 'student').replace(/^@+/, '');
           return `
             <tr class="hover:bg-slate-50 transition-colors">
               <td class="px-3 py-2.5">
                 <span class="font-bold text-slate-800 block">${r.referredName || 'Student'}</span>
-                <span class="text-[11px] text-blue-600 font-mono">@${r.referredUsername || 'student'}</span>
+                <span class="text-[11px] text-blue-600 font-mono">${studentCleanUsername}</span>
               </td>
               <td class="px-3 py-2.5">
                 <span class="px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-100 text-slate-700">
@@ -832,7 +834,7 @@ class App {
   copyReferralCode() {
     const user = window.auth ? window.auth.getCurrentUser() : null;
     if (!user) return;
-    const code = '@' + (user.username || user.id);
+    const code = (user.username || user.id).replace(/^@+/, '');
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(code)

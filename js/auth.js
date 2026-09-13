@@ -337,11 +337,12 @@ class AuthManager {
     }
 
     // Referral code resolution: strip optional leading '@' and match case-insensitively
-    const cleanReferredBy = (referredBy || '').trim().replace(/^@/, '').toLowerCase();
+    const cleanReferredBy = (referredBy || '').trim().replace(/^@+/, '').toLowerCase();
     let referrer = null;
     if (cleanReferredBy) {
       referrer = users.find(u => 
-        (u.username && u.username.toLowerCase() === cleanReferredBy)
+        (u.username && u.username.replace(/^@+/, '').toLowerCase() === cleanReferredBy) ||
+        (u.id && u.id.toLowerCase() === cleanReferredBy)
       );
     }
 
@@ -364,7 +365,7 @@ class AuthManager {
       isActive: true,
       referralCount: 0,
       referralPoints: 0,
-      referredBy: referrer ? referrer.username : null,
+      referredBy: referrer ? referrer.username.replace(/^@+/, '') : null,
       baseXp: 0,
       subjectXp: { 'Accounting': 0, 'Business Law': 0, 'Business Economics': 0, 'Quantitative Aptitude': 0 },
       achievementBadges: ['First Solve'],
@@ -377,7 +378,7 @@ class AuthManager {
       const existingRefs = window.store.getReferrals ? window.store.getReferrals() : [];
       const alreadyReferred = existingRefs.some(r => 
         r.referredId === newUser.id || 
-        (r.referredUsername && r.referredUsername.toLowerCase() === newUser.username.toLowerCase())
+        (r.referredUsername && r.referredUsername.replace(/^@+/, '').toLowerCase() === newUser.username.toLowerCase())
       );
       if (!alreadyReferred) {
         referrer.referralPoints = (referrer.referralPoints || 0) + 100;
@@ -389,10 +390,10 @@ class AuthManager {
             id: 'ref-' + Date.now(),
             referrerId: referrer.id,
             referrerName: referrer.name,
-            referrerUsername: referrer.username,
+            referrerUsername: referrer.username.replace(/^@+/, ''),
             referredId: newUser.id,
             referredName: newUser.name,
-            referredUsername: newUser.username,
+            referredUsername: newUser.username.replace(/^@+/, ''),
             examLevel: newUser.caLevel,
             pointsAwarded: 100,
             createdAt: new Date().toISOString()
@@ -554,7 +555,7 @@ class AuthManager {
       // Logged in: HIDE register link and guest actions from dashboard/navbar
       if (navRegister) navRegister.style.display = 'none';
       if (mobileNavRegister) mobileNavRegister.style.display = 'none';
-      if (mobileNavProfile) mobileNavProfile.style.display = 'block';
+      if (mobileNavProfile) mobileNavProfile.style.display = 'flex';
       if (navLogin) navLogin.style.display = 'none';
       if (navGuestActions) navGuestActions.style.display = 'none';
       if (navUserContainer) navUserContainer.style.display = 'flex';
@@ -574,7 +575,7 @@ class AuthManager {
     } else {
       // Logged out: SHOW login & register buttons, HIDE user profile container
       if (navRegister) navRegister.style.display = 'inline-flex';
-      if (mobileNavRegister) mobileNavRegister.style.display = 'block';
+      if (mobileNavRegister) mobileNavRegister.style.display = 'flex';
       if (mobileNavProfile) mobileNavProfile.style.display = 'none';
       if (navLogin) navLogin.style.display = 'inline-flex';
       if (navGuestActions) navGuestActions.style.display = 'flex';

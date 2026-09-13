@@ -2097,16 +2097,25 @@ class AppStore {
     const tests = this.getTests();
     tests.unshift(tst);
     this.saveTests(tests);
+    if (window.firebaseSync && typeof window.firebaseSync.saveTest === 'function') {
+      window.firebaseSync.saveTest(tst);
+    }
   }
   updateTest(tst) {
     const tests = this.getTests().map(t => t.id === tst.id ? tst : t);
     this.saveTests(tests);
+    if (window.firebaseSync && typeof window.firebaseSync.saveTest === 'function') {
+      window.firebaseSync.saveTest(tst);
+    }
   }
   deleteTest(id) {
     const tests = this.getTests().filter(t => t.id !== id);
     this.saveTests(tests);
     const questions = this.getQuestions().filter(q => q.testId !== id);
     this.saveQuestions(questions);
+    if (window.firebaseSync && typeof window.firebaseSync.deleteTest === 'function') {
+      window.firebaseSync.deleteTest(id);
+    }
   }
 
   // Questions
@@ -2123,14 +2132,23 @@ class AppStore {
     const questions = this.getQuestions();
     questions.push(question);
     this.saveQuestions(questions);
+    if (window.firebaseSync && typeof window.firebaseSync.saveQuestion === 'function') {
+      window.firebaseSync.saveQuestion(question);
+    }
   }
   updateQuestion(question) {
     const questions = this.getQuestions().map(q => q.id === question.id ? question : q);
     this.saveQuestions(questions);
+    if (window.firebaseSync && typeof window.firebaseSync.saveQuestion === 'function') {
+      window.firebaseSync.saveQuestion(question);
+    }
   }
   deleteQuestion(id) {
     const questions = this.getQuestions().filter(q => q.id !== id);
     this.saveQuestions(questions);
+    if (window.firebaseSync && typeof window.firebaseSync.deleteQuestion === 'function') {
+      window.firebaseSync.deleteQuestion(id);
+    }
   }
 
 

@@ -466,7 +466,7 @@ startxref
       const b = new Uint8Array(buffer);
       const isPng = b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47;
       const isJpg = b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF;
-      const isWebp = b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46; // RIFF
+      const isWebp = b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46; // RIFF header for WebP
       const isGif = b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46; // GIF
 
       if (!isPng && !isJpg && !isWebp && !isGif) {
@@ -481,6 +481,7 @@ startxref
 
   /**
    * Uploads question or option image to server
+   * Gracefully falls back to client-side Base64 Data URL so uploads work seamlessly on both Vercel and localhost
    * @param {File} file 
    */
   async uploadImageFile(file) {
@@ -494,7 +495,7 @@ startxref
       reader.readAsDataURL(file);
     });
 
-    const user = window.auth.getCurrentUser();
+    const user = window.auth ? window.auth.getCurrentUser() : null;
     const token = user ? (user.token || user.email) : '';
 
     try {
@@ -515,12 +516,18 @@ startxref
         return {
           success: true,
           imageUrl: data.imageUrl || base64Data,
-          fileName: data.fileName,
-          imageId: data.imageId
+          fileName: data.fileName || file.name,
+          imageId: data.imageId || `img_${Date.now()}`
         };
       } else {
-        const errJson = await resp.json().catch(() => ({}));
-        return { success: false, error: errJson.error || 'Server rejected image upload.' };
+        // Fallback gracefully to validated Base64 Data URL if server is unavailable, returns 404, or session rejects
+        console.warn('Server image upload endpoint returned non-200, falling back to local Base64:', resp.status);
+        return {
+          success: true,
+          imageUrl: base64Data,
+          fileName: file.name,
+          imageId: `img_${Date.now()}`
+        };
       }
     } catch (err) {
       // Local fallback
@@ -534,63 +541,134 @@ startxref
   }
 
   /**
-   * Send PDF to backend for MCQ extraction & draft question creation
+   * Extracts raw selectable text across all pages from a PDF File using PDF.js
+   * @param {File} file 
+   * @returns {Promise<string>}
    */
-  async importMCQFromPdf(file, testId, rawTextOverride = '') {
-    let base64Data = '';
+  async extractTextFromPdf(file) {
+    if (!window.pdfjsLib) {
+      throw new Error('PDF parsing library (PDF.js) is not available.');
+    }
+    const arrayBuffer = await file.arrayBuffer();
+    const loadingTask = window.pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdfDoc = await loadingTask.promise;
+    let fullText = '';
+    for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+      const page = await pdfDoc.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items.map(item => item.str + (item.hasEOL ? '\n' : ' ')).join('');
+      fullText += pageText + '\n\n';
+    }
+    return fullText;
+  }
+
+  /**
+   * Send PDF for MCQ extraction & draft question creation
+   * Extracts text via client-side PDF.js, with server fallback and clear error reporting
+   * @param {File} file
+   * @param {string} testId
+   * @param {string} rawTextOverride
+   * @param {number} pointsPerQ
+   */
+  async importMCQFromPdf(file, testId, rawTextOverride = '', pointsPerQ = 2.0) {
+    let extractedText = rawTextOverride ? rawTextOverride.trim() : '';
+
     if (file) {
       const val = await this.validatePdfFile(file);
       if (!val.valid) return { success: false, error: val.error };
 
-      base64Data = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(new Error('Failed to read PDF'));
-        reader.readAsDataURL(file);
-      });
+      try {
+        if (window.pdfjsLib) {
+          const clientText = await this.extractTextFromPdf(file);
+          if (clientText && clientText.trim().length > 0) {
+            extractedText = (extractedText ? extractedText + '\n\n' : '') + clientText;
+          }
+        }
+      } catch (pdfErr) {
+        console.warn('Client-side PDF.js extraction failed, attempting server/raw text:', pdfErr);
+      }
     }
 
-    const user = window.auth.getCurrentUser();
-    const token = user ? (user.token || user.email) : '';
-
-    try {
-      const resp = await fetch('/api/tests/import-pdf', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          testId: testId,
-          pdfData: base64Data,
-          rawText: rawTextOverride
-        })
-      });
-
-      if (resp.ok) {
-        const data = await resp.json();
+    // Check if we extracted selectable text
+    if (extractedText && extractedText.trim().length > 0) {
+      const questions = this.clientSideParseMCQ(extractedText, testId, pointsPerQ);
+      if (questions.length > 0) {
         return {
           success: true,
-          extractedCount: data.extractedCount,
-          questions: data.questions
+          extractedCount: questions.length,
+          questions: questions
         };
       } else {
-        const errJson = await resp.json().catch(() => ({}));
-        return { success: false, error: errJson.error || 'Failed to parse PDF.' };
+        return {
+          success: false,
+          error: 'No MCQ questions could be identified in the text. Please verify the format includes question numbers (e.g. 1. or Q1.) and options (e.g. (A), (B) or A., B.).'
+        };
       }
-    } catch (err) {
-      // Fallback: client-side regex parsing if raw text provided
-      if (rawTextOverride) {
-        const questions = this.clientSideParseMCQ(rawTextOverride, testId);
-        return { success: true, extractedCount: questions.length, questions: questions };
-      }
-      return { success: false, error: 'Could not connect to PDF parser: ' + err.message };
     }
+
+    // If file was supplied but extractedText is empty, it may be a scanned image without selectable text
+    if (file && (!extractedText || extractedText.trim().length === 0)) {
+      // Try backend endpoint if available
+      try {
+        const base64Data = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error('Failed to read PDF'));
+          reader.readAsDataURL(file);
+        });
+
+        const user = window.auth ? window.auth.getCurrentUser() : null;
+        const token = user ? (user.token || user.email) : '';
+
+        const resp = await fetch('/api/tests/import-pdf', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            testId: testId,
+            pdfData: base64Data,
+            rawText: rawTextOverride
+          })
+        });
+
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.questions && data.questions.length > 0) {
+            data.questions.forEach(q => { q.marks = pointsPerQ; });
+            return {
+              success: true,
+              extractedCount: data.extractedCount,
+              questions: data.questions
+            };
+          }
+        }
+      } catch (e) {
+        // Backend unavailable
+      }
+
+      return {
+        success: false,
+        error: 'This PDF appears to be a scanned image or contains no selectable text. Please paste the question text into the box below or use a text-based PDF.'
+      };
+    }
+
+    return {
+      success: false,
+      error: 'Please select a valid PDF file or paste MCQ text.'
+    };
   }
 
-  clientSideParseMCQ(rawText, testId) {
+  /**
+   * Robust multi-format client-side MCQ text parser
+   * @param {string} rawText
+   * @param {string} testId
+   * @param {number} pointsPerQ
+   */
+  clientSideParseMCQ(rawText, testId, pointsPerQ = 2.0) {
     const lines = rawText.split(/\r?\n/);
-    const existing = window.store.getQuestionsByTestId(testId);
+    const existing = window.store ? window.store.getQuestionsByTestId(testId) : [];
     const results = [];
     let currentQ = null;
 
@@ -613,13 +691,14 @@ startxref
       const trimmed = line.trim();
       if (!trimmed) return;
 
-      const qMatch = trimmed.match(/^(?:Q(?:uestion)?\s*[\.#:]?\s*(\d+)|(\d+)[\.\)])\s*(.*)$/i);
+      // Question headers: Q1., Question 1:, 1., 1), (1), Q. 1:, 1 -
+      const qMatch = trimmed.match(/^(?:Q(?:uestion)?\s*[\.#:\-]?\s*(\d+)|\((\d+)\)|(\d+)[\.\)\-])\s*(.*)$/i);
       if (qMatch) {
         flushCurrent();
-        const num = qMatch[1] || qMatch[2];
-        const prompt = qMatch[3] || '';
+        const num = qMatch[1] || qMatch[2] || qMatch[3];
+        const prompt = qMatch[4] || '';
         currentQ = {
-          id: 'q-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+          id: 'q-' + Date.now() + '-' + Math.floor(Math.random() * 10000) + '-' + results.length,
           testId: testId,
           number: parseInt(num, 10) || (results.length + 1),
           text: prompt,
@@ -630,7 +709,7 @@ startxref
           optionImages: { A: null, B: null, C: null, D: null },
           correctOption: null,
           aiSuggestedAnswer: null,
-          marks: 2.0,
+          marks: typeof pointsPerQ === 'number' && pointsPerQ > 0 ? pointsPerQ : 2.0,
           explanation: '',
           isDraft: true,
           isDuplicate: false
@@ -639,14 +718,16 @@ startxref
       }
 
       if (currentQ) {
-        const optMatch = trimmed.match(/^(?:\(([A-D])\)|([A-D])[\.\)])\s*(.*)$/i);
+        // Option headers: (A), [A], A., A), (a), a.
+        const optMatch = trimmed.match(/^(?:\(([A-D])\)|\[([A-D])\]|([A-D])[\.\)])\s*(.*)$/i);
         if (optMatch) {
-          const optKey = (optMatch[1] || optMatch[2]).toUpperCase();
-          currentQ['option' + optKey] = optMatch[3] || '';
+          const optKey = (optMatch[1] || optMatch[2] || optMatch[3]).toUpperCase();
+          currentQ['option' + optKey] = optMatch[4] || '';
           return;
         }
 
-        const ansMatch = trimmed.match(/^(?:Answer|Ans|Key|Correct(?:\s+Option)?)\s*[:\-]?\s*\(?([A-D])\)?/i);
+        // Answer key detection: Ans: B, Answer: (C), Correct Option: A
+        const ansMatch = trimmed.match(/^(?:Answer|Ans|Key|Correct(?:\s+(?:Option|Answer))?)\s*[:\-]?\s*\(?([A-D])\)?/i);
         if (ansMatch) {
           const key = ansMatch[1].toUpperCase();
           currentQ.aiSuggestedAnswer = key;
@@ -654,15 +735,16 @@ startxref
           return;
         }
 
-        const expMatch = trimmed.match(/^(?:Explanation|Solution|Ref)\s*[:\-]\s*(.*)$/i);
+        // Explanation detection
+        const expMatch = trimmed.match(/^(?:Explanation|Solution|Ref|ICAI\s+Ref)\s*[:\-]\s*(.*)$/i);
         if (expMatch) {
           currentQ.explanation = expMatch[1];
           return;
         }
 
-        // Otherwise append to prompt
-        if (!currentQ.optionA) {
-          currentQ.text += ' ' + trimmed;
+        // If options not started yet, append to question prompt
+        if (!currentQ.optionA && !currentQ.optionB && !currentQ.optionC && !currentQ.optionD) {
+          currentQ.text += (currentQ.text ? ' ' : '') + trimmed;
         }
       }
     });

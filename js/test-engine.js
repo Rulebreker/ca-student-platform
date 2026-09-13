@@ -53,7 +53,7 @@ class TestEngine {
     const filterContainer = document.getElementById('test-subject-filters');
     if (!filterContainer) return;
 
-    const allPublishedTests = window.store.getTests().filter(t => t.isPublished);
+    const allPublishedTests = window.store.getTests().filter(t => t.isPublished || t.status === 'Published' || t.status === 'Live');
     const subjects = window.store.getSubjects();
 
     filterContainer.innerHTML = `
@@ -133,7 +133,7 @@ class TestEngine {
   }
 
   getFilteredAndSortedTests() {
-    let list = window.store.getTests().filter(t => t.isPublished);
+    let list = window.store.getTests().filter(t => t.isPublished || t.status === 'Published' || t.status === 'Live');
 
     // 1. Subject filter
     if (this.selectedSubject !== 'all') {
@@ -557,7 +557,7 @@ class TestEngine {
                   Question ${this.currentIndex + 1}
                 </span>
                 <div class="flex items-center gap-2 text-xs font-semibold">
-                  <span class="text-emerald-600">+${this.activeTest.marksPerCorrect} Marks</span>
+                  <span class="text-emerald-600">+${(typeof currentQ.marks === 'number' && currentQ.marks > 0) ? currentQ.marks : (this.activeTest.marksPerCorrect || 2.0)} Marks</span>
                   <span class="text-slate-300">•</span>
                   <span class="text-rose-600">-${this.activeTest.negativeMarksPerWrong} Neg.</span>
                 </div>
@@ -771,24 +771,31 @@ class TestEngine {
     let correctCount = 0;
     let wrongCount = 0;
     let unattemptedCount = 0;
+    let grossMarks = 0;
+    let totalPossibleMarks = 0;
+
+    const defaultPos = typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0;
+    const neg = typeof test.negativeMarksPerWrong === 'number' ? test.negativeMarksPerWrong : 0.5;
 
     questionsWithKeys.forEach(q => {
+      const qMark = (typeof q.marks === 'number' && q.marks > 0) ? q.marks : defaultPos;
+      totalPossibleMarks += qMark;
       const chosen = this.userAnswers[q.id];
       if (!chosen) {
         unattemptedCount++;
       } else if (chosen === q.correctOption) {
         correctCount++;
+        grossMarks += qMark;
       } else {
         wrongCount++;
       }
     });
 
-    const pos = typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0;
-    const neg = typeof test.negativeMarksPerWrong === 'number' ? test.negativeMarksPerWrong : 0.5;
-    const grossMarks = correctCount * pos;
     const negativePenalty = wrongCount * neg;
     const finalScore = Math.max(0, grossMarks - negativePenalty);
-    const totalPossibleMarks = questionsWithKeys.length * pos;
+    if (totalPossibleMarks <= 0) {
+      totalPossibleMarks = test.maximumMarks || (questionsWithKeys.length * defaultPos);
+    }
     const percentage = totalPossibleMarks > 0 ? (finalScore / totalPossibleMarks) * 100 : 0;
 
     if (this.isPreview) {
@@ -874,7 +881,7 @@ class TestEngine {
     const timeFormatted = `${minutes}m ${seconds}s`;
     const pos = test ? (test.marksPerCorrect || 2.0) : 2.0;
     const neg = test ? (test.negativeMarksPerWrong || 0.5) : 0.5;
-    const totalMarks = test ? (questions.length * pos) : (questions.length * 2);
+    const totalMarks = questions.reduce((sum, q) => sum + (typeof q.marks === 'number' && q.marks > 0 ? q.marks : pos), 0) || (test ? test.maximumMarks : (questions.length * 2));
 
     const modalContent = document.getElementById('result-modal-content');
     if (!modalContent) return;

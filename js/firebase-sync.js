@@ -17,6 +17,8 @@ class FirebaseSyncManager {
     this._isMergingUsers = false;
     this._isMergingAssignments = false;
     this._isMergingSubmissions = false;
+    this._isMergingTests = false;
+    this._isMergingQuestions = false;
     this._knownUserIds = new Set();
   }
 
@@ -111,6 +113,42 @@ class FirebaseSyncManager {
     }).catch(err => {
       console.warn('[FirebaseSync] Check seed assignments warning:', err);
     });
+
+    // Check if tests collection exists
+    this.db.ref('tests').once('value').then(snap => {
+      const val = snap.val();
+      if (!val) {
+        console.info('[FirebaseSync] Seeding initial mock tests into cloud database...');
+        const localTests = window.store ? window.store.getTests() : [];
+        if (localTests && localTests.length) {
+          const map = {};
+          localTests.forEach(t => {
+            if (t && t.id) map[t.id] = t;
+          });
+          this.db.ref('tests').set(map);
+        }
+      }
+    }).catch(err => {
+      console.warn('[FirebaseSync] Check seed tests warning:', err);
+    });
+
+    // Check if questions collection exists
+    this.db.ref('questions').once('value').then(snap => {
+      const val = snap.val();
+      if (!val) {
+        console.info('[FirebaseSync] Seeding initial questions into cloud database...');
+        const localQs = window.store ? window.store.getQuestions() : [];
+        if (localQs && localQs.length) {
+          const map = {};
+          localQs.forEach(q => {
+            if (q && q.id) map[q.id] = q;
+          });
+          this.db.ref('questions').set(map);
+        }
+      }
+    }).catch(err => {
+      console.warn('[FirebaseSync] Check seed questions warning:', err);
+    });
   }
 
   attachListeners() {
@@ -153,6 +191,32 @@ class FirebaseSyncManager {
       this.mergeRemoteSubmissions(remoteSubs);
     }, err => {
       console.warn('[FirebaseSync] Submissions listener error:', err);
+    });
+
+    // --- TESTS REALTIME LISTENER ---
+    this.db.ref('tests').on('value', snap => {
+      const val = snap.val();
+      if (!val || this._isMergingTests) return;
+
+      const remoteTests = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
+      if (!remoteTests.length) return;
+
+      this.mergeRemoteTests(remoteTests);
+    }, err => {
+      console.warn('[FirebaseSync] Tests listener error:', err);
+    });
+
+    // --- QUESTIONS REALTIME LISTENER ---
+    this.db.ref('questions').on('value', snap => {
+      const val = snap.val();
+      if (!val || this._isMergingQuestions) return;
+
+      const remoteQs = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
+      if (!remoteQs.length) return;
+
+      this.mergeRemoteQuestions(remoteQs);
+    }, err => {
+      console.warn('[FirebaseSync] Questions listener error:', err);
     });
   }
 
@@ -318,6 +382,98 @@ class FirebaseSyncManager {
     }
   }
 
+  mergeRemoteTests(remoteTests) {
+    if (!window.store) return;
+    this._isMergingTests = true;
+
+    try {
+      const localTests = window.store.getTests();
+      let changed = false;
+
+      remoteTests.forEach(rt => {
+        if (!rt || !rt.id) return;
+        const idx = localTests.findIndex(lt => lt.id === rt.id);
+        if (idx === -1) {
+          localTests.unshift(rt);
+          changed = true;
+        } else {
+          const existing = localTests[idx];
+          let testModified = false;
+          Object.keys(rt).forEach(k => {
+            if (JSON.stringify(existing[k]) !== JSON.stringify(rt[k])) {
+              existing[k] = rt[k];
+              testModified = true;
+            }
+          });
+          if (testModified) changed = true;
+        }
+      });
+
+      if (changed) {
+        window.store.saveTests(localTests);
+
+        // Re-render student MCQ test list if student is viewing tests
+        if (window.testEngine && typeof window.testEngine.renderTestList === 'function') {
+          const curView = window.app ? window.app.currentView : '';
+          if (curView === 'tests') {
+            window.testEngine.renderTestList();
+          }
+        }
+
+        // Re-render admin MCQ tests tab if admin is viewing it
+        if (window.adminDashboard && window.auth && window.auth.isAdmin() && window.adminDashboard.currentTab === 'mcq-tests') {
+          window.adminDashboard.renderMCQTests();
+        }
+      }
+    } catch (e) {
+      console.warn('[FirebaseSync] Error merging tests:', e);
+    } finally {
+      this._isMergingTests = false;
+    }
+  }
+
+  mergeRemoteQuestions(remoteQuestions) {
+    if (!window.store) return;
+    this._isMergingQuestions = true;
+
+    try {
+      const localQs = window.store.getQuestions();
+      let changed = false;
+
+      remoteQuestions.forEach(rq => {
+        if (!rq || !rq.id) return;
+        const idx = localQs.findIndex(lq => lq.id === rq.id);
+        if (idx === -1) {
+          localQs.push(rq);
+          changed = true;
+        } else {
+          const existing = localQs[idx];
+          let qModified = false;
+          Object.keys(rq).forEach(k => {
+            if (JSON.stringify(existing[k]) !== JSON.stringify(rq[k])) {
+              existing[k] = rq[k];
+              qModified = true;
+            }
+          });
+          if (qModified) changed = true;
+        }
+      });
+
+      if (changed) {
+        window.store.saveQuestions(localQs);
+
+        // If admin is currently in question builder for a test, update view
+        if (window.adminDashboard && window.adminDashboard.activeTestQuestionsId) {
+          window.adminDashboard.openQuestionBuilder(window.adminDashboard.activeTestQuestionsId);
+        }
+      }
+    } catch (e) {
+      console.warn('[FirebaseSync] Error merging questions:', e);
+    } finally {
+      this._isMergingQuestions = false;
+    }
+  }
+
   // --- WRITE OPERATIONS TO CLOUD ---
 
   saveUser(user) {
@@ -352,6 +508,34 @@ class FirebaseSyncManager {
     if (!this.db || !submission || !submission.id) return Promise.resolve();
     return this.db.ref('submissions/' + submission.id).set(submission).catch(err => {
       console.warn('[FirebaseSync] saveSubmission error:', err);
+    });
+  }
+
+  saveTest(test) {
+    if (!this.db || !test || !test.id) return Promise.resolve();
+    return this.db.ref('tests/' + test.id).set(test).catch(err => {
+      console.warn('[FirebaseSync] saveTest error:', err);
+    });
+  }
+
+  deleteTest(testId) {
+    if (!this.db || !testId) return Promise.resolve();
+    return this.db.ref('tests/' + testId).remove().catch(err => {
+      console.warn('[FirebaseSync] deleteTest error:', err);
+    });
+  }
+
+  saveQuestion(question) {
+    if (!this.db || !question || !question.id) return Promise.resolve();
+    return this.db.ref('questions/' + question.id).set(question).catch(err => {
+      console.warn('[FirebaseSync] saveQuestion error:', err);
+    });
+  }
+
+  deleteQuestion(questionId) {
+    if (!this.db || !questionId) return Promise.resolve();
+    return this.db.ref('questions/' + questionId).remove().catch(err => {
+      console.warn('[FirebaseSync] deleteQuestion error:', err);
     });
   }
 }
