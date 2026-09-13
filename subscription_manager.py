@@ -1079,7 +1079,7 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
             sync_fn(f"subscriptions/{user_id}", existing)
         return True, existing
 
-    elif action in ('cancel', 'remove', 'remove_trial'):
+    elif action in ('cancel', 'remove', 'remove_trial', 'revoke'):
         existing['status'] = 'cancelled'
         existing['cancelledAt'] = now_iso
         existing.setdefault('history', []).append({
