@@ -78,30 +78,45 @@ class SubscriptionManager {
 
   async syncMySubscription() {
     const user = window.auth ? window.auth.getCurrentUser() : null;
-    if (!user || user.role === 'admin') return;
+    if (!user || user.role === 'admin') {
+      this.userEntitlements = null;
+      return null;
+    }
 
     try {
       const token = user.token || user.id;
-      const resp = await fetch('/api/subscriptions/my', {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const resp = await fetch(`/api/subscriptions/my?_t=${Date.now()}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        cache: 'no-store'
       });
       if (resp.ok) {
         const data = await resp.json();
         if (data.success) {
-          if (data.subscription && window.store) {
-            window.store.saveSubscription(data.subscription);
-          }
-          if (data.paymentHistory && window.store) {
-            window.store.savePaymentSessions(data.paymentHistory);
+          this.userEntitlements = data.entitlements || null;
+          if (window.store) {
+            if (data.subscription) {
+              window.store.saveSubscription(data.subscription);
+            } else if (user.id) {
+              const subs = window.store.getSubscriptions();
+              if (subs && subs[user.id]) {
+                delete subs[user.id];
+                window.store.saveSubscriptions(subs);
+              }
+            }
+            if (data.paymentHistory) {
+              window.store.savePaymentSessions(data.paymentHistory);
+            }
           }
           if (window.studentDashboard && typeof window.studentDashboard.renderPassBadge === 'function') {
             window.studentDashboard.renderPassBadge();
           }
+          return data;
         }
       }
     } catch (err) {
-      // Offline fallback
+      console.warn('[SubscriptionManager] syncMySubscription error:', err);
     }
+    return null;
   }
 
   // --- PRICING MODAL ---
@@ -870,59 +885,60 @@ class SubscriptionManager {
       `;
     }
 
-    const user = window.auth ? window.auth.getCurrentUser() : null;
-
-    // 2. Authoritative parallel fetch: public plans catalog + user subscription
     try {
-      const plansPromise = this.fetchPlans(true);
-      const subPromise = user ? this.syncMySubscription() : Promise.resolve(null);
-      await Promise.all([plansPromise, subPromise]);
-    } catch (e) {
-      console.warn('[SubscriptionManager] Parallel sync warning:', e);
-    }
+      const user = window.auth ? window.auth.getCurrentUser() : null;
 
-    // 3. Obtain fresh authoritative plans catalog from DB/backend
-    const plans = this.getPlans() || {};
-    const planKeys = Object.keys(plans);
+      // 2. Authoritative parallel fetch: public plans catalog + user subscription
+      try {
+        const plansPromise = this.fetchPlans(true);
+        const subPromise = user ? this.syncMySubscription() : Promise.resolve(null);
+        await Promise.all([plansPromise, subPromise]);
+      } catch (e) {
+        console.warn('[SubscriptionManager] Parallel sync warning:', e);
+      }
 
-    if (planKeys.length === 0) {
-      container.innerHTML = `
-        <div class="p-8 text-center bg-white rounded-2xl border border-rose-200 shadow-xs max-w-md mx-auto space-y-4 my-10">
-          <div class="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
-            <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+      // 3. Obtain fresh authoritative plans catalog from DB/backend
+      const plans = this.getPlans() || {};
+      const planKeys = Object.keys(plans);
+
+      if (planKeys.length === 0) {
+        container.innerHTML = `
+          <div class="p-8 text-center bg-white rounded-2xl border border-rose-200 shadow-xs max-w-md mx-auto space-y-4 my-10">
+            <div class="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+              <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-slate-900">Unable to load Passes</h3>
+              <p class="text-xs text-slate-500 mt-1">Failed to connect to the backend pricing catalog. Please try again.</p>
+            </div>
+            <button 
+              onclick="window.subscriptionManager.renderPassesPage(true)"
+              class="px-5 py-2.5 bg-rose-700 hover:bg-rose-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 mx-auto cursor-pointer"
+            >
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Retry
+            </button>
           </div>
-          <div>
-            <h3 class="text-base font-bold text-slate-900">Unable to load Passes</h3>
-            <p class="text-xs text-slate-500 mt-1">Failed to connect to the backend pricing catalog. Please try again.</p>
-          </div>
-          <button 
-            onclick="window.subscriptionManager.renderPassesPage(true)"
-            class="px-5 py-2.5 bg-rose-700 hover:bg-rose-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 mx-auto cursor-pointer"
-          >
-            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Retry
-          </button>
-        </div>
-      `;
-      if (window.lucide) window.lucide.createIcons();
-      return;
-    }
+        `;
+        if (window.lucide) window.lucide.createIcons();
+        return;
+      }
 
-    this._passesLoadedOnce = true;
+      // 4. Resolve authenticated user state & subscription details
+      const backendEntitlements = this.userEntitlements;
+      const storeEntitlements = window.store ? window.store.getUserEntitlements(user ? user.id : null) : null;
+      const entitlements = backendEntitlements || storeEntitlements;
+      const subscription = window.store ? window.store.getUserSubscription(user ? user.id : null) : null;
+      const isSubscribed = !!(entitlements && entitlements.isSubscribed);
 
-    // 4. Resolve authenticated user state & subscription details
-    const entitlements = window.store ? window.store.getUserEntitlements(user ? user.id : null) : null;
-    const subscription = window.store ? window.store.getUserSubscription(user ? user.id : null) : null;
-    const isSubscribed = !!(entitlements && entitlements.isSubscribed);
+      const userTier = isSubscribed ? String(entitlements.tier || 'free').toLowerCase() : 'free';
+      const activePlanId = isSubscribed ? String(entitlements.planId || '') : '';
+      const isTrialOnly = activePlanId.includes('trial') || userTier === 'trial';
 
-    const userTier = isSubscribed ? String(entitlements.tier || 'free').toLowerCase() : 'free';
-    const activePlanId = isSubscribed ? String(entitlements.planId || '') : '';
-    const isTrialOnly = activePlanId.includes('trial') || userTier === 'trial';
-
-    let userTierRank = 0;
-    if (userTier === 'core') userTierRank = 1;
-    else if (userTier === 'plus') userTierRank = 2;
-    else if (userTier === 'elite' && !isTrialOnly) userTierRank = 3;
-    else if (isTrialOnly) userTierRank = 1;
+      let userTierRank = 0;
+      if (userTier === 'core') userTierRank = 1;
+      else if (userTier === 'plus') userTierRank = 2;
+      else if (userTier === 'elite' && !isTrialOnly) userTierRank = 3;
+      else if (isTrialOnly) userTierRank = 1;
 
     // 5. Dynamic Billing Cycles Detection from DB plans
     const nonTrialPlans = Object.values(plans).filter(p => p.tier !== 'trial');
@@ -955,7 +971,7 @@ class SubscriptionManager {
         const isHighestTier = userTier === 'elite' && !isTrialOnly;
         const startStr = subscription && subscription.startedAt ? new Date(subscription.startedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A';
         const expiryStr = entitlements && entitlements.expiresAt ? new Date(entitlements.expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A';
-        const daysRemaining = entitlements ? Math.max(0, entitlements.daysRemaining || 0) : 0;
+        const daysRemaining = entitlements ? Math.max(0, entitlements.remainingDays !== undefined ? entitlements.remainingDays : (entitlements.daysRemaining || 0)) : 0;
         const passNameDisplay = entitlements ? (entitlements.planName || 'ACTIVE PASS').toUpperCase() : 'ACTIVE PASS';
 
         currentPassBannerHtml = `
@@ -1334,7 +1350,30 @@ class SubscriptionManager {
       </div>
     `;
 
-    if (window.lucide) window.lucide.createIcons();
+      this._passesLoadedOnce = true;
+      if (window.lucide) window.lucide.createIcons();
+    } catch (err) {
+      console.error('[SubscriptionManager] Error rendering passes page:', err);
+      this._passesLoadedOnce = false;
+      container.innerHTML = `
+        <div class="p-8 text-center bg-white rounded-2xl border border-rose-200 shadow-xs max-w-md mx-auto space-y-4 my-10">
+          <div class="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+            <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Unable to load Passes</h3>
+            <p class="text-xs text-slate-500 mt-1">${(err && err.message) ? err.message : 'An unexpected error occurred while loading passes.'}</p>
+          </div>
+          <button 
+            onclick="window.subscriptionManager.renderPassesPage(true)"
+            class="px-5 py-2.5 bg-rose-700 hover:bg-rose-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 mx-auto cursor-pointer"
+          >
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Retry
+          </button>
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+    }
   }
 
   // --- REALTIME SYNC HANDLERS ---

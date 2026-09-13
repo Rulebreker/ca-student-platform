@@ -40,7 +40,7 @@
       "caLevel": "CA FOUNDATION",
       "referralPoints": 0,
       "referralCount": 0,
-      "totalXp": 500
+      "totalXp": 1000
     },
     "prof.sharma@excellenceca.com": {
       "id": "usr-teacher-1",
@@ -4140,6 +4140,20 @@
   ],
   "xp_transactions": [
     {
+      "id": "tx_sub_psess_1789322998925_05dcb63a",
+      "userId": "usr-student-2",
+      "userName": "Priya Patel",
+      "activityName": "Bonus XP: Core Pass (Monthly) Activation",
+      "points": 500,
+      "timestamp": "2026-09-13T18:09:59.127640+00:00",
+      "createdAt": "2026-09-13T18:09:59.127640+00:00",
+      "metadata": {
+        "paymentSessionId": "psess_1789322998925_05dcb63a",
+        "planId": "core_monthly",
+        "amount": 500
+      }
+    },
+    {
       "id": "tx_sub_psess_1789318707994_74363413",
       "userId": "usr-student-2",
       "userName": "Priya Patel",
@@ -6250,6 +6264,105 @@
   ],
   "notifications": [
     {
+      "id": "notif_sub_canc_1789323009194_ccef",
+      "userId": "usr-student-4",
+      "title": "Subscription Cancelled",
+      "message": "Your subscription has been cancelled. Reason: Cleanup after test",
+      "type": "subscription",
+      "createdAt": "2026-09-13T18:10:09.194755+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_grant_1789323008496_f61c",
+      "userId": "usr-student-4",
+      "title": "Pass Granted: Elite Pass (Monthly)",
+      "message": "An administrator has granted you the Elite Pass (Monthly) pass (valid until 2026-10-13). Reason: Test Elite state verification",
+      "type": "subscription",
+      "createdAt": "2026-09-13T18:10:08.496697+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_rej_1789322999779",
+      "userId": "usr-student-2",
+      "title": "Payment Verification Failed",
+      "message": "Your payment of \u20b9149 for Elite Pass (Monthly) could not be verified: UTR not found in bank statement. Please contact faculty support.",
+      "type": "subscription",
+      "createdAt": "2026-09-13T18:09:59.779537+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_1789322999128",
+      "userId": "usr-student-2",
+      "title": "Core Pass Activated!",
+      "message": "Your payment of \u20b949 (UTR: UTR1789322999011) has been verified. Welcome to Core Pass (Monthly)! You received +500 bonus XP.",
+      "type": "subscription",
+      "createdAt": "2026-09-13T18:09:59.127640+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_ext_1789322984046_4d97",
+      "userId": "usr-student-2",
+      "title": "Subscription Extended",
+      "message": "Your Core Pass (Monthly) has been extended by 15 days to 2026-11-12. Reason: Batch extension test",
+      "type": "subscription",
+      "createdAt": "2026-09-13T18:09:44.046823+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_ext_1789322983973_f624",
+      "userId": "usr-student-1",
+      "title": "Subscription Extended",
+      "message": "Your Plus Pass (Monthly) has been extended by 15 days to 2026-10-28. Reason: Batch extension test",
+      "type": "subscription",
+      "createdAt": "2026-09-13T18:09:43.973177+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_grant_1789322983741_7ef9",
+      "userId": "usr-student-1",
+      "title": "Pass Granted: Plus Pass (Monthly)",
+      "message": "An administrator has granted you the Plus Pass (Monthly) pass (valid until 2026-10-13). Reason: Test grant for Plus Pass",
+      "type": "subscription",
+      "createdAt": "2026-09-13T18:09:43.741015+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_canc_1789322973929_0602",
+      "userId": "usr-student-4",
+      "title": "Subscription Cancelled",
+      "message": "Your subscription has been cancelled. Reason: Cleanup after test",
+      "type": "subscription",
+      "createdAt": "2026-09-13T18:09:33.929454+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_grant_1789322973250_1d60",
+      "userId": "usr-student-4",
+      "title": "Pass Granted: Elite Pass (Monthly)",
+      "message": "An administrator has granted you the Elite Pass (Monthly) pass (valid until 2026-10-13). Reason: Test Elite state verification",
+      "type": "subscription",
+      "createdAt": "2026-09-13T18:09:33.250613+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_grant_1789322951069_75d9",
+      "userId": "usr-student-4",
+      "title": "Pass Granted: Elite Pass (Monthly)",
+      "message": "An administrator has granted you the Elite Pass (Monthly) pass (valid until 2026-10-13). Reason: Test Elite state verification",
+      "type": "subscription",
+      "createdAt": "2026-09-13T18:09:11.068092+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_grant_1789320165169_e033",
+      "userId": "usr-student-1789308468650",
+      "title": "Pass Granted: Elite Pass (Monthly)",
+      "message": "An administrator has granted you the Elite Pass (Monthly) pass (valid until 2026-10-13). Reason: x",
+      "type": "subscription",
+      "createdAt": "2026-09-13T17:22:45.168943+00:00",
+      "isRead": false
+    },
+    {
       "id": "notif_sub_ext_1789318714232_4634",
       "userId": "usr-student-2",
       "title": "Subscription Extended",
@@ -6265,7 +6378,8 @@
       "message": "Your Plus Pass (Monthly) has been extended by 15 days to 2026-10-28. Reason: Batch extension test",
       "type": "subscription",
       "createdAt": "2026-09-13T16:58:34.121234+00:00",
-      "isRead": false
+      "isRead": false,
+      "read": true
     },
     {
       "id": "notif_sub_grant_1789318713827_aeb0",
@@ -6274,7 +6388,8 @@
       "message": "An administrator has granted you the Plus Pass (Monthly) pass (valid until 2026-10-13). Reason: Test grant for Plus Pass",
       "type": "subscription",
       "createdAt": "2026-09-13T16:58:33.827106+00:00",
-      "isRead": false
+      "isRead": false,
+      "read": true
     },
     {
       "id": "notif_sub_rej_1789318708952",
@@ -6533,6 +6648,99 @@
   ],
   "payment_sessions": [
     {
+      "paymentSessionId": "psess_1789322999583_816459fa",
+      "sessionId": "psess_1789322999583_816459fa",
+      "userId": "usr-student-2",
+      "userEmail": "priya.patel@castudent.in",
+      "userName": "Priya Patel",
+      "userPhone": "",
+      "caLevel": "CA FOUNDATION",
+      "planId": "elite_monthly",
+      "planName": "Elite Pass (Monthly)",
+      "planTier": "elite",
+      "amount": 149,
+      "currency": "INR",
+      "durationDays": 30,
+      "channelSnapshot": {
+        "id": "chan-primary-1",
+        "name": "Primary UPI (HDFC Bank)",
+        "upiId": "excellenceca@okhdfcbank",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR"
+      },
+      "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
+      "status": "rejected",
+      "createdAt": "2026-09-13T18:09:59.583157+00:00",
+      "expiresAt": "2026-09-13T18:14:59.583157+00:00",
+      "utr": "UTR1789322999768",
+      "screenshot": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      "submittedAt": "2026-09-13T18:09:59.684182+00:00",
+      "verifiedAt": "2026-09-13T18:09:59.779537+00:00",
+      "verifiedBy": "usr-admin-1",
+      "rejectionReason": "UTR not found in bank statement"
+    },
+    {
+      "paymentSessionId": "psess_1789322998925_05dcb63a",
+      "sessionId": "psess_1789322998925_05dcb63a",
+      "userId": "usr-student-2",
+      "userEmail": "priya.patel@castudent.in",
+      "userName": "Priya Patel",
+      "userPhone": "",
+      "caLevel": "CA FOUNDATION",
+      "planId": "core_monthly",
+      "planName": "Core Pass (Monthly)",
+      "planTier": "core",
+      "amount": 49,
+      "currency": "INR",
+      "durationDays": 30,
+      "channelSnapshot": {
+        "id": "chan-primary-1",
+        "name": "Primary UPI (HDFC Bank)",
+        "upiId": "excellenceca@okhdfcbank",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR"
+      },
+      "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
+      "status": "approved",
+      "createdAt": "2026-09-13T18:09:58.925619+00:00",
+      "expiresAt": "2026-09-13T18:14:58.925619+00:00",
+      "utr": "UTR1789322999011",
+      "screenshot": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      "submittedAt": "2026-09-13T18:09:59.025569+00:00",
+      "verifiedAt": "2026-09-13T18:09:59.127640+00:00",
+      "verifiedBy": "usr-admin-1",
+      "rejectionReason": null
+    },
+    {
+      "paymentSessionId": "psess_1789322988575_316b4b2a",
+      "sessionId": "psess_1789322988575_316b4b2a",
+      "userId": "usr-student-2",
+      "userEmail": "priya.patel@castudent.in",
+      "userName": "Priya Patel",
+      "userPhone": "",
+      "caLevel": "CA FOUNDATION",
+      "planId": "core_monthly",
+      "planName": "Core Pass (Monthly)",
+      "planTier": "core",
+      "amount": 49,
+      "currency": "INR",
+      "durationDays": 30,
+      "channelSnapshot": {
+        "id": "chan-primary-1",
+        "name": "Primary UPI (HDFC Bank)",
+        "upiId": "excellenceca@okhdfcbank",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR"
+      },
+      "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
+      "status": "pending",
+      "createdAt": "2026-09-13T18:09:48.575322+00:00",
+      "expiresAt": "2026-09-13T18:14:48.575322+00:00",
+      "utr": null,
+      "screenshot": null,
+      "submittedAt": null,
+      "verifiedAt": null,
+      "verifiedBy": null,
+      "rejectionReason": null
+    },
+    {
       "paymentSessionId": "psess_1789318708731_5c3b7b9f",
       "sessionId": "psess_1789318708731_5c3b7b9f",
       "userId": "usr-student-2",
@@ -6659,15 +6867,15 @@
   ],
   "subscriptions": {
     "usr-student-1": {
-      "id": "sub_usr-student-1_1789318713",
+      "id": "sub_usr-student-1_1789322983",
       "userId": "usr-student-1",
       "planId": "plus_monthly",
       "planName": "Plus Pass (Monthly)",
       "planTier": "plus",
       "isTrial": false,
       "status": "active",
-      "startedAt": "2026-09-13T16:58:33.827106+00:00",
-      "expiresAt": "2026-10-28T16:58:33.827106+00:00",
+      "startedAt": "2026-09-13T18:09:43.741015+00:00",
+      "expiresAt": "2026-10-28T18:09:43.741015+00:00",
       "purchasedAmount": 0,
       "history": [
         {
@@ -6709,22 +6917,35 @@
           "adminId": "usr-admin-1",
           "timestamp": "2026-09-13T16:58:34.121234+00:00",
           "details": "Extended by 15 days to 2026-10-28T16:58:33.827106+00:00"
+        },
+        {
+          "action": "admin_granted",
+          "adminId": "usr-admin-1",
+          "adminName": "Administrator",
+          "timestamp": "2026-09-13T18:09:43.741015+00:00",
+          "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+        },
+        {
+          "action": "admin_extended",
+          "adminId": "usr-admin-1",
+          "timestamp": "2026-09-13T18:09:43.973177+00:00",
+          "details": "Extended by 15 days to 2026-10-28T18:09:43.741015+00:00"
         }
       ]
     },
     "usr-student-2": {
-      "id": "sub_usr-student-2_1789318708",
+      "id": "sub_usr-student-2_1789322999",
       "userId": "usr-student-2",
       "planId": "core_monthly",
       "planName": "Core Pass (Monthly)",
       "planTier": "core",
       "isTrial": false,
       "status": "active",
-      "startedAt": "2026-09-13T16:58:28.208211+00:00",
-      "expiresAt": "2026-10-28T16:58:28.208211+00:00",
+      "startedAt": "2026-09-13T18:09:59.127640+00:00",
+      "expiresAt": "2026-12-12T16:58:28.208211+00:00",
       "purchasedAmount": 49,
-      "paymentSessionId": "psess_1789318707994_74363413",
-      "utr": "UTR998877665544",
+      "paymentSessionId": "psess_1789322998925_05dcb63a",
+      "utr": "UTR1789322999011",
       "history": [
         {
           "action": "payment_approved",
@@ -6739,11 +6960,987 @@
           "adminId": "usr-admin-1",
           "timestamp": "2026-09-13T16:58:34.232362+00:00",
           "details": "Extended by 15 days to 2026-10-28T16:58:28.208211+00:00"
+        },
+        {
+          "action": "admin_extended",
+          "adminId": "usr-admin-1",
+          "timestamp": "2026-09-13T18:09:44.046823+00:00",
+          "details": "Extended by 15 days to 2026-11-12T16:58:28.208211+00:00"
+        },
+        {
+          "action": "payment_approved",
+          "paymentSessionId": "psess_1789322998925_05dcb63a",
+          "adminId": "usr-admin-1",
+          "adminName": "Administrator",
+          "timestamp": "2026-09-13T18:09:59.127640+00:00",
+          "details": "Approved payment of \u20b949 for Core Pass (Monthly)"
         }
       ]
+    },
+    "usr-student-1789308468650": {
+      "id": "sub_usr-student-1789308468650_1789320165",
+      "userId": "usr-student-1789308468650",
+      "planId": "elite_monthly",
+      "planName": "Elite Pass (Monthly)",
+      "planTier": "elite",
+      "isTrial": false,
+      "status": "manually_granted",
+      "startedAt": "2026-09-13T17:22:45.168943+00:00",
+      "expiresAt": "2026-10-13T17:22:45.168943+00:00",
+      "purchasedAmount": 0,
+      "history": [
+        {
+          "action": "admin_granted",
+          "adminId": "usr-admin-1",
+          "adminName": "Administrator",
+          "timestamp": "2026-09-13T17:22:45.168943+00:00",
+          "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: x"
+        }
+      ]
+    },
+    "usr-student-4": {
+      "id": "sub_usr-student-4_1789323008",
+      "userId": "usr-student-4",
+      "planId": "elite_monthly",
+      "planName": "Elite Pass (Monthly)",
+      "planTier": "elite",
+      "isTrial": false,
+      "status": "cancelled",
+      "startedAt": "2026-09-13T18:10:08.496697+00:00",
+      "expiresAt": "2026-10-13T18:10:08.496697+00:00",
+      "purchasedAmount": 0,
+      "history": [
+        {
+          "action": "admin_granted",
+          "adminId": "usr-admin-1",
+          "adminName": "Administrator",
+          "timestamp": "2026-09-13T18:09:11.068092+00:00",
+          "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+        },
+        {
+          "action": "admin_granted",
+          "adminId": "usr-admin-1",
+          "adminName": "Administrator",
+          "timestamp": "2026-09-13T18:09:33.250613+00:00",
+          "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+        },
+        {
+          "action": "admin_cancelled",
+          "adminId": "usr-admin-1",
+          "timestamp": "2026-09-13T18:09:33.929454+00:00",
+          "details": "Admin cancelled subscription. Reason: Cleanup after test"
+        },
+        {
+          "action": "admin_granted",
+          "adminId": "usr-admin-1",
+          "adminName": "Administrator",
+          "timestamp": "2026-09-13T18:10:08.496697+00:00",
+          "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+        },
+        {
+          "action": "admin_cancelled",
+          "adminId": "usr-admin-1",
+          "timestamp": "2026-09-13T18:10:09.194755+00:00",
+          "details": "Admin cancelled subscription. Reason: Cleanup after test"
+        }
+      ],
+      "cancelledAt": "2026-09-13T18:10:09.194755+00:00"
     }
   },
   "admin_audit_logs": [
+    {
+      "id": "audit_1789323009195_837902",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "CANCEL_SUBSCRIPTION",
+      "targetId": "usr-student-4",
+      "target": "usr-student-4",
+      "details": "Cancelled subscription",
+      "oldValue": {
+        "id": "sub_usr-student-4_1789323008",
+        "userId": "usr-student-4",
+        "planId": "elite_monthly",
+        "planName": "Elite Pass (Monthly)",
+        "planTier": "elite",
+        "isTrial": false,
+        "status": "manually_granted",
+        "startedAt": "2026-09-13T18:10:08.496697+00:00",
+        "expiresAt": "2026-10-13T18:10:08.496697+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:11.068092+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:33.250613+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          },
+          {
+            "action": "admin_cancelled",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T18:09:33.929454+00:00",
+            "details": "Admin cancelled subscription. Reason: Cleanup after test"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:10:08.496697+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          },
+          {
+            "action": "admin_cancelled",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T18:10:09.194755+00:00",
+            "details": "Admin cancelled subscription. Reason: Cleanup after test"
+          }
+        ]
+      },
+      "newValue": {
+        "id": "sub_usr-student-4_1789323008",
+        "userId": "usr-student-4",
+        "planId": "elite_monthly",
+        "planName": "Elite Pass (Monthly)",
+        "planTier": "elite",
+        "isTrial": false,
+        "status": "cancelled",
+        "startedAt": "2026-09-13T18:10:08.496697+00:00",
+        "expiresAt": "2026-10-13T18:10:08.496697+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:11.068092+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:33.250613+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          },
+          {
+            "action": "admin_cancelled",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T18:09:33.929454+00:00",
+            "details": "Admin cancelled subscription. Reason: Cleanup after test"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:10:08.496697+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          },
+          {
+            "action": "admin_cancelled",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T18:10:09.194755+00:00",
+            "details": "Admin cancelled subscription. Reason: Cleanup after test"
+          }
+        ],
+        "cancelledAt": "2026-09-13T18:10:09.194755+00:00"
+      },
+      "timestamp": "2026-09-13T18:10:09.195758+00:00"
+    },
+    {
+      "id": "audit_1789323008496_720503",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "GRANT_SUBSCRIPTION",
+      "targetId": "usr-student-4",
+      "target": "usr-student-4",
+      "details": "Admin granted Elite Pass (Monthly) until 2026-10-13T18:10:08.496697+00:00",
+      "oldValue": {
+        "id": "sub_usr-student-4_1789322973",
+        "userId": "usr-student-4",
+        "planId": "elite_monthly",
+        "planName": "Elite Pass (Monthly)",
+        "planTier": "elite",
+        "isTrial": false,
+        "status": "cancelled",
+        "startedAt": "2026-09-13T18:09:33.250613+00:00",
+        "expiresAt": "2026-10-13T18:09:33.250613+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:11.068092+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:33.250613+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          },
+          {
+            "action": "admin_cancelled",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T18:09:33.929454+00:00",
+            "details": "Admin cancelled subscription. Reason: Cleanup after test"
+          }
+        ],
+        "cancelledAt": "2026-09-13T18:09:33.929454+00:00"
+      },
+      "newValue": {
+        "id": "sub_usr-student-4_1789323008",
+        "userId": "usr-student-4",
+        "planId": "elite_monthly",
+        "planName": "Elite Pass (Monthly)",
+        "planTier": "elite",
+        "isTrial": false,
+        "status": "manually_granted",
+        "startedAt": "2026-09-13T18:10:08.496697+00:00",
+        "expiresAt": "2026-10-13T18:10:08.496697+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:11.068092+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:33.250613+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          },
+          {
+            "action": "admin_cancelled",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T18:09:33.929454+00:00",
+            "details": "Admin cancelled subscription. Reason: Cleanup after test"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:10:08.496697+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          }
+        ]
+      },
+      "timestamp": "2026-09-13T18:10:08.496697+00:00"
+    },
+    {
+      "id": "audit_1789322999779_d4e24f",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "REJECT_PAYMENT",
+      "targetId": "usr-student-2",
+      "target": "usr-student-2",
+      "details": "Rejected payment of \u20b9149 for Elite Pass (Monthly). Reason: UTR not found in bank statement",
+      "oldValue": "rejected",
+      "newValue": "rejected",
+      "timestamp": "2026-09-13T18:09:59.779537+00:00"
+    },
+    {
+      "id": "audit_1789322999202_b3b483",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "APPROVE_PAYMENT",
+      "targetId": "usr-student-2",
+      "target": "usr-student-2",
+      "details": "Approved payment of \u20b949 for Core Pass (Monthly) (UTR: UTR1789322999011)",
+      "oldValue": "approved",
+      "newValue": "approved",
+      "timestamp": "2026-09-13T18:09:59.202772+00:00"
+    },
+    {
+      "id": "audit_1789322984925_742958",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "DELETE_PAYMENT_CHANNEL",
+      "targetId": "chan_1789322984411_1a39",
+      "target": "chan_1789322984411_1a39",
+      "details": "Deleted channel: HDFC Premium Escrow",
+      "oldValue": {
+        "id": "chan_1789322984411_1a39",
+        "name": "HDFC Premium Escrow",
+        "title": "HDFC Premium Escrow",
+        "upiId": "hdfcescrow@hdfcbank",
+        "payeeName": "ExcellenceCA Education Pvt Ltd",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=hdfcescrow@hdfcbank%26pn=ExcellenceCA%20Education%20Pvt%20Ltd%26cu=INR",
+        "bankAccountNumber": "50200099887766",
+        "bankIfsc": "HDFC0001234",
+        "bankAccountHolder": "ExcellenceCA Education Pvt Ltd",
+        "amountLimit": 100000.0,
+        "totalTransactions": 0,
+        "totalVolume": 0.0,
+        "isPrimary": false,
+        "isActive": true,
+        "order": 3,
+        "createdAt": "2026-09-13T18:09:44.411524+00:00"
+      },
+      "newValue": null,
+      "timestamp": "2026-09-13T18:09:44.925031+00:00"
+    },
+    {
+      "id": "audit_1789322984759_430870",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "SET_PRIMARY_CHANNEL",
+      "targetId": "chan-primary-1",
+      "target": "chan-primary-1",
+      "details": "Set primary channel: Primary UPI (HDFC Bank)",
+      "oldValue": null,
+      "newValue": {
+        "id": "chan-primary-1",
+        "title": "Primary UPI (HDFC Bank)",
+        "name": "Primary UPI (HDFC Bank)",
+        "upiId": "excellenceca@okhdfcbank",
+        "payeeName": "ExcellenceCA EduTech LLP",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
+        "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
+        "isPrimary": true,
+        "isActive": true,
+        "order": 1
+      },
+      "timestamp": "2026-09-13T18:09:44.759578+00:00"
+    },
+    {
+      "id": "audit_1789322984577_7c1805",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "SET_PRIMARY_CHANNEL",
+      "targetId": "chan_1789322984411_1a39",
+      "target": "chan_1789322984411_1a39",
+      "details": "Set primary channel: HDFC Premium Escrow",
+      "oldValue": null,
+      "newValue": {
+        "id": "chan_1789322984411_1a39",
+        "name": "HDFC Premium Escrow",
+        "title": "HDFC Premium Escrow",
+        "upiId": "hdfcescrow@hdfcbank",
+        "payeeName": "ExcellenceCA Education Pvt Ltd",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=hdfcescrow@hdfcbank%26pn=ExcellenceCA%20Education%20Pvt%20Ltd%26cu=INR",
+        "bankAccountNumber": "50200099887766",
+        "bankIfsc": "HDFC0001234",
+        "bankAccountHolder": "ExcellenceCA Education Pvt Ltd",
+        "amountLimit": 100000.0,
+        "totalTransactions": 0,
+        "totalVolume": 0.0,
+        "isPrimary": true,
+        "isActive": true,
+        "order": 3,
+        "createdAt": "2026-09-13T18:09:44.411524+00:00"
+      },
+      "timestamp": "2026-09-13T18:09:44.577934+00:00"
+    },
+    {
+      "id": "audit_1789322984411_fdae68",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "ADD_PAYMENT_CHANNEL",
+      "targetId": "chan_1789322984411_1a39",
+      "target": "chan_1789322984411_1a39",
+      "details": "Added channel: HDFC Premium Escrow (hdfcescrow@hdfcbank)",
+      "oldValue": null,
+      "newValue": {
+        "id": "chan_1789322984411_1a39",
+        "name": "HDFC Premium Escrow",
+        "title": "HDFC Premium Escrow",
+        "upiId": "hdfcescrow@hdfcbank",
+        "payeeName": "ExcellenceCA Education Pvt Ltd",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=hdfcescrow@hdfcbank%26pn=ExcellenceCA%20Education%20Pvt%20Ltd%26cu=INR",
+        "bankAccountNumber": "50200099887766",
+        "bankIfsc": "HDFC0001234",
+        "bankAccountHolder": "ExcellenceCA Education Pvt Ltd",
+        "amountLimit": 100000.0,
+        "totalTransactions": 0,
+        "totalVolume": 0.0,
+        "isPrimary": false,
+        "isActive": true,
+        "order": 3,
+        "createdAt": "2026-09-13T18:09:44.411524+00:00"
+      },
+      "timestamp": "2026-09-13T18:09:44.411524+00:00"
+    },
+    {
+      "id": "audit_1789322984177_d672d3",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "EXTEND_SUBSCRIPTION",
+      "targetId": "usr-student-2",
+      "target": "usr-student-2",
+      "details": "Extended by 15 days",
+      "oldValue": {
+        "id": "sub_usr-student-2_1789318708",
+        "userId": "usr-student-2",
+        "planId": "core_monthly",
+        "planName": "Core Pass (Monthly)",
+        "planTier": "core",
+        "isTrial": false,
+        "status": "active",
+        "startedAt": "2026-09-13T16:58:28.208211+00:00",
+        "expiresAt": "2026-10-28T16:58:28.208211+00:00",
+        "purchasedAmount": 49,
+        "paymentSessionId": "psess_1789318707994_74363413",
+        "utr": "UTR998877665544",
+        "history": [
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789318707994_74363413",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:58:28.208211+00:00",
+            "details": "Approved payment of \u20b949 for Core Pass (Monthly)"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:58:34.232362+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:58:28.208211+00:00"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T18:09:44.046823+00:00",
+            "details": "Extended by 15 days to 2026-11-12T16:58:28.208211+00:00"
+          }
+        ]
+      },
+      "newValue": {
+        "id": "sub_usr-student-2_1789318708",
+        "userId": "usr-student-2",
+        "planId": "core_monthly",
+        "planName": "Core Pass (Monthly)",
+        "planTier": "core",
+        "isTrial": false,
+        "status": "active",
+        "startedAt": "2026-09-13T16:58:28.208211+00:00",
+        "expiresAt": "2026-11-12T16:58:28.208211+00:00",
+        "purchasedAmount": 49,
+        "paymentSessionId": "psess_1789318707994_74363413",
+        "utr": "UTR998877665544",
+        "history": [
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789318707994_74363413",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:58:28.208211+00:00",
+            "details": "Approved payment of \u20b949 for Core Pass (Monthly)"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:58:34.232362+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:58:28.208211+00:00"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T18:09:44.046823+00:00",
+            "details": "Extended by 15 days to 2026-11-12T16:58:28.208211+00:00"
+          }
+        ]
+      },
+      "timestamp": "2026-09-13T18:09:44.177995+00:00"
+    },
+    {
+      "id": "audit_1789322983974_137df4",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "EXTEND_SUBSCRIPTION",
+      "targetId": "usr-student-1",
+      "target": "usr-student-1",
+      "details": "Extended by 15 days",
+      "oldValue": {
+        "id": "sub_usr-student-1_1789322983",
+        "userId": "usr-student-1",
+        "planId": "plus_monthly",
+        "planName": "Plus Pass (Monthly)",
+        "planTier": "plus",
+        "isTrial": false,
+        "status": "manually_granted",
+        "startedAt": "2026-09-13T18:09:43.741015+00:00",
+        "expiresAt": "2026-10-13T18:09:43.741015+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789311613843_ba9f8799",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T15:00:14.126228+00:00",
+            "details": "Approved payment of \u20b99 for \u20b99 Elite 10-Day Trial"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T15:00:14.446401+00:00",
+            "details": "Extended by 15 days to 2026-10-08T15:00:14.126228+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:55:48.999248+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:55:49.249701+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:55:48.999248+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:58:33.827106+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:58:34.121234+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:58:33.827106+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:43.741015+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T18:09:43.973177+00:00",
+            "details": "Extended by 15 days to 2026-10-28T18:09:43.741015+00:00"
+          }
+        ]
+      },
+      "newValue": {
+        "id": "sub_usr-student-1_1789322983",
+        "userId": "usr-student-1",
+        "planId": "plus_monthly",
+        "planName": "Plus Pass (Monthly)",
+        "planTier": "plus",
+        "isTrial": false,
+        "status": "active",
+        "startedAt": "2026-09-13T18:09:43.741015+00:00",
+        "expiresAt": "2026-10-28T18:09:43.741015+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789311613843_ba9f8799",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T15:00:14.126228+00:00",
+            "details": "Approved payment of \u20b99 for \u20b99 Elite 10-Day Trial"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T15:00:14.446401+00:00",
+            "details": "Extended by 15 days to 2026-10-08T15:00:14.126228+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:55:48.999248+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:55:49.249701+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:55:48.999248+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:58:33.827106+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:58:34.121234+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:58:33.827106+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:43.741015+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T18:09:43.973177+00:00",
+            "details": "Extended by 15 days to 2026-10-28T18:09:43.741015+00:00"
+          }
+        ]
+      },
+      "timestamp": "2026-09-13T18:09:43.974183+00:00"
+    },
+    {
+      "id": "audit_1789322983741_0a7d52",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "GRANT_SUBSCRIPTION",
+      "targetId": "usr-student-1",
+      "target": "usr-student-1",
+      "details": "Admin granted Plus Pass (Monthly) until 2026-10-13T18:09:43.741015+00:00",
+      "oldValue": {
+        "id": "sub_usr-student-1_1789318713",
+        "userId": "usr-student-1",
+        "planId": "plus_monthly",
+        "planName": "Plus Pass (Monthly)",
+        "planTier": "plus",
+        "isTrial": false,
+        "status": "active",
+        "startedAt": "2026-09-13T16:58:33.827106+00:00",
+        "expiresAt": "2026-10-28T16:58:33.827106+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789311613843_ba9f8799",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T15:00:14.126228+00:00",
+            "details": "Approved payment of \u20b99 for \u20b99 Elite 10-Day Trial"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T15:00:14.446401+00:00",
+            "details": "Extended by 15 days to 2026-10-08T15:00:14.126228+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:55:48.999248+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:55:49.249701+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:55:48.999248+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:58:33.827106+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:58:34.121234+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:58:33.827106+00:00"
+          }
+        ]
+      },
+      "newValue": {
+        "id": "sub_usr-student-1_1789322983",
+        "userId": "usr-student-1",
+        "planId": "plus_monthly",
+        "planName": "Plus Pass (Monthly)",
+        "planTier": "plus",
+        "isTrial": false,
+        "status": "manually_granted",
+        "startedAt": "2026-09-13T18:09:43.741015+00:00",
+        "expiresAt": "2026-10-13T18:09:43.741015+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789311613843_ba9f8799",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T15:00:14.126228+00:00",
+            "details": "Approved payment of \u20b99 for \u20b99 Elite 10-Day Trial"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T15:00:14.446401+00:00",
+            "details": "Extended by 15 days to 2026-10-08T15:00:14.126228+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:55:48.999248+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:55:49.249701+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:55:48.999248+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T16:58:33.827106+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T16:58:34.121234+00:00",
+            "details": "Extended by 15 days to 2026-10-28T16:58:33.827106+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:43.741015+00:00",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass"
+          }
+        ]
+      },
+      "timestamp": "2026-09-13T18:09:43.741531+00:00"
+    },
+    {
+      "id": "audit_1789322973929_398bac",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "CANCEL_SUBSCRIPTION",
+      "targetId": "usr-student-4",
+      "target": "usr-student-4",
+      "details": "Cancelled subscription",
+      "oldValue": {
+        "id": "sub_usr-student-4_1789322973",
+        "userId": "usr-student-4",
+        "planId": "elite_monthly",
+        "planName": "Elite Pass (Monthly)",
+        "planTier": "elite",
+        "isTrial": false,
+        "status": "manually_granted",
+        "startedAt": "2026-09-13T18:09:33.250613+00:00",
+        "expiresAt": "2026-10-13T18:09:33.250613+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:11.068092+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:33.250613+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          },
+          {
+            "action": "admin_cancelled",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T18:09:33.929454+00:00",
+            "details": "Admin cancelled subscription. Reason: Cleanup after test"
+          }
+        ]
+      },
+      "newValue": {
+        "id": "sub_usr-student-4_1789322973",
+        "userId": "usr-student-4",
+        "planId": "elite_monthly",
+        "planName": "Elite Pass (Monthly)",
+        "planTier": "elite",
+        "isTrial": false,
+        "status": "cancelled",
+        "startedAt": "2026-09-13T18:09:33.250613+00:00",
+        "expiresAt": "2026-10-13T18:09:33.250613+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:11.068092+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:33.250613+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          },
+          {
+            "action": "admin_cancelled",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T18:09:33.929454+00:00",
+            "details": "Admin cancelled subscription. Reason: Cleanup after test"
+          }
+        ],
+        "cancelledAt": "2026-09-13T18:09:33.929454+00:00"
+      },
+      "timestamp": "2026-09-13T18:09:33.929454+00:00"
+    },
+    {
+      "id": "audit_1789322973250_77b3d4",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "GRANT_SUBSCRIPTION",
+      "targetId": "usr-student-4",
+      "target": "usr-student-4",
+      "details": "Admin granted Elite Pass (Monthly) until 2026-10-13T18:09:33.250613+00:00",
+      "oldValue": {
+        "id": "sub_usr-student-4_1789322951",
+        "userId": "usr-student-4",
+        "planId": "elite_monthly",
+        "planName": "Elite Pass (Monthly)",
+        "planTier": "elite",
+        "isTrial": false,
+        "status": "manually_granted",
+        "startedAt": "2026-09-13T18:09:11.068092+00:00",
+        "expiresAt": "2026-10-13T18:09:11.068092+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:11.068092+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          }
+        ]
+      },
+      "newValue": {
+        "id": "sub_usr-student-4_1789322973",
+        "userId": "usr-student-4",
+        "planId": "elite_monthly",
+        "planName": "Elite Pass (Monthly)",
+        "planTier": "elite",
+        "isTrial": false,
+        "status": "manually_granted",
+        "startedAt": "2026-09-13T18:09:33.250613+00:00",
+        "expiresAt": "2026-10-13T18:09:33.250613+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:11.068092+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:33.250613+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          }
+        ]
+      },
+      "timestamp": "2026-09-13T18:09:33.250613+00:00"
+    },
+    {
+      "id": "audit_1789322951069_627274",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "GRANT_SUBSCRIPTION",
+      "targetId": "usr-student-4",
+      "target": "usr-student-4",
+      "details": "Admin granted Elite Pass (Monthly) until 2026-10-13T18:09:11.068092+00:00",
+      "oldValue": null,
+      "newValue": {
+        "id": "sub_usr-student-4_1789322951",
+        "userId": "usr-student-4",
+        "planId": "elite_monthly",
+        "planName": "Elite Pass (Monthly)",
+        "planTier": "elite",
+        "isTrial": false,
+        "status": "manually_granted",
+        "startedAt": "2026-09-13T18:09:11.068092+00:00",
+        "expiresAt": "2026-10-13T18:09:11.068092+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T18:09:11.068092+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: Test Elite state verification"
+          }
+        ]
+      },
+      "timestamp": "2026-09-13T18:09:11.069094+00:00"
+    },
+    {
+      "id": "audit_1789320165169_258410",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "GRANT_SUBSCRIPTION",
+      "targetId": "usr-student-1789308468650",
+      "target": "usr-student-1789308468650",
+      "details": "Admin granted Elite Pass (Monthly) until 2026-10-13T17:22:45.168943+00:00",
+      "oldValue": null,
+      "newValue": {
+        "id": "sub_usr-student-1789308468650_1789320165",
+        "userId": "usr-student-1789308468650",
+        "planId": "elite_monthly",
+        "planName": "Elite Pass (Monthly)",
+        "planTier": "elite",
+        "isTrial": false,
+        "status": "manually_granted",
+        "startedAt": "2026-09-13T17:22:45.168943+00:00",
+        "expiresAt": "2026-10-13T17:22:45.168943+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T17:22:45.168943+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: x"
+          }
+        ]
+      },
+      "timestamp": "2026-09-13T17:22:45.169956+00:00"
+    },
     {
       "id": "audit_1789318715175_e155e2",
       "adminId": "usr-admin-1",

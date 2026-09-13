@@ -27,7 +27,12 @@ const STORAGE_KEYS = {
   XP_TRANSACTIONS: 'excellenceca_xp_transactions',
   REFERRAL_SETTINGS: 'excellenceca_referral_settings',
   XP_RESET_SETTINGS: 'excellenceca_xp_reset_settings',
-  XP_RESET_HISTORY: 'excellenceca_xp_reset_history'
+  XP_RESET_HISTORY: 'excellenceca_xp_reset_history',
+  SUBSCRIPTIONS: 'excellenceca_subscriptions',
+  PAYMENT_SESSIONS: 'excellenceca_payment_sessions',
+  PAYMENT_CHANNELS: 'excellenceca_payment_channels',
+  SUBSCRIPTION_PLANS: 'excellenceca_subscription_plans',
+  ADMIN_AUDIT_LOGS: 'excellenceca_admin_audit_logs'
 };
 
 const DEFAULT_RANK_TIERS = [
@@ -2013,6 +2018,32 @@ class AppStore {
     localStorage.setItem(STORAGE_KEYS.RANK_TIERS, JSON.stringify(DEFAULT_RANK_TIERS));
     localStorage.setItem(STORAGE_KEYS.XP_SETTINGS, JSON.stringify(DEFAULT_XP_SETTINGS));
     localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(DEFAULT_USERS[0]));
+  }
+
+  // Key-value store helpers for local storage
+  get(key, defaultValue = null) {
+    try {
+      const storageKey = STORAGE_KEYS[key.toUpperCase()] || (key.startsWith('excellenceca_') ? key : `excellenceca_${key}`);
+      const val = localStorage.getItem(storageKey);
+      if (val === null || val === undefined) return defaultValue;
+      return JSON.parse(val);
+    } catch (e) {
+      console.warn(`[AppStore] Failed to read key ${key}:`, e);
+      return defaultValue;
+    }
+  }
+
+  set(key, value) {
+    try {
+      const storageKey = STORAGE_KEYS[key.toUpperCase()] || (key.startsWith('excellenceca_') ? key : `excellenceca_${key}`);
+      if (value === null || value === undefined) {
+        localStorage.removeItem(storageKey);
+      } else {
+        localStorage.setItem(storageKey, JSON.stringify(value));
+      }
+    } catch (e) {
+      console.warn(`[AppStore] Failed to write key ${key}:`, e);
+    }
   }
 
   // Users
