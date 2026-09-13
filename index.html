@@ -228,25 +228,32 @@
             Take timed MCQ mock tests with authentic negative marking, download official case question papers, receive individual red-ink evaluated PDF copies, and rise on the state-wide gamified leaderboard.
           </p>
 
-          <!-- PROMINENT CALL TO ACTIONS: Sign In & Register -->
+          <!-- PROMINENT CALL TO ACTIONS: Conditional Auth Buttons (Sign In / Register vs Go to Dashboard) -->
           <div class="flex flex-wrap items-center gap-4 mt-8">
             <button 
               id="hero-signin-btn"
               onclick="window.app.showAuthModal('login')" 
-              class="px-6 py-3.5 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-sm rounded-xl shadow-lg shadow-blue-600/30 transition-all flex items-center gap-2 hover:-translate-y-0.5 active:translate-y-0"
+              class="px-6 py-3.5 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-sm rounded-xl shadow-lg shadow-blue-600/30 transition-all flex items-center gap-2 hover:-translate-y-0.5 active:translate-y-0 cursor-pointer"
             >
               <i data-lucide="log-in" class="w-4 h-4"></i> Sign In to Account
             </button>
             <button 
               id="hero-register-btn"
               onclick="window.app.navigate('register')" 
-              class="px-6 py-3.5 bg-white hover:bg-slate-100 text-slate-900 font-extrabold text-sm rounded-xl shadow-md transition-all flex items-center gap-2 hover:-translate-y-0.5 active:translate-y-0"
+              class="px-6 py-3.5 bg-white hover:bg-slate-100 text-slate-900 font-extrabold text-sm rounded-xl shadow-md transition-all flex items-center gap-2 hover:-translate-y-0.5 active:translate-y-0 cursor-pointer"
             >
               <i data-lucide="user-plus" class="w-4 h-4 text-blue-600"></i> Register as Student
             </button>
             <button 
+              id="hero-dashboard-btn"
+              onclick="window.app.navigate(window.auth && window.auth.isAdmin() ? 'admin' : (window.auth && window.auth.isTeacher() ? 'teacher' : 'dashboard'))" 
+              class="hidden px-6 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold text-sm rounded-xl shadow-lg shadow-blue-600/30 transition-all flex items-center gap-2 hover:-translate-y-0.5 active:translate-y-0 cursor-pointer"
+            >
+              <i data-lucide="layout-dashboard" class="w-4 h-4"></i> Go to Dashboard
+            </button>
+            <button 
               onclick="window.app.navigate('tests')" 
-              class="px-5 py-3.5 bg-white/10 hover:bg-white/20 text-white font-semibold text-sm rounded-xl backdrop-blur-md border border-white/10 transition-colors flex items-center gap-2"
+              class="px-5 py-3.5 bg-white/10 hover:bg-white/20 text-white font-semibold text-sm rounded-xl backdrop-blur-md border border-white/10 transition-colors flex items-center gap-2 cursor-pointer"
             >
               <i data-lucide="eye" class="w-4 h-4 text-slate-300"></i> Explore MCQ Tests
             </button>
@@ -317,7 +324,7 @@
             <h2 class="text-xl font-black text-slate-900 tracking-tight">Select Your Chartered Accountancy Level</h2>
             <p class="text-xs text-slate-500 mt-1">Curated test schedules, syllabus coverage, and model question papers for every stage.</p>
           </div>
-          <button onclick="window.app.navigate('register')" class="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
+          <button id="homepage-enroll-link" onclick="window.app.navigate(window.auth && window.auth.isLoggedIn() ? 'dashboard' : 'register')" class="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1 cursor-pointer">
             Enroll now for free <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
           </button>
         </div>
@@ -829,11 +836,16 @@
 
               <!-- Referral Code / Link (Optional) -->
               <div>
-                <label class="block font-bold text-slate-700 mb-1.5 flex items-center justify-between">
-                  <span class="flex items-center gap-1.5">
-                    <i data-lucide="gift" class="w-3.5 h-3.5 text-blue-600"></i> Referral Code (Optional)
-                  </span>
-                  <span class="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-md">100 Pts to Referrer</span>
+                <!-- Dynamic referral incentive badge -->
+                <div id="page-reg-ref-badge" class="mb-3 flex items-center gap-2 bg-gradient-to-r from-emerald-50 to-blue-50 border border-emerald-200 rounded-xl px-4 py-2.5">
+                  <span class="text-lg">✨</span>
+                  <div>
+                    <span class="text-xs font-black text-emerald-700 uppercase tracking-wide" id="page-reg-ref-earn-text">REFER A FRIEND &amp; EARN 100 PTS</span>
+                    <span class="text-[11px] text-slate-500 block" id="page-reg-ref-sub-text">Enter a friend's referral code below to get 100 bonus points when you join</span>
+                  </div>
+                </div>
+                <label class="block font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                  <i data-lucide="gift" class="w-3.5 h-3.5 text-blue-600"></i> Referral Code (Optional)
                 </label>
                 <input 
                   type="text" 
@@ -841,7 +853,7 @@
                   placeholder="e.g. ram123 or @ram123" 
                   class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-slate-800"
                 >
-                <span class="text-[10px] text-slate-400 mt-1 block">If a friend referred you, enter their username to grant them 100 points.</span>
+                <span class="text-[10px] text-slate-400 mt-1 block" id="page-reg-ref-hint">Enter your friend's username. They earn bonus referral points when you complete registration!</span>
               </div>
 
               <!-- Password & Confirm Password Grid with Strong Password Enforcement & Eye Toggles -->

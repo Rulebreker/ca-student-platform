@@ -24,7 +24,10 @@ const STORAGE_KEYS = {
   REFERRALS: 'excellenceca_referrals',
   BOOKMARKS: 'excellenceca_bookmarks',
   NOTIFICATIONS: 'excellenceca_notifications',
-  XP_TRANSACTIONS: 'excellenceca_xp_transactions'
+  XP_TRANSACTIONS: 'excellenceca_xp_transactions',
+  REFERRAL_SETTINGS: 'excellenceca_referral_settings',
+  XP_RESET_SETTINGS: 'excellenceca_xp_reset_settings',
+  XP_RESET_HISTORY: 'excellenceca_xp_reset_history'
 };
 
 const DEFAULT_RANK_TIERS = [
@@ -56,6 +59,19 @@ const DEFAULT_RANK_TIERS = [
 
 const DEFAULT_XP_SETTINGS = {
   referralXp: 500
+};
+
+const DEFAULT_REFERRAL_SETTINGS = {
+  referrerReward: 100,
+  newStudentReward: 100
+};
+
+const DEFAULT_XP_RESET_SETTINGS = {
+  enabled: false,
+  scheduledTime: '',
+  interval: 'once',
+  nextReset: null,
+  lastReset: null
 };
 
 const DEFAULT_BANNERS = [
@@ -2857,6 +2873,111 @@ class AppStore {
     if (upper.includes('INTER')) return 'CA Intermediate';
     if (upper.includes('FINAL')) return 'CA Final';
     return rawLevel;
+  }
+
+  // ─── Referral Settings (Dynamic Reward Configuration) ───────────────────────
+  getReferralSettings() {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.REFERRAL_SETTINGS);
+      return data ? JSON.parse(data) : { ...DEFAULT_REFERRAL_SETTINGS };
+    } catch (e) {
+      return { ...DEFAULT_REFERRAL_SETTINGS };
+    }
+  }
+
+  saveReferralSettings(settings) {
+    const merged = { ...DEFAULT_REFERRAL_SETTINGS, ...settings };
+    localStorage.setItem(STORAGE_KEYS.REFERRAL_SETTINGS, JSON.stringify(merged));
+    return merged;
+  }
+
+  // ─── XP Reset Settings (Schedule) ────────────────────────────────────────────
+  getXpResetSettings() {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.XP_RESET_SETTINGS);
+      return data ? JSON.parse(data) : { ...DEFAULT_XP_RESET_SETTINGS };
+    } catch (e) {
+      return { ...DEFAULT_XP_RESET_SETTINGS };
+    }
+  }
+
+  saveXpResetSettings(settings) {
+    const merged = { ...DEFAULT_XP_RESET_SETTINGS, ...settings };
+    localStorage.setItem(STORAGE_KEYS.XP_RESET_SETTINGS, JSON.stringify(merged));
+    return merged;
+  }
+
+  // ─── XP Reset History ─────────────────────────────────────────────────────────
+  getXpResetHistory() {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.XP_RESET_HISTORY);
+      return data ? JSON.parse(data) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  recordXpResetEvent(event) {
+    const history = this.getXpResetHistory();
+    history.unshift({
+      id: `xpreset-${Date.now()}`,
+      triggeredBy: event.triggeredBy || 'admin',
+      adminUser: event.adminUser || '',
+      studentsReset: event.studentsReset || 0,
+      resetAt: event.resetAt || new Date().toISOString(),
+      notes: event.notes || ''
+    });
+    // Keep last 100 events
+    localStorage.setItem(STORAGE_KEYS.XP_RESET_HISTORY, JSON.stringify(history.slice(0, 100)));
+  }
+
+  // ─── Admin XP Adjustment ──────────────────────────────────────────────────────
+  adminAdjustStudentXp(studentId, action, amount, reason, adminUser) {
+    if (!studentId || !action) return { success: false, error: 'Invalid parameters' };
+    const user = this.getUserById(studentId);
+    if (!user) return { success: false, error: 'Student not found' };
+
+    const prevXp = Number(user.totalXp !== undefined ? user.totalXp : (user.baseXp || 0));
+    let newXp;
+
+    if (action === 'add') {
+      newXp = prevXp + Number(amount);
+    } else if (action === 'remove') {
+      newXp = Math.max(0, prevXp - Number(amount));
+    } else if (action === 'set') {
+      newXp = Math.max(0, Number(amount));
+    } else {
+      return { success: false, error: 'Unknown action' };
+    }
+
+    user.totalXp = newXp;
+    user.baseXp = newXp;
+    this.updateUser(user);
+
+    // Record audit transaction
+    this.recordXpTransaction({
+      userId: studentId,
+      points: newXp - prevXp,
+      source: `admin_${action}`,
+      description: reason || `Admin ${action} XP`,
+      adminUser: adminUser || 'admin',
+      previousXp: prevXp,
+      newXp: newXp,
+      createdAt: new Date().toISOString()
+    });
+
+    // Also call backend if online
+    if (typeof fetch !== 'undefined') {
+      const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+      const token = currentUser ? (currentUser.token || currentUser.email) : '';
+      fetch('/api/admin/xp/manage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ studentId, action, amount: Number(amount), reason: reason || `Admin ${action} XP` })
+      }).catch(() => {});
+    }
+
+    return { success: true, previousXp: prevXp, newXp, user };
   }
 
 }

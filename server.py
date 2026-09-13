@@ -5,7 +5,9 @@ import json
 import urllib.parse
 import uuid
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import threading
+import time
 import re
 import zlib
 import hashlib
@@ -151,6 +153,8 @@ def award_xp_transaction(data, user_id, source_type, source_id, activity_name, p
     return tx, True
 
 def sync_historical_xp(d):
+    if d.get('_xp_historical_synced'):
+        return
     if 'xp_transactions' not in d:
         d['xp_transactions'] = []
     
@@ -238,8 +242,8 @@ def sync_historical_xp(d):
             u['totalXp'] = calc_xp
             dirty = True
 
-    if dirty:
-        save_backend_data(d)
+    d['_xp_historical_synced'] = True
+    save_backend_data(d)
 
 def load_backend_data():
     if os.path.exists(DATA_STORE_FILE):
@@ -255,6 +259,10 @@ def load_backend_data():
                 if 'notifications' not in d: d['notifications'] = []
                 if 'bookmarks' not in d: d['bookmarks'] = []
                 if 'subjects' not in d: d['subjects'] = []
+                if 'referrals' not in d: d['referrals'] = []
+                if 'referral_settings' not in d: d['referral_settings'] = {'referrerReward': 100, 'newStudentReward': 100}
+                if 'xp_reset_settings' not in d: d['xp_reset_settings'] = {'enabled': False, 'nextReset': None, 'intervalDays': 90, 'customSeconds': None, 'lastReset': None}
+                if 'xp_reset_history' not in d: d['xp_reset_history'] = []
                 # Sync seed users and hashed passwords
                 for email, init_u in INITIAL_USERS.items():
                     if email not in d.get('users', {}):
@@ -281,7 +289,11 @@ def load_backend_data():
         'xp_transactions': [],
         'notifications': [],
         'bookmarks': [],
-        'subjects': []
+        'subjects': [],
+        'referrals': [],
+        'referral_settings': {'referrerReward': 100, 'newStudentReward': 100},
+        'xp_reset_settings': {'enabled': False, 'nextReset': None, 'intervalDays': 90, 'customSeconds': None, 'lastReset': None},
+        'xp_reset_history': []
     }
     sync_historical_xp(data)
     save_backend_data(data)
@@ -290,6 +302,81 @@ def load_backend_data():
 def save_backend_data(data):
     with open(DATA_STORE_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2)
+
+def execute_xp_reset(data, triggered_by='scheduled', admin_user=None):
+    reset_id = f"reset-{int(datetime.now().timestamp() * 1000)}-{uuid.uuid4().hex[:6]}"
+    now_iso = datetime.now(timezone.utc).isoformat()
+    students_affected = 0
+    
+    users = data.get('users', {})
+    for u in users.values():
+        if u.get('role') == 'student':
+            old_xp = int(u.get('totalXp', 0))
+            if old_xp > 0 or u.get('baseXp'):
+                students_affected += 1
+            u['totalXp'] = 0
+            if 'baseXp' in u:
+                u['baseXp'] = 0
+    
+    # Calculate next reset if automatic
+    reset_settings = data.get('xp_reset_settings', {})
+    interval_days = int(reset_settings.get('intervalDays', 90))
+    custom_seconds = reset_settings.get('customSeconds')
+    
+    next_reset = None
+    if reset_settings.get('enabled'):
+        now_dt = datetime.now(timezone.utc)
+        if custom_seconds:
+            next_dt = now_dt + timedelta(seconds=int(custom_seconds))
+        else:
+            next_dt = now_dt + timedelta(days=interval_days)
+        next_reset = next_dt.isoformat()
+        reset_settings['nextReset'] = next_reset
+
+    reset_settings['lastReset'] = now_iso
+    reset_settings['lastResetStudentsCount'] = students_affected
+    data['xp_reset_settings'] = reset_settings
+
+    # Record event in reset history
+    event = {
+        'id': reset_id,
+        'timestamp': now_iso,
+        'type': triggered_by,
+        'studentsAffected': students_affected,
+        'admin': admin_user.get('name', admin_user.get('username', 'Administrator')) if admin_user else 'System Scheduler',
+        'nextScheduledReset': next_reset
+    }
+    if 'xp_reset_history' not in data:
+        data['xp_reset_history'] = []
+    data['xp_reset_history'].insert(0, event)
+    save_backend_data(data)
+    return event
+
+_last_checked_schedule_time = None
+
+def xp_reset_background_worker():
+    global _last_checked_schedule_time
+    while True:
+        try:
+            time.sleep(10)
+            data = load_backend_data()
+            reset_settings = data.get('xp_reset_settings', {})
+            if reset_settings.get('enabled') and reset_settings.get('nextReset'):
+                next_reset_str = reset_settings.get('nextReset')
+                try:
+                    next_reset_dt = datetime.fromisoformat(next_reset_str.replace('Z', '+00:00'))
+                    now_utc = datetime.now(timezone.utc)
+                    if now_utc >= next_reset_dt:
+                        # Idempotency guard: prevent duplicate runs within 15 seconds
+                        if _last_checked_schedule_time and (now_utc - _last_checked_schedule_time).total_seconds() < 15:
+                            continue
+                        _last_checked_schedule_time = now_utc
+                        print(f"[XP Reset Engine] Scheduled automatic reset triggering at {now_utc.isoformat()}")
+                        execute_xp_reset(data, triggered_by='scheduled')
+                except Exception as ex:
+                    pass
+        except Exception as e:
+            pass
 
 def authenticate_token(token_or_email):
     if not token_or_email:
@@ -788,6 +875,47 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             })
             return
 
+        # Referral Rewards Settings (Public)
+        if path == '/api/referrals/settings':
+            data = load_backend_data()
+            settings = data.get('referral_settings', {'referrerReward': 100, 'newStudentReward': 100})
+            self.send_json(200, {
+                'success': True,
+                'referrerReward': int(settings.get('referrerReward', 100)),
+                'newStudentReward': int(settings.get('newStudentReward', 100))
+            })
+            return
+
+        # Referrals List (Admin gets all, Student gets their own)
+        if path == '/api/referrals':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user:
+                self.send_json(401, {'error': 'Authentication required', 'code': 401})
+                return
+            data = load_backend_data()
+            all_refs = data.get('referrals', [])
+            settings = data.get('referral_settings', {'referrerReward': 100, 'newStudentReward': 100})
+            if user.get('role') == 'admin':
+                self.send_json(200, {'success': True, 'referrals': all_refs, 'settings': settings})
+            else:
+                user_refs = [r for r in all_refs if r.get('referrerId') == user.get('id') or (r.get('referrerUsername') and r.get('referrerUsername').lower() == (user.get('username') or '').lower())]
+                self.send_json(200, {'success': True, 'referrals': user_refs, 'settings': settings})
+            return
+
+        # XP Reset Settings & History (Admin only)
+        if path == '/api/admin/xp-reset/settings':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator privileges required', 'code': 403})
+                return
+            data = load_backend_data()
+            settings = data.get('xp_reset_settings', {'enabled': False, 'nextReset': None, 'intervalDays': 90, 'customSeconds': None, 'lastReset': None})
+            history = data.get('xp_reset_history', [])
+            self.send_json(200, {'success': True, 'settings': settings, 'history': history})
+            return
+
         # File Download (PDF)
         if path == '/api/files/download':
             token = self.get_auth_token()
@@ -1034,31 +1162,82 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 users_dict[raw_email] = new_user
                 data['users'] = users_dict
 
-                # Referral Reward Engine (100 Points to Referrer)
+                # 4 & 5. Dynamic Referral Reward Engine (Referrer & Referred Student Rewards)
                 raw_ref = str(post_data.get('referralCode') or post_data.get('ref') or '').strip().lstrip('@').lower()
+                ref_settings = data.get('referral_settings', {'referrerReward': 100, 'newStudentReward': 100})
+                referrer_reward = int(ref_settings.get('referrerReward', 100))
+                new_student_reward = int(ref_settings.get('newStudentReward', 100))
+
                 if raw_ref:
                     referrer = next((u for u in users_dict.values() if (u.get('username') or '').lower() == raw_ref or (u.get('email') or '').lower() == raw_ref or u.get('id') == raw_ref), None)
+                    # Abuse prevention: prevent self-referral and ensure referrer exists
                     if referrer and referrer.get('id') != user_id:
-                        award_xp_transaction(
-                            data, referrer.get('id'), 'referral', user_id,
-                            f"Referral: {new_user.get('name')}", 100,
-                            "New Student Enrolled",
-                            idempotency_key=f"referral_{user_id}",
-                            metadata={'referredUserId': user_id, 'referredName': new_user.get('name')}
+                        if 'referrals' not in data:
+                            data['referrals'] = []
+                        
+                        # Abuse prevention: check if this referred account was already rewarded
+                        already_rewarded = any(
+                            r.get('referredId') == user_id or 
+                            (r.get('referredUsername') and r.get('referredUsername').lower() == raw_uname)
+                            for r in data['referrals']
                         )
-                        notifs = data.get('notifications', [])
-                        notifs.insert(0, {
-                            'id': f"notif-{int(datetime.now().timestamp() * 1000)}",
-                            'userId': referrer.get('id'),
-                            'type': 'referral',
-                            'title': 'Referral Bonus Credited! 🎉',
-                            'message': f"{new_user.get('name')} registered using your code! +100 Platform Points credited.",
-                            'link': 'profile',
-                            'read': False,
-                            'metadata': {'points': 100, 'referredId': user_id},
-                            'createdAt': datetime.now(timezone.utc).isoformat()
-                        })
-                        data['notifications'] = notifs
+
+                        if not already_rewarded:
+                            # 1. Credit Referrer Points & Count
+                            referrer['referralPoints'] = int(referrer.get('referralPoints', 0)) + referrer_reward
+                            referrer['referralCount'] = int(referrer.get('referralCount', 0)) + 1
+                            
+                            # 2. Credit New Student Reward Points
+                            new_user['referralPoints'] = int(new_user.get('referralPoints', 0)) + new_student_reward
+                            new_user['referredBy'] = referrer.get('username') or referrer.get('name')
+
+                            # 3. Create persistent audit record in referrals
+                            ref_id = f"ref-{int(datetime.now().timestamp() * 1000)}-{uuid.uuid4().hex[:6]}"
+                            ref_record = {
+                                'id': ref_id,
+                                'referrerId': referrer.get('id'),
+                                'referrerUsername': referrer.get('username'),
+                                'referrerName': referrer.get('name'),
+                                'referredId': user_id,
+                                'referredUsername': new_user.get('username'),
+                                'referredName': new_user.get('name'),
+                                'referralCode': raw_ref,
+                                'referrerReward': referrer_reward,
+                                'referredReward': new_student_reward,
+                                'pointsAwarded': referrer_reward,
+                                'examLevel': new_user.get('caLevel', 'CA FOUNDATION'),
+                                'createdAt': datetime.now(timezone.utc).isoformat(),
+                                'status': 'completed'
+                            }
+                            data['referrals'].insert(0, ref_record)
+
+                            # 4. Real-time Notifications
+                            notifs = data.get('notifications', [])
+                            # Notify Referrer
+                            notifs.insert(0, {
+                                'id': f"notif-{int(datetime.now().timestamp() * 1000)}",
+                                'userId': referrer.get('id'),
+                                'type': 'referral',
+                                'title': 'Referral Bonus Credited! 🎉',
+                                'message': f"{new_user.get('name')} (@{new_user.get('username')}) registered using your code! +{referrer_reward} Referral Points credited.",
+                                'link': 'profile',
+                                'read': False,
+                                'metadata': {'points': referrer_reward, 'referredId': user_id, 'referredUsername': new_user.get('username')},
+                                'createdAt': datetime.now(timezone.utc).isoformat()
+                            })
+                            # Notify New Student
+                            notifs.insert(0, {
+                                'id': f"notif-{int(datetime.now().timestamp() * 1000) + 1}",
+                                'userId': user_id,
+                                'type': 'referral',
+                                'title': 'Welcome Referral Bonus! 🎁',
+                                'message': f"You joined with referral code @{referrer.get('username')}! +{new_student_reward} Referral Points credited to your account.",
+                                'link': 'profile',
+                                'read': False,
+                                'metadata': {'points': new_student_reward, 'referrerId': referrer.get('id')},
+                                'createdAt': datetime.now(timezone.utc).isoformat()
+                            })
+                            data['notifications'] = notifs
 
                 save_backend_data(data)
 
@@ -1391,6 +1570,212 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             except Exception as e:
                 self.send_json(500, {'error': f'Award XP error: {str(e)}', 'code': 500})
+                return
+
+        # 2c-v. Admin Student XP Management (Add, Remove, Set)
+        if path == '/api/admin/xp/manage':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator privileges required', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                req_data = json.loads(body.decode('utf-8'))
+                
+                student_identifier = str(req_data.get('studentId') or req_data.get('userId') or req_data.get('username') or '').strip().lstrip('@').lower()
+                action = str(req_data.get('action', 'add')).lower()
+                try:
+                    amount = int(req_data.get('amount', 0))
+                except (ValueError, TypeError):
+                    self.send_json(400, {'error': 'Invalid numeric amount', 'code': 400})
+                    return
+                reason = str(req_data.get('reason', 'Administrative adjustment')).strip()
+
+                if not student_identifier:
+                    self.send_json(400, {'error': 'Student username or ID required', 'code': 400})
+                    return
+
+                if amount < 0 and action in ['add', 'set']:
+                    self.send_json(400, {'error': 'Amount must be non-negative', 'code': 400})
+                    return
+
+                data = load_backend_data()
+                target_student = next((u for u in data.get('users', {}).values() if u.get('id') == student_identifier or (u.get('username') or '').lower() == student_identifier or (u.get('email') or '').lower() == student_identifier), None)
+
+                if not target_student:
+                    self.send_json(404, {'error': f'Student "{student_identifier}" not found', 'code': 404})
+                    return
+
+                old_xp = int(target_student.get('totalXp', 0))
+
+                if action == 'add':
+                    new_xp = old_xp + amount
+                    diff = amount
+                elif action == 'remove':
+                    new_xp = max(0, old_xp - amount)
+                    diff = new_xp - old_xp
+                elif action == 'set':
+                    new_xp = max(0, amount)
+                    diff = new_xp - old_xp
+                else:
+                    self.send_json(400, {'error': f'Unsupported action: {action}. Use add, remove, or set.', 'code': 400})
+                    return
+
+                target_student['totalXp'] = new_xp
+                if 'baseXp' in target_student and new_xp == 0:
+                    target_student['baseXp'] = 0
+
+                # Record authoritative audit transaction in xp_transactions
+                tx_id = f"tx-admin-{int(datetime.now().timestamp() * 1000)}-{uuid.uuid4().hex[:6]}"
+                act_str = action == 'set' and f"Set to {new_xp} XP" or f"{diff >= 0 and '+' or ''}{diff} XP"
+                tx = {
+                    'id': tx_id,
+                    'idempotencyKey': f"admin_adj_{target_student.get('id')}_{int(datetime.now().timestamp() * 1000)}",
+                    'userId': target_student.get('id'),
+                    'sourceType': 'admin_adjustment',
+                    'sourceId': user.get('id'),
+                    'activityName': f"Admin XP {action.capitalize()}: {act_str}",
+                    'points': diff,
+                    'resultStatus': f"Previous: {old_xp} XP → New: {new_xp} XP",
+                    'metadata': {
+                        'action': action,
+                        'amount': amount,
+                        'previousXp': old_xp,
+                        'newXp': new_xp,
+                        'adminName': user.get('name'),
+                        'adminUsername': user.get('username') or user.get('email'),
+                        'reason': reason
+                    },
+                    'createdAt': datetime.now(timezone.utc).isoformat()
+                }
+                if 'xp_transactions' not in data:
+                    data['xp_transactions'] = []
+                data['xp_transactions'].insert(0, tx)
+
+                # Send notification to the student
+                notifs = data.get('notifications', [])
+                notifs.insert(0, {
+                    'id': f"notif-{int(datetime.now().timestamp() * 1000)}",
+                    'userId': target_student.get('id'),
+                    'type': 'points_received',
+                    'title': 'Academic XP Adjusted ⚖️',
+                    'message': f"Your XP was adjusted by Administrator: {diff >= 0 and '+' or ''}{diff} XP (New Total: {new_xp} XP). Reason: {reason}",
+                    'link': 'profile',
+                    'read': False,
+                    'metadata': {'previousXp': old_xp, 'newXp': new_xp, 'diff': diff},
+                    'createdAt': datetime.now(timezone.utc).isoformat()
+                })
+                data['notifications'] = notifs
+
+                save_backend_data(data)
+
+                sanitized_student = dict(target_student)
+                sanitized_student.pop('password', None)
+
+                self.send_json(200, {
+                    'success': True,
+                    'message': f'XP successfully updated for {target_student.get("name")}',
+                    'student': sanitized_student,
+                    'previousXp': old_xp,
+                    'newXp': new_xp,
+                    'diff': diff,
+                    'transaction': tx
+                })
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Admin XP adjust error: {str(e)}', 'code': 500})
+                return
+
+        # 2c-vi. XP Reset Settings (Save schedule)
+        if path == '/api/admin/xp-reset/settings':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator privileges required', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                req_data = json.loads(body.decode('utf-8'))
+                
+                data = load_backend_data()
+                current_settings = data.get('xp_reset_settings', {})
+
+                if 'enabled' in req_data:
+                    current_settings['enabled'] = bool(req_data['enabled'])
+                if 'intervalDays' in req_data:
+                    current_settings['intervalDays'] = max(1, int(req_data['intervalDays']))
+                if 'customSeconds' in req_data:
+                    current_settings['customSeconds'] = int(req_data['customSeconds']) if req_data['customSeconds'] else None
+                if 'nextReset' in req_data:
+                    current_settings['nextReset'] = str(req_data['nextReset']) if req_data['nextReset'] else None
+                elif current_settings.get('enabled') and not current_settings.get('nextReset'):
+                    interval_days = int(current_settings.get('intervalDays', 90))
+                    current_settings['nextReset'] = (datetime.now(timezone.utc) + timedelta(days=interval_days)).isoformat()
+
+                current_settings['updatedAt'] = datetime.now(timezone.utc).isoformat()
+                current_settings['updatedBy'] = user.get('name')
+                data['xp_reset_settings'] = current_settings
+                save_backend_data(data)
+
+                self.send_json(200, {'success': True, 'settings': current_settings})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'XP Reset settings error: {str(e)}', 'code': 500})
+                return
+
+        # 2c-vii. XP Reset Manual Trigger
+        if path == '/api/admin/xp-reset/trigger':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator privileges required', 'code': 403})
+                return
+            try:
+                data = load_backend_data()
+                event = execute_xp_reset(data, triggered_by='manual', admin_user=user)
+                self.send_json(200, {
+                    'success': True,
+                    'message': f'XP reset executed successfully for {event.get("studentsAffected", 0)} students.',
+                    'event': event,
+                    'settings': data.get('xp_reset_settings', {})
+                })
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'XP Reset trigger error: {str(e)}', 'code': 500})
+                return
+
+        # 2c-viii. Referral Rewards Settings (Admin save)
+        if path == '/api/admin/referrals/settings':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator privileges required', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                req_data = json.loads(body.decode('utf-8'))
+                
+                referrer_reward = max(0, int(req_data.get('referrerReward', 100)))
+                new_student_reward = max(0, int(req_data.get('newStudentReward', 100)))
+
+                data = load_backend_data()
+                settings = {
+                    'referrerReward': referrer_reward,
+                    'newStudentReward': new_student_reward,
+                    'updatedAt': datetime.now(timezone.utc).isoformat(),
+                    'updatedBy': user.get('name')
+                }
+                data['referral_settings'] = settings
+                save_backend_data(data)
+
+                self.send_json(200, {'success': True, 'settings': settings})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Referral settings error: {str(e)}', 'code': 500})
                 return
 
         # 2d. Bookmarks Management (Toggle)
@@ -2083,6 +2468,9 @@ def run_server(port=PORT):
         print(f' http://localhost:{port}')
         print(f' Private Storage: {PRIVATE_STORAGE_DIR}')
         print(f'==================================================')
+        # Start scheduled background XP reset worker
+        worker_thread = threading.Thread(target=xp_reset_background_worker, daemon=True)
+        worker_thread.start()
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:

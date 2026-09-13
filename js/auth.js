@@ -373,7 +373,7 @@ class AuthManager {
       createdAt: new Date().toISOString()
     };
 
-    // Process referral reward (100 points to referrer, prevent duplicate counting)
+    // Process referral reward (dynamic, configurable by admin)
     if (referrer && referrer.id !== newUser.id) {
       const existingRefs = window.store.getReferrals ? window.store.getReferrals() : [];
       const alreadyReferred = existingRefs.some(r => 
@@ -381,10 +381,21 @@ class AuthManager {
         (r.referredUsername && r.referredUsername.replace(/^@+/, '').toLowerCase() === newUser.username.toLowerCase())
       );
       if (!alreadyReferred) {
-        referrer.referralPoints = (referrer.referralPoints || 0) + 100;
-        referrer.referralCount = (referrer.referralCount || 0) + 1;
+        // Fetch dynamic reward settings
+        const refSettings = window.store.getReferralSettings ? window.store.getReferralSettings() : { referrerReward: 100, newStudentReward: 100 };
+        const referrerReward = Number(refSettings.referrerReward) || 100;
+        const newStudentReward = Number(refSettings.newStudentReward) || 100;
 
-        // Log referral record
+        // 1. Credit Referrer Points
+        referrer.referralPoints = (referrer.referralPoints || 0) + referrerReward;
+        referrer.referralCount = (referrer.referralCount || 0) + 1;
+        // IMPORTANT: DO NOT add to referrer.totalXp — referralPoints are separate
+
+        // 2. Credit New Student Referral Reward
+        newUser.referralPoints = newStudentReward;
+        // IMPORTANT: DO NOT add to newUser.totalXp
+
+        // 3. Log referral record
         if (window.store.addReferral) {
           window.store.addReferral({
             id: 'ref-' + Date.now(),
@@ -395,20 +406,32 @@ class AuthManager {
             referredName: newUser.name,
             referredUsername: newUser.username.replace(/^@+/, ''),
             examLevel: newUser.caLevel,
-            pointsAwarded: 100,
+            referrerReward: referrerReward,
+            referredReward: newStudentReward,
+            pointsAwarded: referrerReward,
+            status: 'completed',
             createdAt: new Date().toISOString()
           });
         }
 
-        // Real-time notification to referrer
+        // 4. Real-time notification to referrer
         if (window.store.addNotification) {
           window.store.addNotification({
             userId: referrer.id,
             type: 'referral',
             title: 'Referral Bonus Credited! 🎉',
-            message: `${newUser.name} (@${newUser.username}) registered using your link! You earned +100 Platform Points.`,
-            link: 'leaderboard',
-            metadata: { referredUserId: newUser.id, points: 100 }
+            message: `${newUser.name} (@${newUser.username}) registered using your link! You earned +${referrerReward} Referral Points.`,
+            link: 'profile',
+            metadata: { referredUserId: newUser.id, points: referrerReward }
+          });
+          // 5. Notification to new student about their reward
+          window.store.addNotification({
+            userId: newUser.id,
+            type: 'referral',
+            title: 'Referral Bonus for You! 🎁',
+            message: `You joined using ${referrer.name}'s referral code and earned +${newStudentReward} Referral Points!`,
+            link: 'profile',
+            metadata: { referrerUserId: referrer.id, points: newStudentReward }
           });
         }
       }
@@ -561,6 +584,12 @@ class AuthManager {
     const mobileNavTeacher = document.getElementById('mobile-nav-teacher');
     const mobileNavAdmin = document.getElementById('mobile-nav-admin');
 
+    // Homepage Hero Buttons & CTA
+    const heroSignInBtn = document.getElementById('hero-signin-btn');
+    const heroRegisterBtn = document.getElementById('hero-register-btn');
+    const heroDashboardBtn = document.getElementById('hero-dashboard-btn');
+    const homepageEnrollLink = document.getElementById('homepage-enroll-link');
+
     if (user) {
       if (userDisplay) userDisplay.textContent = user.name;
       if (userRoleBadge) {
@@ -582,6 +611,23 @@ class AuthManager {
       if (navLogin) navLogin.style.display = 'none';
       if (navGuestActions) navGuestActions.style.display = 'none';
       if (navUserContainer) navUserContainer.style.display = 'flex';
+
+      // Logged in: HIDE Homepage Sign In & Register buttons, SHOW Go to Dashboard CTA
+      if (heroSignInBtn) heroSignInBtn.classList.add('hidden');
+      if (heroRegisterBtn) heroRegisterBtn.classList.add('hidden');
+      if (heroDashboardBtn) {
+        heroDashboardBtn.classList.remove('hidden');
+        if (user.role === 'admin') {
+          heroDashboardBtn.innerHTML = '<i data-lucide="shield" class="w-4 h-4"></i> Open Admin Portal';
+        } else if (user.role === 'teacher') {
+          heroDashboardBtn.innerHTML = '<i data-lucide="user-check" class="w-4 h-4"></i> Open Faculty Portal';
+        } else {
+          heroDashboardBtn.innerHTML = '<i data-lucide="layout-dashboard" class="w-4 h-4"></i> Go to Dashboard';
+        }
+      }
+      if (homepageEnrollLink) {
+        homepageEnrollLink.innerHTML = 'Go to Dashboard <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>';
+      }
 
       if (adminNavTab) {
         adminNavTab.style.display = user.role === 'admin' ? 'inline-flex' : 'none';
@@ -607,6 +653,18 @@ class AuthManager {
       if (mobileNavAdmin) mobileNavAdmin.style.display = 'none';
       if (teacherNavTab) teacherNavTab.style.display = 'none';
       if (mobileNavTeacher) mobileNavTeacher.style.display = 'none';
+
+      // Logged out: SHOW Homepage Sign In & Register buttons, HIDE Go to Dashboard
+      if (heroSignInBtn) heroSignInBtn.classList.remove('hidden');
+      if (heroRegisterBtn) heroRegisterBtn.classList.remove('hidden');
+      if (heroDashboardBtn) heroDashboardBtn.classList.add('hidden');
+      if (homepageEnrollLink) {
+        homepageEnrollLink.innerHTML = 'Enroll now for free <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>';
+      }
+    }
+
+    if (window.lucide) {
+      window.lucide.createIcons();
     }
 
     if (window.app && typeof window.app.updateNotificationBadge === 'function') {

@@ -143,7 +143,7 @@ class App {
       }
     }
 
-    // If navigating to register page, auto-fill referral code if captured
+    // If navigating to register page, auto-fill referral code and update dynamic badge text
     if (hash === 'register') {
       setTimeout(() => {
         const refEl = document.getElementById('page-reg-ref');
@@ -151,6 +151,8 @@ class App {
         if (refEl && savedRef && !refEl.value) {
           refEl.value = savedRef;
         }
+        // Dynamically update referral badge with configured rewards
+        this._updateRegReferralBadge();
       }, 50);
     }
 
@@ -267,6 +269,10 @@ class App {
       window.adminDashboard.render();
     } else if (viewName === 'teacher') {
       window.teacherPortal.render();
+    } else if (viewName === 'home') {
+      if (window.auth && typeof window.auth.onAuthChange === 'function') {
+        window.auth.onAuthChange();
+      }
     }
 
     // Keep browser address bar URL hash synchronized with current view
@@ -845,13 +851,55 @@ class App {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(code)
         .then(() => {
-          this.showToast(`Referral code ${code} copied to clipboard! Share with friends to earn 100 points.`, 'success');
+          const pts = (window.store && window.store.getReferralSettings) ? window.store.getReferralSettings().referrerReward : 100;
+          this.showToast(`Referral code ${code} copied! Share to earn ${pts} pts per friend.`, 'success');
         })
         .catch(() => {
           this.showToast(`Referral code ${code} copied to clipboard!`, 'success');
         });
     } else {
       this.showToast(`Referral code ${code} copied to clipboard!`, 'success');
+    }
+  }
+
+  // Dynamically update registration page referral badge with configured reward amounts
+  _updateRegReferralBadge() {
+    const earnEl = document.getElementById('page-reg-ref-earn-text');
+    const subEl  = document.getElementById('page-reg-ref-sub-text');
+    const hintEl = document.getElementById('page-reg-ref-hint');
+    if (!earnEl) return;
+
+    const applySettings = (settings) => {
+      const newStudentReward = Number(settings.newStudentReward) || 100;
+      const referrerReward   = Number(settings.referrerReward) || 100;
+      if (earnEl) earnEl.textContent = `✨ REFER A FRIEND & EARN ${referrerReward} PTS`;
+      if (subEl)  subEl.textContent  = `Enter a friend's referral code below to get ${newStudentReward} bonus points when you join`;
+      if (hintEl) hintEl.textContent = `Enter your friend's username. They earn +${referrerReward} referral points when you complete registration!`;
+    };
+
+    // Try to load from backend first, then fall back to local settings
+    if (typeof fetch !== 'undefined') {
+      fetch('/api/referrals/settings')
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data && (data.referrerReward !== undefined)) {
+            // Save latest settings locally too
+            if (window.store && window.store.saveReferralSettings) {
+              window.store.saveReferralSettings(data);
+            }
+            applySettings(data);
+          } else {
+            const local = window.store && window.store.getReferralSettings ? window.store.getReferralSettings() : { referrerReward: 100, newStudentReward: 100 };
+            applySettings(local);
+          }
+        })
+        .catch(() => {
+          const local = window.store && window.store.getReferralSettings ? window.store.getReferralSettings() : { referrerReward: 100, newStudentReward: 100 };
+          applySettings(local);
+        });
+    } else {
+      const local = window.store && window.store.getReferralSettings ? window.store.getReferralSettings() : { referrerReward: 100, newStudentReward: 100 };
+      applySettings(local);
     }
   }
 

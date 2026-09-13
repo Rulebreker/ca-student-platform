@@ -37,6 +37,8 @@ class AdminDashboard {
     else if (this.currentTab === 'teachers') this.renderTeachers();
     else if (this.currentTab === 'papers') this.renderTestPapers();
     else if (this.currentTab === 'grading') this.renderGradingCenter();
+    else if (this.currentTab === 'xp-management') this.renderXpManagement();
+    else if (this.currentTab === 'xp-reset') this.renderXpResetSettings();
     else if (this.currentTab === 'referrals') this.renderReferrals();
     else if (this.currentTab === 'mcq-tests') this.renderMCQTests();
     else if (this.currentTab === 'ranks-config') this.renderRanksConfig();
@@ -67,6 +69,8 @@ class AdminDashboard {
       { id: 'subjects', name: 'Subject Management', icon: 'book-open' },
       { id: 'papers', name: 'Question Papers (PDF)', icon: 'file-up' },
       { id: 'grading', name: 'Checked Copy Grading', icon: 'file-check-2' },
+      { id: 'xp-management', name: 'Student XP Management', icon: 'zap' },
+      { id: 'xp-reset', name: 'XP Reset Settings', icon: 'clock' },
       { id: 'referrals', name: 'Referral Management', icon: 'share-2' },
       { id: 'mcq-tests', name: 'MCQ Tests Builder', icon: 'check-square' },
       { id: 'ranks-config', name: 'XP & Rank Tiers', icon: 'award' },
@@ -4643,13 +4647,507 @@ This will remove the question paper, attached answer keys, and student submissio
     }
   }
 
-  // --- 10. REFERRAL MANAGEMENT & AUDIT ---
+  // --- 10. STUDENT XP MANAGEMENT ---
+  renderXpManagement() {
+    const container = document.getElementById('admin-content-area');
+    if (!container) return;
+
+    const adminUser = window.auth ? window.auth.getCurrentUser() : null;
+    const students = window.store.getStudents ? window.store.getStudents() : [];
+
+    container.innerHTML = `
+      <div class="space-y-6">
+        <!-- Header -->
+        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
+          <div class="flex items-center gap-3 mb-1">
+            <div class="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="zap" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h2 class="text-base font-black text-slate-900">Student XP Management</h2>
+              <p class="text-xs text-slate-500">Search a student, view their XP and CA rank level, then add, remove or set XP directly.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Search Card -->
+        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
+          <label class="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">Search Student by Username</label>
+          <div class="flex gap-2">
+            <input 
+              type="text" 
+              id="admin-xp-search" 
+              placeholder="Enter username (e.g. ram123)"
+              class="flex-1 px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+              oninput="window.adminDashboard._xpSearchDebounce(this.value)"
+            >
+            <button 
+              onclick="window.adminDashboard._xpSearchStudent(document.getElementById('admin-xp-search').value)"
+              class="px-4 py-2.5 bg-indigo-600 text-white text-sm font-bold rounded-xl hover:bg-indigo-700 flex items-center gap-1.5"
+            >
+              <i data-lucide="search" class="w-4 h-4"></i> Find
+            </button>
+          </div>
+          <div id="admin-xp-student-card" class="mt-4"></div>
+        </div>
+
+        <!-- XP Adjust Form (hidden until student found) -->
+        <div id="admin-xp-adjust-panel" class="hidden bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
+          <h3 class="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+            <i data-lucide="edit-3" class="w-4 h-4 text-indigo-500"></i> Adjust XP
+          </h3>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+            <button onclick="window.adminDashboard._xpSetAction('add')" id="admin-xp-btn-add"
+              class="flex items-center justify-center gap-2 px-4 py-2.5 border-2 border-emerald-300 text-emerald-700 font-bold rounded-xl hover:bg-emerald-50 transition-all text-sm">
+              <i data-lucide="plus-circle" class="w-4 h-4"></i> Add XP
+            </button>
+            <button onclick="window.adminDashboard._xpSetAction('remove')" id="admin-xp-btn-remove"
+              class="flex items-center justify-center gap-2 px-4 py-2.5 border-2 border-rose-300 text-rose-700 font-bold rounded-xl hover:bg-rose-50 transition-all text-sm">
+              <i data-lucide="minus-circle" class="w-4 h-4"></i> Remove XP
+            </button>
+            <button onclick="window.adminDashboard._xpSetAction('set')" id="admin-xp-btn-set"
+              class="flex items-center justify-center gap-2 px-4 py-2.5 border-2 border-blue-300 text-blue-700 font-bold rounded-xl hover:bg-blue-50 transition-all text-sm">
+              <i data-lucide="target" class="w-4 h-4"></i> Set XP
+            </button>
+          </div>
+          <div id="admin-xp-action-form" class="hidden">
+            <div class="flex gap-2 items-end">
+              <div class="flex-1">
+                <label class="block text-xs font-bold text-slate-600 mb-1" id="admin-xp-amount-label">XP Amount</label>
+                <input type="number" id="admin-xp-amount" min="0" placeholder="e.g. 500"
+                  class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
+              </div>
+              <div class="flex-1">
+                <label class="block text-xs font-bold text-slate-600 mb-1">Reason (optional)</label>
+                <input type="text" id="admin-xp-reason" placeholder="e.g. Bonus for quiz"
+                  class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
+              </div>
+              <button onclick="window.adminDashboard._xpApplyAction()"
+                class="px-5 py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 text-sm flex items-center gap-1.5 whitespace-nowrap">
+                <i data-lucide="check" class="w-4 h-4"></i> Apply
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Audit History -->
+        <div class="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+          <div class="p-5 border-b border-slate-100">
+            <h3 class="text-sm font-bold text-slate-900">Recent XP Adjustment History</h3>
+            <p class="text-xs text-slate-500 mt-0.5">Latest admin XP changes across all students</p>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-100">
+                  <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Student</th>
+                  <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Action</th>
+                  <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Prev XP</th>
+                  <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Change</th>
+                  <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">New XP</th>
+                  <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Date</th>
+                </tr>
+              </thead>
+              <tbody id="admin-xp-history-tbody">
+                ${this._renderXpAuditRows()}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  _renderXpAuditRows() {
+    const allTx = [];
+    const users = window.store.getStudents ? window.store.getStudents() : [];
+    users.forEach(u => {
+      const txs = window.store.getXpTransactions ? window.store.getXpTransactions(u.id) : [];
+      txs.filter(t => t.source && t.source.startsWith('admin_')).forEach(t => {
+        allTx.push({ ...t, username: u.username || u.name, userId: u.id });
+      });
+    });
+    allTx.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    const recent = allTx.slice(0, 30);
+    if (recent.length === 0) {
+      return `<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400 text-sm">No XP adjustments yet. Use the search above to modify a student's XP.</td></tr>`;
+    }
+    return recent.map(t => {
+      const action = (t.source || '').replace('admin_', '');
+      const change = Number(t.points || 0);
+      const colorCls = change > 0 ? 'text-emerald-700' : (change < 0 ? 'text-rose-700' : 'text-slate-600');
+      const prefix = change > 0 ? '+' : '';
+      const dateStr = t.createdAt ? new Date(t.createdAt).toLocaleString('en-IN') : '—';
+      return `
+        <tr class="border-b border-slate-50 hover:bg-slate-50">
+          <td class="px-4 py-2.5 font-mono text-xs text-blue-700">${t.username || t.userId || '—'}</td>
+          <td class="px-4 py-2.5">
+            <span class="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
+              action === 'add' ? 'bg-emerald-100 text-emerald-700' :
+              action === 'remove' ? 'bg-rose-100 text-rose-700' :
+              'bg-blue-100 text-blue-700'
+            }">${action}</span>
+          </td>
+          <td class="px-4 py-2.5 text-xs text-slate-500">${Number(t.previousXp || 0).toLocaleString()}</td>
+          <td class="px-4 py-2.5 text-xs font-bold ${colorCls}">${prefix}${change.toLocaleString()}</td>
+          <td class="px-4 py-2.5 text-xs font-bold text-slate-900">${Number(t.newXp !== undefined ? t.newXp : (Number(t.previousXp || 0) + change)).toLocaleString()}</td>
+          <td class="px-4 py-2.5 text-[11px] text-slate-400">${dateStr}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  _xpSearchDebounce(val) {
+    clearTimeout(this._xpSearchTimer);
+    this._xpSearchTimer = setTimeout(() => this._xpSearchStudent(val), 350);
+  }
+
+  _xpSearchStudent(query) {
+    const q = (query || '').trim().toLowerCase().replace(/^@+/, '');
+    const cardEl = document.getElementById('admin-xp-student-card');
+    const panelEl = document.getElementById('admin-xp-adjust-panel');
+    if (!cardEl) return;
+    if (!q) {
+      cardEl.innerHTML = '';
+      if (panelEl) panelEl.classList.add('hidden');
+      return;
+    }
+    const students = window.store.getStudents ? window.store.getStudents() : [];
+    const student = students.find(s => 
+      (s.username && s.username.toLowerCase() === q) ||
+      (s.email && s.email.toLowerCase() === q) ||
+      (s.name && s.name.toLowerCase() === q)
+    );
+    if (!student) {
+      cardEl.innerHTML = `<div class="flex items-center gap-2 text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-sm">
+        <i data-lucide="user-x" class="w-4 h-4"></i> No student found with username "<strong>${q}</strong>"
+      </div>`;
+      if (panelEl) panelEl.classList.add('hidden');
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
+    this._currentXpStudent = student;
+    const totalXp = Number(student.totalXp !== undefined ? student.totalXp : (student.baseXp || 0));
+    const tierInfo = window.store.resolveTier ? window.store.resolveTier(totalXp) : null;
+    const tierName = tierInfo ? tierInfo.currentTier.name : '—';
+    const tierFamily = tierInfo ? tierInfo.currentTier.family : '';
+    const familyColor = {
+      'Rookie': 'bg-slate-100 text-slate-700', 'Scholar': 'bg-blue-100 text-blue-700',
+      'Achiever': 'bg-emerald-100 text-emerald-700', 'Elite': 'bg-purple-100 text-purple-700',
+      'Master': 'bg-yellow-100 text-yellow-700', 'Apex': 'bg-orange-100 text-orange-700',
+      'Titan': 'bg-rose-100 text-rose-700', 'Legend': 'bg-pink-100 text-pink-700',
+      'Sovereign': 'bg-amber-100 text-amber-700'
+    }[tierFamily] || 'bg-slate-100 text-slate-700';
+
+    cardEl.innerHTML = `
+      <div class="flex items-center gap-4 bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-200 rounded-xl p-4">
+        <img src="${student.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=80'}" 
+          class="w-14 h-14 rounded-full object-cover border-2 border-indigo-200" onerror="this.src='https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=80'">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-black text-slate-900">${student.name || '—'}</span>
+            <span class="font-mono text-xs text-blue-600">@${student.username || student.id}</span>
+            <span class="px-2 py-0.5 text-[10px] font-bold rounded-md ${familyColor}">${tierName}</span>
+          </div>
+          <div class="flex items-center gap-3 mt-1 flex-wrap">
+            <span class="text-xs text-slate-500">${student.caLevel || '—'}</span>
+            <span class="text-2xl font-black text-indigo-700">${totalXp.toLocaleString()} <span class="text-sm font-bold text-indigo-400">XP</span></span>
+            <span class="text-xs text-slate-400">Referral Pts: <strong class="text-emerald-700">${student.referralPoints || 0}</strong></span>
+          </div>
+        </div>
+      </div>
+    `;
+    if (panelEl) panelEl.classList.remove('hidden');
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  _xpSetAction(action) {
+    this._currentXpAction = action;
+    const formEl = document.getElementById('admin-xp-action-form');
+    const labelEl = document.getElementById('admin-xp-amount-label');
+    const amtEl = document.getElementById('admin-xp-amount');
+    if (formEl) formEl.classList.remove('hidden');
+    if (amtEl) amtEl.focus();
+    // Update labels
+    const labels = { add: 'XP to Add', remove: 'XP to Remove', set: 'Set XP to' };
+    if (labelEl) labelEl.textContent = labels[action] || 'XP Amount';
+    // Highlight active button
+    ['add', 'remove', 'set'].forEach(a => {
+      const btn = document.getElementById(`admin-xp-btn-${a}`);
+      if (btn) btn.classList.toggle('ring-2', a === action);
+    });
+  }
+
+  _xpApplyAction() {
+    const student = this._currentXpStudent;
+    const action = this._currentXpAction;
+    const amtEl = document.getElementById('admin-xp-amount');
+    const reasonEl = document.getElementById('admin-xp-reason');
+    if (!student || !action) {
+      window.app.showToast('Please search for a student first.', 'error');
+      return;
+    }
+    const amount = parseInt(amtEl ? amtEl.value : 0, 10);
+    if (isNaN(amount) || amount < 0) {
+      window.app.showToast('Please enter a valid non-negative XP amount.', 'error');
+      return;
+    }
+    const reason = reasonEl ? reasonEl.value.trim() : '';
+    const adminUser = window.auth ? window.auth.getCurrentUser() : null;
+
+    const actionLabels = { add: `Add ${amount} XP`, remove: `Remove ${amount} XP`, set: `Set XP to ${amount}` };
+    const confirmed = confirm(`Confirm: ${actionLabels[action]} for @${student.username}?`);
+    if (!confirmed) return;
+
+    const result = window.store.adminAdjustStudentXp(student.id, action, amount, reason, adminUser ? adminUser.username : 'admin');
+    if (result.success) {
+      window.app.showToast(`✅ XP updated: @${student.username} → ${result.newXp.toLocaleString()} XP`, 'success');
+      // Update the displayed card
+      this._currentXpStudent = { ...this._currentXpStudent, totalXp: result.newXp, baseXp: result.newXp };
+      this._xpSearchStudent(student.username);
+      // Refresh audit rows
+      const tbody = document.getElementById('admin-xp-history-tbody');
+      if (tbody) tbody.innerHTML = this._renderXpAuditRows();
+      // Clear inputs
+      if (amtEl) amtEl.value = '';
+      if (reasonEl) reasonEl.value = '';
+    } else {
+      window.app.showToast(`Error: ${result.error}`, 'error');
+    }
+  }
+
+  // --- 11. XP RESET SETTINGS ---
+  renderXpResetSettings() {
+    const container = document.getElementById('admin-content-area');
+    if (!container) return;
+
+    const settings = window.store.getXpResetSettings ? window.store.getXpResetSettings() : { enabled: false, scheduledTime: '', interval: 'once', nextReset: null, lastReset: null };
+    const history = window.store.getXpResetHistory ? window.store.getXpResetHistory() : [];
+
+    const fmtDate = (iso) => iso ? new Date(iso).toLocaleString('en-IN') : '—';
+
+    container.innerHTML = `
+      <div class="space-y-6">
+        <!-- Header -->
+        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="clock" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h2 class="text-base font-black text-slate-900">Automatic XP Reset Settings</h2>
+              <p class="text-xs text-slate-500">Configure scheduled XP resets. Only academic XP is reset. Referral points, test history, and accounts are never affected.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Warning Banner -->
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+          <i data-lucide="alert-triangle" class="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5"></i>
+          <div class="text-xs text-amber-800">
+            <strong class="font-bold">Important:</strong> XP Reset only zeroes student <code>totalXp</code>. 
+            Referral Points, Referral History, Test Attempts, Evaluated Papers, Notifications, and Student Accounts are <strong>never deleted or modified</strong>.
+          </div>
+        </div>
+
+        <!-- Settings Form -->
+        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-bold text-slate-900">Schedule Configuration</h3>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <span class="text-xs font-semibold text-slate-600">Enable Auto-Reset</span>
+              <div class="relative">
+                <input type="checkbox" id="admin-xp-reset-enabled" class="sr-only" ${settings.enabled ? 'checked' : ''}>
+                <div class="w-10 h-6 bg-slate-200 rounded-full peer-checked:bg-indigo-500 transition-colors" id="admin-xp-reset-toggle-track">
+                </div>
+              </div>
+              <button onclick="window.adminDashboard._toggleXpReset()" 
+                class="relative inline-flex w-10 h-5 items-center rounded-full transition-colors ${settings.enabled ? 'bg-indigo-500' : 'bg-slate-300'}" 
+                id="admin-xp-reset-toggle">
+                <span class="inline-block w-4 h-4 bg-white rounded-full shadow transition-transform ${settings.enabled ? 'translate-x-5' : 'translate-x-0.5'}"></span>
+              </button>
+            </label>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-600 mb-1.5">Scheduled Date & Time</label>
+              <input type="datetime-local" id="admin-xp-reset-datetime" 
+                value="${settings.scheduledTime || ''}"
+                class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-600 mb-1.5">Reset Interval</label>
+              <select id="admin-xp-reset-interval" 
+                class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 bg-white">
+                <option value="once" ${settings.interval === 'once' ? 'selected' : ''}>One-time reset only</option>
+                <option value="monthly" ${settings.interval === 'monthly' ? 'selected' : ''}>Every Month</option>
+                <option value="quarterly" ${settings.interval === 'quarterly' ? 'selected' : ''}>Every 3 Months</option>
+                <option value="biannual" ${settings.interval === 'biannual' ? 'selected' : ''}>Every 6 Months</option>
+                <option value="yearly" ${settings.interval === 'yearly' ? 'selected' : ''}>Every Year</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+            <div class="bg-slate-50 rounded-xl p-3">
+              <span class="text-xs font-semibold text-slate-500 block">Next Scheduled Reset</span>
+              <span class="text-sm font-bold text-indigo-700" id="admin-xp-reset-next-display">${settings.nextReset ? fmtDate(settings.nextReset) : 'Not scheduled'}</span>
+            </div>
+            <div class="bg-slate-50 rounded-xl p-3">
+              <span class="text-xs font-semibold text-slate-500 block">Last Reset Executed</span>
+              <span class="text-sm font-bold text-slate-700">${settings.lastReset ? fmtDate(settings.lastReset) : 'Never'}</span>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap gap-3 mt-5">
+            <button onclick="window.adminDashboard._saveXpResetSettings()"
+              class="px-5 py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 text-sm flex items-center gap-2">
+              <i data-lucide="save" class="w-4 h-4"></i> Save Settings
+            </button>
+            <button onclick="window.adminDashboard._manualXpReset()"
+              class="px-5 py-2.5 bg-rose-600 text-white font-bold rounded-xl hover:bg-rose-700 text-sm flex items-center gap-2">
+              <i data-lucide="refresh-cw" class="w-4 h-4"></i> Trigger Manual Reset Now
+            </button>
+          </div>
+        </div>
+
+        <!-- Reset History -->
+        <div class="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+          <div class="p-5 border-b border-slate-100">
+            <h3 class="text-sm font-bold text-slate-900">XP Reset History</h3>
+            <p class="text-xs text-slate-500 mt-0.5">Log of all XP resets (manual and automatic)</p>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-100">
+                  <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Date & Time</th>
+                  <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Triggered By</th>
+                  <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Students Reset</th>
+                  <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${history.length === 0
+                  ? `<tr><td colspan="4" class="px-4 py-8 text-center text-slate-400 text-sm">No XP resets have been performed yet.</td></tr>`
+                  : history.slice(0, 30).map(h => `
+                      <tr class="border-b border-slate-50 hover:bg-slate-50">
+                        <td class="px-4 py-2.5 text-xs text-slate-700">${fmtDate(h.resetAt)}</td>
+                        <td class="px-4 py-2.5">
+                          <span class="px-2 py-0.5 text-[10px] font-bold rounded-md ${h.triggeredBy === 'admin' ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'}">
+                            ${h.triggeredBy === 'admin' ? `👤 ${h.adminUser || 'Admin'}` : '🕐 Scheduled'}
+                          </span>
+                        </td>
+                        <td class="px-4 py-2.5 text-xs font-bold text-slate-900">${h.studentsReset || '—'}</td>
+                        <td class="px-4 py-2.5 text-xs text-slate-500">${h.notes || '—'}</td>
+                      </tr>
+                    `).join('')
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  _toggleXpReset() {
+    const btn = document.getElementById('admin-xp-reset-toggle');
+    const chk = document.getElementById('admin-xp-reset-enabled');
+    if (!btn || !chk) return;
+    const newEnabled = !chk.checked;
+    chk.checked = newEnabled;
+    btn.className = `relative inline-flex w-10 h-5 items-center rounded-full transition-colors ${newEnabled ? 'bg-indigo-500' : 'bg-slate-300'}`;
+    btn.querySelector('span').className = `inline-block w-4 h-4 bg-white rounded-full shadow transition-transform ${newEnabled ? 'translate-x-5' : 'translate-x-0.5'}`;
+  }
+
+  _saveXpResetSettings() {
+    const enabledChk = document.getElementById('admin-xp-reset-enabled');
+    const datetimeEl = document.getElementById('admin-xp-reset-datetime');
+    const intervalEl = document.getElementById('admin-xp-reset-interval');
+    const nextDisplayEl = document.getElementById('admin-xp-reset-next-display');
+
+    const enabled = enabledChk ? enabledChk.checked : false;
+    const scheduledTime = datetimeEl ? datetimeEl.value : '';
+    const interval = intervalEl ? intervalEl.value : 'once';
+    const nextReset = (enabled && scheduledTime) ? new Date(scheduledTime).toISOString() : null;
+
+    const settings = window.store.saveXpResetSettings ? window.store.saveXpResetSettings({ enabled, scheduledTime, interval, nextReset, lastReset: (window.store.getXpResetSettings ? window.store.getXpResetSettings().lastReset : null) }) : null;
+
+    if (nextDisplayEl) nextDisplayEl.textContent = nextReset ? new Date(nextReset).toLocaleString('en-IN') : 'Not scheduled';
+
+    // Also persist to backend
+    const adminUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = adminUser ? (adminUser.token || adminUser.email) : '';
+    if (typeof fetch !== 'undefined') {
+      fetch('/api/admin/xp-reset/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ enabled, scheduledTime, interval, nextReset })
+      }).catch(() => {});
+    }
+
+    window.app.showToast(enabled ? `✅ XP Reset scheduled for ${new Date(scheduledTime).toLocaleString('en-IN')}` : '✅ Auto-reset disabled. Settings saved.', 'success');
+  }
+
+  _manualXpReset() {
+    const confirmed = confirm('⚠️ CONFIRM XP RESET\n\nThis will reset ALL student academic XP to 0 immediately.\n\nReferral points, test history, and accounts will NOT be affected.\n\nThis action cannot be undone. Proceed?');
+    if (!confirmed) return;
+    const doubleConfirm = confirm('Final confirmation: Reset ALL student XP to 0 now?');
+    if (!doubleConfirm) return;
+
+    const students = window.store.getStudents ? window.store.getStudents() : [];
+    let resetCount = 0;
+    students.forEach(s => {
+      s.totalXp = 0;
+      s.baseXp = 0;
+      window.store.updateUser(s);
+      resetCount++;
+    });
+
+    const adminUser = window.auth ? window.auth.getCurrentUser() : null;
+    const resetEvent = {
+      triggeredBy: 'admin',
+      adminUser: adminUser ? (adminUser.username || adminUser.name) : 'admin',
+      studentsReset: resetCount,
+      resetAt: new Date().toISOString(),
+      notes: 'Manual reset triggered from Admin Panel'
+    };
+    if (window.store.recordXpResetEvent) window.store.recordXpResetEvent(resetEvent);
+
+    // Update lastReset in settings
+    const currentSettings = window.store.getXpResetSettings ? window.store.getXpResetSettings() : {};
+    if (window.store.saveXpResetSettings) window.store.saveXpResetSettings({ ...currentSettings, lastReset: resetEvent.resetAt });
+
+    // Call backend to reset server-side too
+    const token = adminUser ? (adminUser.token || adminUser.email) : '';
+    if (typeof fetch !== 'undefined') {
+      fetch('/api/admin/xp-reset/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ manual: true })
+      }).catch(() => {});
+    }
+
+    window.app.showToast(`✅ XP Reset complete: ${resetCount} students' XP reset to 0`, 'success');
+    this.renderXpResetSettings();
+  }
+
+  // --- 12. REFERRAL MANAGEMENT & AUDIT ---
   renderReferrals() {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
 
     const referrals = window.store.getReferrals ? window.store.getReferrals() : [];
     const totalPoints = referrals.reduce((sum, r) => sum + (r.pointsAwarded || 100), 0);
+
+    // Load current referral reward settings
+    const refSettings = window.store.getReferralSettings ? window.store.getReferralSettings() : { referrerReward: 100, newStudentReward: 100 };
 
     // Compute top referrers
     const referrerMap = {};
@@ -4669,6 +5167,47 @@ This will remove the question paper, attached answer keys, and student submissio
 
     container.innerHTML = `
       <div class="space-y-6">
+
+        <!-- Admin Referral Reward Configuration Card -->
+        <div class="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+          <div class="p-5 border-b border-slate-100 flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="settings-2" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h3 class="text-sm font-bold text-slate-900">Referral Reward Configuration</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Configure how many points are awarded for referrals. Applies to future referrals only — existing rewards are not affected.</p>
+            </div>
+          </div>
+          <div class="p-5">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-600 mb-1.5">Referrer Reward (points earned by the person who referred)</label>
+                <div class="flex items-center gap-2">
+                  <input type="number" id="admin-ref-reward-referrer" min="0" value="${refSettings.referrerReward || 100}"
+                    class="flex-1 px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-400">
+                  <span class="text-xs text-slate-500 font-semibold">pts</span>
+                </div>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-600 mb-1.5">New Student Reward (points earned by the newly registered student)</label>
+                <div class="flex items-center gap-2">
+                  <input type="number" id="admin-ref-reward-new-student" min="0" value="${refSettings.newStudentReward || 100}"
+                    class="flex-1 px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-400">
+                  <span class="text-xs text-slate-500 font-semibold">pts</span>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <button onclick="window.adminDashboard._saveReferralSettings()"
+                class="px-5 py-2.5 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 text-sm flex items-center gap-2">
+                <i data-lucide="save" class="w-4 h-4"></i> Save Reward Settings
+              </button>
+              <span class="text-xs text-slate-400">Current: <strong class="text-slate-700">${refSettings.referrerReward}pts</strong> referrer / <strong class="text-slate-700">${refSettings.newStudentReward}pts</strong> new student</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Top Stats Row -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex items-center gap-4">
@@ -4689,7 +5228,7 @@ This will remove the question paper, attached answer keys, and student submissio
             <div>
               <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Points Awarded</span>
               <span class="text-2xl font-black text-emerald-700">${totalPoints.toLocaleString()} Pts</span>
-              <span class="text-[11px] text-emerald-600 font-semibold block">100 points per verified referral</span>
+              <span class="text-[11px] text-emerald-600 font-semibold block">${refSettings.referrerReward}pts per verified referral</span>
             </div>
           </div>
 
@@ -4815,6 +5354,52 @@ This will remove the question paper, attached answer keys, and student submissio
       tbody.innerHTML = this.renderReferralRows(filtered);
       if (window.lucide) window.lucide.createIcons();
     }
+  }
+
+  _saveReferralSettings() {
+    const referrerEl = document.getElementById('admin-ref-reward-referrer');
+    const newStudentEl = document.getElementById('admin-ref-reward-new-student');
+    const referrerReward = parseInt(referrerEl ? referrerEl.value : 100, 10);
+    const newStudentReward = parseInt(newStudentEl ? newStudentEl.value : 100, 10);
+
+    if (isNaN(referrerReward) || referrerReward < 0) {
+      window.app.showToast('Referrer reward must be a non-negative number.', 'error');
+      return;
+    }
+    if (isNaN(newStudentReward) || newStudentReward < 0) {
+      window.app.showToast('New student reward must be a non-negative number.', 'error');
+      return;
+    }
+
+    // Save to store (localStorage)
+    if (window.store.saveReferralSettings) {
+      window.store.saveReferralSettings({ referrerReward, newStudentReward });
+    }
+
+    // Persist to backend
+    const adminUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = adminUser ? (adminUser.token || adminUser.email) : '';
+    if (typeof fetch !== 'undefined') {
+      fetch('/api/admin/referrals/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ referrerReward, newStudentReward })
+      }).then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data && data.success) {
+            window.app.showToast(`✅ Referral rewards updated: Referrer = ${referrerReward} pts / New Student = ${newStudentReward} pts`, 'success');
+          }
+        })
+        .catch(() => {
+          // Backend may be offline; settings saved locally at least
+          window.app.showToast(`✅ Referral rewards updated locally: ${referrerReward}pts / ${newStudentReward}pts`, 'success');
+        });
+    } else {
+      window.app.showToast(`✅ Referral rewards updated: Referrer = ${referrerReward} pts / New Student = ${newStudentReward} pts`, 'success');
+    }
+
+    // Re-render the tab to show new current values
+    setTimeout(() => this.renderReferrals(), 500);
   }
 
   // --- SUBJECT MANAGEMENT TAB ---
