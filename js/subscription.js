@@ -33,9 +33,10 @@ class SubscriptionManager {
     });
   }
 
-  async fetchPlans() {
+  async fetchPlans(force = false) {
     try {
-      const resp = await fetch('/api/subscriptions/plans');
+      const url = force ? `/api/subscriptions/plans?_t=${Date.now()}` : '/api/subscriptions/plans';
+      const resp = await fetch(url, { cache: 'no-store' });
       if (resp.ok) {
         const data = await resp.json();
         if (data.success && data.plans) {
@@ -841,51 +842,122 @@ class SubscriptionManager {
   // --- DEDICATED PASSES & PRICING PAGE (/#passes) ---
 
   setPassesBillingCycle(cycle) {
-    this.currentCycle = cycle;
-    this.renderPassesPage();
+    this.currentPassesCycle = cycle;
+    this.renderPassesPage(false);
   }
 
-  renderPassesPage() {
+  async renderPassesPage(showSkeleton = true) {
     const container = document.getElementById('passes-page-container');
     if (!container) return;
 
+    // 1. Loading skeleton on initial render or hard refresh
+    if (showSkeleton && !this._passesLoadedOnce) {
+      container.innerHTML = `
+        <div class="space-y-6 animate-pulse">
+          <div class="text-center max-w-xl mx-auto space-y-3 pt-4">
+            <div class="h-6 bg-slate-200 rounded-full w-48 mx-auto"></div>
+            <div class="h-9 bg-slate-200 rounded-xl w-72 mx-auto"></div>
+            <div class="h-4 bg-slate-200 rounded-lg w-full max-w-md mx-auto"></div>
+            <div class="h-10 bg-slate-200 rounded-xl w-64 mx-auto mt-4"></div>
+          </div>
+          <div class="h-28 bg-slate-100 rounded-2xl border border-slate-200 max-w-4xl mx-auto"></div>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-5 lg:gap-6 pt-2">
+            <div class="h-96 bg-slate-100 rounded-2xl border border-slate-200"></div>
+            <div class="h-96 bg-slate-100 rounded-2xl border border-slate-200"></div>
+            <div class="h-96 bg-slate-100 rounded-2xl border border-slate-200"></div>
+          </div>
+        </div>
+      `;
+    }
+
     const user = window.auth ? window.auth.getCurrentUser() : null;
+
+    // 2. Authoritative parallel fetch: public plans catalog + user subscription
+    try {
+      const plansPromise = this.fetchPlans(true);
+      const subPromise = user ? this.syncMySubscription() : Promise.resolve(null);
+      await Promise.all([plansPromise, subPromise]);
+    } catch (e) {
+      console.warn('[SubscriptionManager] Parallel sync warning:', e);
+    }
+
+    // 3. Obtain fresh authoritative plans catalog from DB/backend
+    const plans = this.getPlans() || {};
+    const planKeys = Object.keys(plans);
+
+    if (planKeys.length === 0) {
+      container.innerHTML = `
+        <div class="p-8 text-center bg-white rounded-2xl border border-rose-200 shadow-xs max-w-md mx-auto space-y-4 my-10">
+          <div class="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+            <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Unable to load Passes</h3>
+            <p class="text-xs text-slate-500 mt-1">Failed to connect to the backend pricing catalog. Please try again.</p>
+          </div>
+          <button 
+            onclick="window.subscriptionManager.renderPassesPage(true)"
+            class="px-5 py-2.5 bg-rose-700 hover:bg-rose-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 mx-auto cursor-pointer"
+          >
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Retry
+          </button>
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
+
+    this._passesLoadedOnce = true;
+
+    // 4. Resolve authenticated user state & subscription details
     const entitlements = window.store ? window.store.getUserEntitlements(user ? user.id : null) : null;
     const subscription = window.store ? window.store.getUserSubscription(user ? user.id : null) : null;
     const isSubscribed = !!(entitlements && entitlements.isSubscribed);
 
-    const isMonthly = this.currentCycle !== '4_months';
-    const durationLabel = isMonthly ? '/month' : '/4 months';
-    const durationDays = isMonthly ? 30 : 120;
-
-    const corePlanId = isMonthly ? 'core_monthly' : 'core_4_month';
-    const plusPlanId = isMonthly ? 'plus_monthly' : 'plus_4_month';
-    const elitePlanId = isMonthly ? 'elite_monthly' : 'elite_4_month';
-
-    const corePrice = isMonthly ? 49 : 149;
-    const plusPrice = isMonthly ? 99 : 299;
-    const elitePrice = isMonthly ? 149 : 499;
-
-    // User tier rank: Free (0), Core (1), Plus (2), Elite (3), Trial (3)
     const userTier = isSubscribed ? String(entitlements.tier || 'free').toLowerCase() : 'free';
     const activePlanId = isSubscribed ? String(entitlements.planId || '') : '';
-    const isTrialOnly = activePlanId.includes('trial');
+    const isTrialOnly = activePlanId.includes('trial') || userTier === 'trial';
 
-    let tierRank = 0;
-    if (userTier === 'core') tierRank = 1;
-    else if (userTier === 'plus') tierRank = 2;
-    else if (userTier === 'elite' || userTier === 'trial') tierRank = 3;
+    let userTierRank = 0;
+    if (userTier === 'core') userTierRank = 1;
+    else if (userTier === 'plus') userTierRank = 2;
+    else if (userTier === 'elite' && !isTrialOnly) userTierRank = 3;
+    else if (isTrialOnly) userTierRank = 1;
 
-    // Formatted dates for active subscription
-    const startStr = subscription && subscription.startedAt ? new Date(subscription.startedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A';
-    const expiryStr = entitlements && entitlements.expiresAt ? new Date(entitlements.expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A';
-    const daysRemaining = entitlements ? Math.max(0, entitlements.daysRemaining || 0) : 0;
-    const passNameDisplay = entitlements ? (entitlements.planName || 'ACTIVE PASS').toUpperCase() : 'NO ACTIVE PASS';
+    // 5. Dynamic Billing Cycles Detection from DB plans
+    const nonTrialPlans = Object.values(plans).filter(p => p.tier !== 'trial');
+    const availableCycles = [];
+    const seenCycles = new Set();
+    const standardCycleOrder = ['monthly', '4_months'];
 
+    standardCycleOrder.forEach(cycleId => {
+      if (nonTrialPlans.some(p => p.billingCycle === cycleId)) {
+        seenCycles.add(cycleId);
+        availableCycles.push(cycleId);
+      }
+    });
+    nonTrialPlans.forEach(p => {
+      if (p.billingCycle && !seenCycles.has(p.billingCycle)) {
+        seenCycles.add(p.billingCycle);
+        availableCycles.push(p.billingCycle);
+      }
+    });
+
+    if (!this.currentPassesCycle || !seenCycles.has(this.currentPassesCycle)) {
+      this.currentPassesCycle = availableCycles[0] || 'monthly';
+    }
+    const activeCycle = this.currentPassesCycle;
+
+    // 6. User Subscription State Banner HTML
     let currentPassBannerHtml = '';
     if (user) {
       if (isSubscribed) {
-        const isHighestTier = tierRank >= 3 && !isTrialOnly;
+        const isHighestTier = userTier === 'elite' && !isTrialOnly;
+        const startStr = subscription && subscription.startedAt ? new Date(subscription.startedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A';
+        const expiryStr = entitlements && entitlements.expiresAt ? new Date(entitlements.expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A';
+        const daysRemaining = entitlements ? Math.max(0, entitlements.daysRemaining || 0) : 0;
+        const passNameDisplay = entitlements ? (entitlements.planName || 'ACTIVE PASS').toUpperCase() : 'ACTIVE PASS';
+
         currentPassBannerHtml = `
           <div class="bg-gradient-to-br from-slate-900 via-indigo-950 to-purple-950 rounded-2xl p-5 sm:p-7 text-white shadow-xl border border-indigo-500/30 relative overflow-hidden">
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-5 relative z-10">
@@ -909,7 +981,7 @@ class SubscriptionManager {
               </div>
 
               <div class="flex flex-wrap items-center gap-3 self-start md:self-auto">
-                <button onclick="window.subscriptionManager.syncMySubscription(); window.subscriptionManager.renderPassesPage(); window.app.showToast('Subscription refreshed from database.', 'info');" class="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/20 transition-colors flex items-center gap-1.5 cursor-pointer">
+                <button onclick="window.subscriptionManager.renderPassesPage(true); window.app.showToast('Subscription refreshed from database.', 'info');" class="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/20 transition-colors flex items-center gap-1.5 cursor-pointer">
                   <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh Status
                 </button>
                 <button onclick="window.app.navigate('dashboard')" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer">
@@ -969,76 +1041,158 @@ class SubscriptionManager {
       `;
     }
 
-    // Determine card buttons and upgrade logic
-    // 1. Core Card
-    let coreBtnHtml = '';
-    let coreStatusBadge = '';
-    if (userTier === 'core') {
-      coreStatusBadge = '<span class="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-blue-100 text-blue-800 border border-blue-200">Your Current Pass</span>';
-      coreBtnHtml = `<button disabled class="w-full py-2.5 bg-slate-100 text-slate-400 font-bold text-xs rounded-xl border border-slate-200 cursor-not-allowed">Current Plan</button>`;
-    } else if (tierRank > 1 && !isTrialOnly) {
-      coreStatusBadge = '<span class="px-2.5 py-0.5 text-[10px] font-semibold rounded-full bg-slate-100 text-slate-600">Included in Your Plan</span>';
-      coreBtnHtml = `<button disabled class="w-full py-2.5 bg-slate-50 text-slate-400 font-semibold text-xs rounded-xl border border-slate-200 cursor-not-allowed">Included in Your Pass</button>`;
-    } else {
-      coreBtnHtml = `<button onclick="window.subscriptionManager.startCheckout('${corePlanId}')" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
-        <span>${user ? 'Buy Core Pass' : 'Get Core Pass'}</span>
-        <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
-      </button>`;
-    }
-
-    // 2. Plus Card
-    let plusBtnHtml = '';
-    let plusStatusBadge = '';
-    if (userTier === 'plus') {
-      plusStatusBadge = '<span class="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">Your Current Pass</span>';
-      plusBtnHtml = `<button disabled class="w-full py-2.5 bg-slate-100 text-slate-400 font-bold text-xs rounded-xl border border-slate-200 cursor-not-allowed">Current Plan</button>`;
-    } else if (tierRank >= 3 && !isTrialOnly) {
-      plusStatusBadge = '<span class="px-2.5 py-0.5 text-[10px] font-semibold rounded-full bg-slate-100 text-slate-600">Included in Your Plan</span>';
-      plusBtnHtml = `<button disabled class="w-full py-2.5 bg-slate-50 text-slate-400 font-semibold text-xs rounded-xl border border-slate-200 cursor-not-allowed">Included in Your Pass</button>`;
-    } else if (userTier === 'core') {
-      plusStatusBadge = '<span class="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">Recommended Upgrade</span>';
-      plusBtnHtml = `<button onclick="window.subscriptionManager.startCheckout('${plusPlanId}')" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
-        <i data-lucide="sparkles" class="w-3.5 h-3.5 text-indigo-200"></i>
-        <span>Upgrade to Plus</span>
-        <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
-      </button>`;
-    } else {
-      plusBtnHtml = `<button onclick="window.subscriptionManager.startCheckout('${plusPlanId}')" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
-        <span>${user ? 'Buy Plus Pass' : 'Get Plus Pass'}</span>
-        <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
-      </button>`;
-    }
-
-    // 3. Elite Card
-    let eliteBtnHtml = '';
-    let eliteStatusBadge = '';
+    // 7. Dynamic ₹9 Elite Trial Offer Banner
+    let trialBannerHtml = '';
+    const trialPlan = plans['elite_trial'] || Object.values(plans).find(p => p.tier === 'trial');
     const isFullElite = userTier === 'elite' && !isTrialOnly;
-    if (isFullElite) {
-      eliteStatusBadge = '<span class="px-2.5 py-0.5 text-[10px] font-extrabold rounded-full bg-purple-100 text-purple-800 border border-purple-200 flex items-center gap-1"><i data-lucide="crown" class="w-3 h-3 text-amber-500"></i> Highest Tier</span>';
-      eliteBtnHtml = `<div class="text-center space-y-1">
-        <button disabled class="w-full py-2.5 bg-purple-50 text-purple-800 font-extrabold text-xs rounded-xl border border-purple-200 cursor-default flex items-center justify-center gap-1.5">
-          <i data-lucide="check" class="w-4 h-4 text-emerald-600"></i> Current Plan Active
-        </button>
-        <span class="text-[11px] text-purple-700 font-bold block">You already have the highest tier.</span>
-      </div>`;
-    } else if (userTier === 'plus' || userTier === 'core') {
-      eliteStatusBadge = '<span class="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-purple-100 text-purple-800 border border-purple-200">VIP Top Tier</span>';
-      eliteBtnHtml = `<button onclick="window.subscriptionManager.startCheckout('${elitePlanId}')" class="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
-        <i data-lucide="crown" class="w-3.5 h-3.5 text-amber-300"></i>
-        <span>Upgrade to Elite</span>
-        <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
-      </button>`;
-    } else {
-      eliteBtnHtml = `<button onclick="window.subscriptionManager.startCheckout('${elitePlanId}')" class="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
-        <i data-lucide="crown" class="w-3.5 h-3.5 text-amber-300"></i>
-        <span>${user ? 'Buy Elite Pass' : 'Get Elite Pass'}</span>
-        <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
-      </button>`;
+    if (trialPlan && trialPlan.isActive !== false && !isFullElite) {
+      const trialFirstFeature = (trialPlan.features && trialPlan.features[0]) 
+        ? trialPlan.features[0] 
+        : `Experience all Elite Pass features for ${trialPlan.durationDays} full days: 12-hour copy checks, all premium MCQs, and full syllabus mock test papers for just ₹${trialPlan.price}!`;
+      
+      trialBannerHtml = `
+        <div class="rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 p-0.5 shadow-md">
+          <div class="bg-white rounded-[15px] p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-3.5">
+              <div class="w-12 h-12 rounded-xl bg-amber-100 border border-amber-200 flex items-center justify-center text-amber-700 flex-shrink-0">
+                <i data-lucide="zap" class="w-6 h-6"></i>
+              </div>
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded-md bg-rose-600 text-white">Special Trial Offer</span>
+                  <h4 class="text-base font-bold text-slate-900">${escapeHtml(trialPlan.name || '₹' + trialPlan.price + ' Elite ' + trialPlan.durationDays + '-Day Trial')}</h4>
+                </div>
+                <p class="text-xs text-slate-600 mt-1">
+                  ${escapeHtml(trialFirstFeature)}
+                </p>
+              </div>
+            </div>
+            <button 
+              onclick="window.subscriptionManager.startCheckout('${trialPlan.id}')" 
+              class="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-600 hover:to-rose-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-sm transition-all flex items-center gap-2 flex-shrink-0 cursor-pointer"
+            >
+              <span>Try Elite for ₹${trialPlan.price}</span>
+              <i data-lucide="arrow-right" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+      `;
     }
 
-    // ₹9 Trial banner visibility
-    const showTrialBanner = !isFullElite;
+    // 8. Find active plans for current billing cycle
+    const corePlan = Object.values(plans).find(p => p.tier === 'core' && p.billingCycle === activeCycle) 
+      || Object.values(plans).find(p => p.tier === 'core');
+    const plusPlan = Object.values(plans).find(p => p.tier === 'plus' && p.billingCycle === activeCycle) 
+      || Object.values(plans).find(p => p.tier === 'plus');
+    const elitePlan = Object.values(plans).find(p => p.tier === 'elite' && p.billingCycle === activeCycle) 
+      || Object.values(plans).find(p => p.tier === 'elite');
 
+    // Helper to generate dynamic CTA button and status badge
+    const renderCardAction = (plan, tierLevel) => {
+      if (!plan) return { badge: '', btn: '' };
+
+      if (plan.isActive === false) {
+        return {
+          badge: '<span class="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-slate-100 text-slate-500 border border-slate-200">Temporarily Unavailable</span>',
+          btn: `<button disabled class="w-full py-2.5 bg-slate-100 text-slate-400 font-bold text-xs rounded-xl border border-slate-200 cursor-not-allowed">Unavailable</button>`
+        };
+      }
+
+      if (!user) {
+        return {
+          badge: '',
+          btn: `
+            <button onclick="window.app.showAuthModal('login')" class="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
+              <span>Sign in to Buy</span>
+              <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+            </button>
+          `
+        };
+      }
+
+      const planTier = (plan.tier || '').toLowerCase();
+      const planNameCap = planTier.charAt(0).toUpperCase() + planTier.slice(1);
+
+      // Current Plan Active
+      if (userTier === planTier && !isTrialOnly) {
+        return {
+          badge: '<span class="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1"><i data-lucide="check" class="w-3 h-3 text-emerald-600"></i> Your Current Pass</span>',
+          btn: `<button disabled class="w-full py-2.5 bg-slate-100 text-slate-400 font-bold text-xs rounded-xl border border-slate-200 cursor-not-allowed">Current Plan Active</button>`
+        };
+      }
+
+      // Included in higher active plan
+      if (userTierRank > tierLevel && !isTrialOnly) {
+        return {
+          badge: '<span class="px-2.5 py-0.5 text-[10px] font-semibold rounded-full bg-slate-100 text-slate-600">Included in Your Plan</span>',
+          btn: `<button disabled class="w-full py-2.5 bg-slate-50 text-slate-400 font-semibold text-xs rounded-xl border border-slate-200 cursor-not-allowed">Included in Your Pass</button>`
+        };
+      }
+
+      // Upgrade from lower active tier
+      if (userTierRank < tierLevel && userTierRank > 0 && !isTrialOnly) {
+        const btnColors = planTier === 'elite' 
+          ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+          : 'bg-indigo-600 hover:bg-indigo-700 text-white';
+        return {
+          badge: '<span class="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1"><i data-lucide="arrow-up-circle" class="w-3 h-3 text-amber-600"></i> Upgrade Available</span>',
+          btn: `
+            <button onclick="window.subscriptionManager.startCheckout('${plan.id}')" class="w-full py-2.5 ${btnColors} font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
+              <span>Upgrade to ${planNameCap}</span>
+              <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+            </button>
+          `
+        };
+      }
+
+      // Free user or Trial user
+      const defaultBtnColor = planTier === 'elite' 
+        ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+        : (planTier === 'plus' ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white');
+      return {
+        badge: planTier === 'elite' ? '<span class="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded-full bg-purple-600 text-white">VIP Tier</span>' : (planTier === 'plus' ? '<span class="px-2 py-0.5 text-[10px] font-extrabold rounded-full bg-indigo-100 text-indigo-700">Most Popular</span>' : ''),
+        btn: `
+          <button onclick="window.subscriptionManager.startCheckout('${plan.id}')" class="w-full py-2.5 ${defaultBtnColor} font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
+            <span>Buy ${planNameCap} Pass</span>
+            <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+          </button>
+        `
+      };
+    };
+
+    const coreAction = renderCardAction(corePlan, 1);
+    const plusAction = renderCardAction(plusPlan, 2);
+    const eliteAction = renderCardAction(elitePlan, 3);
+
+    const getDurationText = (plan) => {
+      if (!plan) return '';
+      if (plan.billingCycle === 'monthly') return '/ month';
+      if (plan.billingCycle === '4_months') return '/ 4 months';
+      return `/ ${plan.durationDays} days`;
+    };
+
+    const renderFeaturesList = (plan) => {
+      if (!plan || !plan.features || !plan.features.length) {
+        return '<p class="text-xs text-slate-400 italic">No specific features listed for this pass.</p>';
+      }
+      return plan.features.map(feat => `
+        <div class="flex items-start gap-2">
+          <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5"></i>
+          <span class="text-xs text-slate-700 leading-snug">${escapeHtml(feat)}</span>
+        </div>
+      `).join('');
+    };
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // 9. Full Dynamic HTML Generation
     container.innerHTML = `
       <div class="space-y-6">
         <!-- Page Header -->
@@ -1053,219 +1207,120 @@ class SubscriptionManager {
             Get your descriptive mock answer copies checked under authoritative ICAI marking standards, unlock tier-protected MCQ questions, and earn instant bonus XP.
           </p>
 
-          <!-- Billing Cycle Switcher Tabs -->
+          <!-- Dynamic Billing Cycle Switcher Tabs -->
           <div class="inline-flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200 shadow-2xs mt-2">
-            <button 
-              type="button"
-              onclick="window.subscriptionManager.setPassesBillingCycle('monthly')" 
-              class="px-4 py-2 text-xs sm:text-sm font-bold rounded-lg transition-all cursor-pointer ${
-                isMonthly 
-                  ? 'bg-white text-slate-900 shadow-sm' 
-                  : 'text-slate-600 hover:text-slate-900'
-              }"
-            >
-              Monthly Pass (30 Days)
-            </button>
-            <button 
-              type="button"
-              onclick="window.subscriptionManager.setPassesBillingCycle('4_months')" 
-              class="px-4 py-2 text-xs sm:text-sm font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                !isMonthly 
-                  ? 'bg-white text-slate-900 shadow-sm' 
-                  : 'text-slate-600 hover:text-slate-900'
-              }"
-            >
-              <span>4-Month Exam Pass</span>
-              <span class="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full bg-rose-600 text-white">Save 25%</span>
-            </button>
+            ${availableCycles.map(cycleId => {
+              const isSelected = activeCycle === cycleId;
+              const label = cycleId === 'monthly' ? 'Monthly Pass (30 Days)' : (cycleId === '4_months' ? '4-Month Exam Pass' : `${cycleId} Pass`);
+              const badge = cycleId === '4_months' ? '<span class="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full bg-rose-600 text-white">Save 25%</span>' : '';
+              return `
+                <button 
+                  type="button"
+                  onclick="window.subscriptionManager.setPassesBillingCycle('${cycleId}')" 
+                  class="px-4 py-2 text-xs sm:text-sm font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                    isSelected 
+                      ? 'bg-white text-slate-900 shadow-sm' 
+                      : 'text-slate-600 hover:text-slate-900'
+                  }"
+                >
+                  <span>${label}</span>
+                  ${badge}
+                </button>
+              `;
+            }).join('')}
           </div>
         </div>
 
         <!-- 1. USER'S CURRENT SUBSCRIPTION STATUS -->
         ${currentPassBannerHtml}
 
-        <!-- 2. ₹9 ELITE 10-DAY TRIAL BANNER (If not already full Elite) -->
-        ${showTrialBanner ? `
-          <div class="rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 p-0.5 shadow-md">
-            <div class="bg-white rounded-[15px] p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div class="flex items-center gap-3.5">
-                <div class="w-12 h-12 rounded-xl bg-amber-100 border border-amber-200 flex items-center justify-center text-amber-700 flex-shrink-0">
-                  <i data-lucide="zap" class="w-6 h-6"></i>
-                </div>
-                <div>
-                  <div class="flex items-center gap-2">
-                    <span class="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded-md bg-rose-600 text-white">Special Trial Offer</span>
-                    <h4 class="text-base font-bold text-slate-900">₹9 Elite 10-Day Full Access Trial</h4>
-                  </div>
-                  <p class="text-xs text-slate-600 mt-1">
-                    Experience all Elite Pass features for 10 full days: 12-hour copy checks, all premium MCQs, and full syllabus mock test papers for just ₹9!
-                  </p>
-                </div>
-              </div>
-              <button 
-                onclick="window.subscriptionManager.startCheckout('elite_trial')" 
-                class="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-600 hover:to-rose-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-sm transition-all flex items-center gap-2 flex-shrink-0 cursor-pointer"
-              >
-                <span>Try Elite for ₹9</span>
-                <i data-lucide="arrow-right" class="w-4 h-4"></i>
-              </button>
-            </div>
-          </div>
-        ` : ''}
+        <!-- 2. ₹9 ELITE TRIAL BANNER (If active & not already full Elite) -->
+        ${trialBannerHtml}
 
-        <!-- 3. MAIN PASS CARDS GRID -->
+        <!-- 3. MAIN PASS CARDS GRID (Backend Authoritative) -->
         <div id="passes-grid-section" class="grid grid-cols-1 md:grid-cols-3 gap-5 lg:gap-6 pt-2">
           
           <!-- Card 1: Core Pass -->
-          <div class="bg-white rounded-2xl border ${userTier === 'core' ? 'border-2 border-blue-500 shadow-md ring-2 ring-blue-100' : 'border-slate-200 shadow-xs'} p-5 sm:p-6 flex flex-col justify-between transition-all hover:shadow-md">
+          <div class="bg-white rounded-2xl border ${userTier === 'core' && !isTrialOnly ? 'border-2 border-blue-500 shadow-md ring-2 ring-blue-100' : 'border-slate-200 shadow-xs'} p-5 sm:p-6 flex flex-col justify-between transition-all hover:shadow-md">
             <div class="space-y-4">
               <div class="flex items-center justify-between">
                 <span class="px-2.5 py-1 text-xs font-bold rounded-lg bg-blue-50 text-blue-800 border border-blue-200">
-                  Core Pass
+                  ${corePlan ? escapeHtml(corePlan.name) : 'Core Pass'}
                 </span>
-                ${coreStatusBadge}
+                ${coreAction.badge}
               </div>
 
               <div>
                 <div class="flex items-baseline gap-1">
-                  <span class="text-3xl font-black text-slate-900">₹${corePrice}</span>
-                  <span class="text-xs font-semibold text-slate-500">${durationLabel}</span>
+                  <span class="text-3xl font-black text-slate-900">₹${corePlan ? corePlan.price : 0}</span>
+                  <span class="text-xs font-semibold text-slate-500">${getDurationText(corePlan)}</span>
                 </div>
                 <p class="text-xs text-slate-500 mt-1">Foundation revision with certified copy grading</p>
               </div>
 
-              <div class="pt-3 border-t border-slate-100 space-y-2.5 text-xs text-slate-700">
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span><strong>+500 Instant Bonus XP</strong> points</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span>Copy checked within <strong>48 hours</strong></span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span>Access to <strong>Core Tier MCQs</strong></span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span>Daily 1 live MCQ session per subject</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span>Official Core Pass student badge</span>
-                </div>
+              <div class="pt-3 border-t border-slate-100 space-y-2.5">
+                ${renderFeaturesList(corePlan)}
               </div>
             </div>
 
             <div class="pt-6 border-t border-slate-100 mt-6">
-              ${coreBtnHtml}
+              ${coreAction.btn}
             </div>
           </div>
 
           <!-- Card 2: Plus Pass -->
-          <div class="bg-white rounded-2xl border ${userTier === 'plus' ? 'border-2 border-indigo-500 shadow-md ring-2 ring-indigo-100' : 'border-slate-200 shadow-xs'} p-5 sm:p-6 flex flex-col justify-between transition-all hover:shadow-md relative">
+          <div class="bg-white rounded-2xl border ${userTier === 'plus' && !isTrialOnly ? 'border-2 border-indigo-500 shadow-md ring-2 ring-indigo-100' : 'border-slate-200 shadow-xs'} p-5 sm:p-6 flex flex-col justify-between transition-all hover:shadow-md relative">
             <div class="space-y-4">
               <div class="flex items-center justify-between">
                 <span class="px-2.5 py-1 text-xs font-bold rounded-lg bg-indigo-50 text-indigo-800 border border-indigo-200">
-                  Plus Pass
+                  ${plusPlan ? escapeHtml(plusPlan.name) : 'Plus Pass'}
                 </span>
-                ${plusStatusBadge || '<span class="px-2 py-0.5 text-[10px] font-extrabold rounded-full bg-indigo-100 text-indigo-700">Most Popular</span>'}
+                ${plusAction.badge}
               </div>
 
               <div>
                 <div class="flex items-baseline gap-1">
-                  <span class="text-3xl font-black text-slate-900">₹${plusPrice}</span>
-                  <span class="text-xs font-semibold text-slate-500">${durationLabel}</span>
+                  <span class="text-3xl font-black text-slate-900">₹${plusPlan ? plusPlan.price : 0}</span>
+                  <span class="text-xs font-semibold text-slate-500">${getDurationText(plusPlan)}</span>
                 </div>
                 <p class="text-xs text-slate-500 mt-1">Accelerated preparation with priority 24h evaluation</p>
               </div>
 
-              <div class="pt-3 border-t border-slate-100 space-y-2.5 text-xs text-slate-700">
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span><strong>+1,000 Instant Bonus XP</strong> points</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span>Copy checked within <strong>24 hours</strong> (Priority)</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span>Access to <strong>Core + Plus Tier MCQs</strong></span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span>Daily 2 live MCQ sessions per subject</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span>Monthly Full Syllabus Exam simulation</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span>Official Plus Pass student badge</span>
-                </div>
+              <div class="pt-3 border-t border-slate-100 space-y-2.5">
+                ${renderFeaturesList(plusPlan)}
               </div>
             </div>
 
             <div class="pt-6 border-t border-slate-100 mt-6">
-              ${plusBtnHtml}
+              ${plusAction.btn}
             </div>
           </div>
 
           <!-- Card 3: Elite Pass -->
-          <div class="bg-gradient-to-b from-purple-50/40 via-white to-white rounded-2xl border ${isFullElite ? 'border-2 border-purple-500 shadow-md ring-2 ring-purple-100' : 'border-purple-200 shadow-xs'} p-5 sm:p-6 flex flex-col justify-between transition-all hover:shadow-md relative">
+          <div class="bg-gradient-to-b from-purple-50/40 via-white to-white rounded-2xl border ${userTier === 'elite' && !isTrialOnly ? 'border-2 border-purple-500 shadow-md ring-2 ring-purple-100' : 'border-purple-200 shadow-xs'} p-5 sm:p-6 flex flex-col justify-between transition-all hover:shadow-md relative">
             <div class="space-y-4">
               <div class="flex items-center justify-between">
                 <span class="px-2.5 py-1 text-xs font-bold rounded-lg bg-purple-100 text-purple-900 border border-purple-200 flex items-center gap-1">
-                  <i data-lucide="crown" class="w-3.5 h-3.5 text-amber-500"></i> Elite Pass
+                  <i data-lucide="crown" class="w-3.5 h-3.5 text-amber-500"></i> ${elitePlan ? escapeHtml(elitePlan.name) : 'Elite Pass'}
                 </span>
-                ${eliteStatusBadge || '<span class="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded-full bg-purple-600 text-white">VIP Tier</span>'}
+                ${eliteAction.badge}
               </div>
 
               <div>
                 <div class="flex items-baseline gap-1">
-                  <span class="text-3xl font-black text-slate-900">₹${elitePrice}</span>
-                  <span class="text-xs font-semibold text-slate-500">${durationLabel}</span>
+                  <span class="text-3xl font-black text-slate-900">₹${elitePlan ? elitePlan.price : 0}</span>
+                  <span class="text-xs font-semibold text-slate-500">${getDurationText(elitePlan)}</span>
                 </div>
                 <p class="text-xs text-slate-500 mt-1">Full access to all test papers, MCQs & 12h SLA</p>
               </div>
 
-              <div class="pt-3 border-t border-slate-100 space-y-2.5 text-xs text-slate-700">
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span><strong>+1,500 Instant Bonus XP</strong> points</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span>Copy checked within <strong>12 hours</strong> (Ultra Priority)</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span>Access to <strong>All MCQ Questions (Free, Core, Plus, Elite)</strong></span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span>Access to <strong>All Test Papers & Model Answers</strong></span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span>Weekly Full Pledge Exam across all subjects</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span>Direct Faculty Review & Mentorship</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <i data-lucide="check" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i>
-                  <span>Official Elite Pass VIP badge & styling</span>
-                </div>
+              <div class="pt-3 border-t border-slate-100 space-y-2.5">
+                ${renderFeaturesList(elitePlan)}
               </div>
             </div>
 
             <div class="pt-6 border-t border-slate-100 mt-6">
-              ${eliteBtnHtml}
+              ${eliteAction.btn}
             </div>
           </div>
 

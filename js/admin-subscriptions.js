@@ -1533,9 +1533,14 @@
               <div class="bg-white border ${isTrial ? 'border-amber-300 ring-1 ring-amber-200' : (isElite ? 'border-purple-300 ring-1 ring-purple-200' : (isPlus ? 'border-indigo-300' : 'border-slate-200'))} rounded-2xl p-5 shadow-xs flex flex-col justify-between space-y-4">
                 <div>
                   <div class="flex items-center justify-between gap-2 mb-2">
-                    <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${isTrial ? 'bg-amber-100 text-amber-800' : (isElite ? 'bg-purple-100 text-purple-800' : (isPlus ? 'bg-indigo-100 text-indigo-800' : 'bg-blue-100 text-blue-800'))}">
-                      ${p.tier.toUpperCase()} TIER
-                    </span>
+                    <div class="flex items-center gap-1.5">
+                      <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${isTrial ? 'bg-amber-100 text-amber-800' : (isElite ? 'bg-purple-100 text-purple-800' : (isPlus ? 'bg-indigo-100 text-indigo-800' : 'bg-blue-100 text-blue-800'))}">
+                        ${p.tier.toUpperCase()} TIER
+                      </span>
+                      ${p.isActive !== false 
+                        ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">Active</span>' 
+                        : '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">Inactive</span>'}
+                    </div>
                     <span class="text-xs font-mono font-bold text-slate-400">ID: ${p.id}</span>
                   </div>
 
@@ -1560,8 +1565,8 @@
                       <strong class="text-amber-700 font-bold">+${p.instantPoints || 0} XP</strong>
                     </div>
                     <div class="flex items-center justify-between">
-                      <span class="text-slate-600 flex items-center gap-1.5"><i data-lucide="award" class="w-3.5 h-3.5 text-purple-600"></i> Weekly Mock Exams:</span>
-                      <strong class="text-slate-900">${p.permissions && p.permissions.weekly_full_exam_access ? 'Included' : 'Monthly Only'}</strong>
+                      <span class="text-slate-600 flex items-center gap-1.5"><i data-lucide="list-checks" class="w-3.5 h-3.5 text-purple-600"></i> Features Listed:</span>
+                      <strong class="text-slate-900">${(p.features || []).length} Features</strong>
                     </div>
                   </div>
                 </div>
@@ -1605,6 +1610,30 @@
         </div>
 
         <form onsubmit="window.adminDashboard.submitSavePlan(event, '${planId}')" class="space-y-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Plan Display Name <span class="text-rose-600">*</span></label>
+              <input 
+                type="text" 
+                id="admin-plan-name" 
+                required 
+                value="${(plan.name || '').replace(/"/g, '&quot;')}" 
+                class="w-full px-3.5 py-2.5 text-xs font-bold text-slate-900 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white"
+              />
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Status <span class="text-rose-600">*</span></label>
+              <select 
+                id="admin-plan-status" 
+                class="w-full px-3.5 py-2.5 text-xs font-bold text-slate-900 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white"
+              >
+                <option value="true" ${plan.isActive !== false ? 'selected' : ''}>Active (Available for Purchase)</option>
+                <option value="false" ${plan.isActive === false ? 'selected' : ''}>Inactive (Hidden / Unavailable)</option>
+              </select>
+            </div>
+          </div>
+
           <div class="grid grid-cols-2 gap-4">
             <div>
               <label class="block text-xs font-bold text-slate-700 mb-1">Price (₹) <span class="text-rose-600">*</span></label>
@@ -1668,6 +1697,19 @@
             />
           </div>
 
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-bold text-slate-700">Plan Features & Deliverables (One per line)</label>
+              <span class="text-[10px] text-slate-400 font-medium">Each line appears as a checkmark bullet on #passes</span>
+            </div>
+            <textarea 
+              id="admin-plan-features" 
+              rows="6" 
+              class="w-full px-3.5 py-2.5 text-xs font-medium text-slate-800 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white leading-relaxed resize-y"
+              placeholder="e.g.&#10;+500 instant bonus XP points&#10;Copy checked within 48 hours&#10;Access to premium MCQ questions"
+            >${(plan.features || []).join('\n')}</textarea>
+          </div>
+
           <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
             <button 
               type="button" 
@@ -1693,6 +1735,14 @@
 
   AdminDashboard.prototype.submitSavePlan = async function(event, planId) {
     event.preventDefault();
+    const name = document.getElementById('admin-plan-name').value.trim();
+    const isActive = document.getElementById('admin-plan-status').value === 'true';
+    const rawFeatures = document.getElementById('admin-plan-features').value;
+    const features = rawFeatures
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
+
     const price = parseFloat(document.getElementById('admin-plan-price').value);
     const durationDays = parseInt(document.getElementById('admin-plan-duration').value, 10);
     const slaHours = parseInt(document.getElementById('admin-plan-sla').value, 10);
@@ -1700,6 +1750,9 @@
     const instantPoints = parseInt(document.getElementById('admin-plan-points').value, 10);
 
     const planData = {
+      name: name,
+      isActive: isActive,
+      features: features,
       price: price,
       durationDays: durationDays,
       copyCheckSlaHours: slaHours,
@@ -1719,7 +1772,8 @@
         body: JSON.stringify({
           action: 'update_plan',
           planId: planId,
-          planData: planData
+          planData: planData,
+          updates: planData
         })
       });
 
@@ -1731,6 +1785,17 @@
 
       window.app.showToast('Plan terms updated successfully!', 'success');
       window.app.closeModal('admin-generic-modal');
+      
+      // Update store and refresh in memory
+      if (window.store) {
+        const storedPlans = window.store.getSubscriptionPlans() || {};
+        storedPlans[planId] = { ...(storedPlans[planId] || {}), ...planData };
+        window.store.saveSubscriptionPlans(storedPlans);
+      }
+      if (window.subscriptionManager && typeof window.subscriptionManager.fetchPlans === 'function') {
+        window.subscriptionManager.fetchPlans(true);
+      }
+      
       this.renderPlansConfig();
     } catch (err) {
       console.error('[AdminSubscriptions] Save plan error:', err);

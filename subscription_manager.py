@@ -17,6 +17,7 @@ import os
 import re
 import time
 import uuid
+import copy
 from datetime import datetime, timezone, timedelta
 
 # Authorized Plan Definitions with Immutable IDs
@@ -308,11 +309,15 @@ def get_payment_channels(data):
 
 def get_all_plans(data):
     """Retrieve all plans from backend data, falling back to authoritative defaults."""
-    stored = data.get('subscription_plans', {})
-    merged = dict(DEFAULT_PLANS)
+    stored = data.get('subscription_plans')
+    if not isinstance(stored, dict) or not stored:
+        data['subscription_plans'] = copy.deepcopy(DEFAULT_PLANS)
+        return data['subscription_plans']
+    merged = copy.deepcopy(DEFAULT_PLANS)
     for k, v in stored.items():
         if isinstance(v, dict):
-            merged[k] = v
+            merged[k] = copy.deepcopy(v)
+    data['subscription_plans'] = merged
     return merged
 
 def get_plan_by_id(plan_id, data):
@@ -1038,18 +1043,20 @@ def manage_plans_config(admin_user, plan_id, updates, data, sync_fn=None):
     Updates prices, features, SLA, duration, or active status.
     Existing purchased subscriptions retain their original historical terms.
     """
-    plans = data.setdefault('subscription_plans', dict(DEFAULT_PLANS))
+    if 'subscription_plans' not in data or not isinstance(data['subscription_plans'], dict):
+        data['subscription_plans'] = copy.deepcopy(DEFAULT_PLANS)
+    plans = data['subscription_plans']
     target = plans.get(plan_id)
     if not target:
-        target = DEFAULT_PLANS.get(plan_id)
-        if target:
-            plans[plan_id] = dict(target)
+        default_p = DEFAULT_PLANS.get(plan_id)
+        if default_p:
+            plans[plan_id] = copy.deepcopy(default_p)
             target = plans[plan_id]
 
     if not target:
         return False, "Plan ID not found."
 
-    old_copy = dict(target)
+    old_copy = copy.deepcopy(target)
 
     if 'price' in updates:
         try: target['price'] = max(0, int(updates['price']))
@@ -1063,11 +1070,17 @@ def manage_plans_config(admin_user, plan_id, updates, data, sync_fn=None):
     if 'name' in updates and str(updates['name']).strip():
         target['name'] = str(updates['name']).strip()
     if 'features' in updates and isinstance(updates['features'], list):
-        target['features'] = updates['features']
+        target['features'] = [str(f).strip() for f in updates['features'] if str(f).strip()]
     if 'isActive' in updates:
         target['isActive'] = bool(updates['isActive'])
     if 'copyCheckSlaHours' in updates:
         try: target['copyCheckSlaHours'] = int(updates['copyCheckSlaHours'])
+        except Exception: pass
+    if 'liveMcqDailyLimit' in updates:
+        try:
+            target['liveMcqDailyLimit'] = max(0, int(updates['liveMcqDailyLimit']))
+            if 'permissions' in target and isinstance(target['permissions'], dict):
+                target['permissions']['live_mcq_daily_limit'] = target['liveMcqDailyLimit']
         except Exception: pass
 
     target['updatedAt'] = datetime.now(timezone.utc).isoformat()

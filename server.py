@@ -1302,6 +1302,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         if path == '/api/subscriptions/plans':
             data = load_backend_data()
             plans = subscription_manager.get_all_plans(data)
+            if 'subscription_plans' not in data or not data['subscription_plans']:
+                data['subscription_plans'] = plans
+                save_backend_data(data)
             self.send_json(200, {'success': True, 'plans': plans})
             return
 
@@ -2080,7 +2083,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(content_length) if content_length > 0 else b'{}'
                 req_data = json.loads(body.decode('utf-8')) if body else {}
                 plan_id = req_data.get('planId')
-                updates = req_data.get('updates', {})
+                updates = req_data.get('updates') or req_data.get('planData') or {}
                 data = load_backend_data()
                 success, res = subscription_manager.manage_plans_config(admin_u, plan_id, updates, data, sync_to_firebase)
                 if not success:
