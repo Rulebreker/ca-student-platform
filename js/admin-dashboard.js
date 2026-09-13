@@ -853,8 +853,8 @@ class AdminDashboard {
             }
           }
 
-          authoritativeUser = data.user;
-          if (data.token) authoritativeUser.token = data.token;
+          authoritativeUser = (data && data.user) ? data.user : null;
+          if (data && data.token && authoritativeUser) authoritativeUser.token = data.token;
         } catch (apiErr) {
           console.warn('[AdminDashboard] Server provisioning error, proceeding with local fallback:', apiErr);
         }
