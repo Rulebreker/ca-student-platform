@@ -82,6 +82,7 @@ class App {
     let hash = rawHash;
     if (!hash || hash === '/' || hash === 'home') hash = 'home';
     if (hash === 'test' || hash === 'tests' || hash === '/test' || hash === '/tests') hash = 'tests';
+    if (hash === 'passes' || hash === 'pricing' || hash === '/passes' || hash === '/pricing') hash = 'passes';
 
     // 403 Forbidden check for lectures: restricted for students and teachers (only admin allowed)
     if (hash === 'lectures') {
@@ -220,6 +221,7 @@ class App {
       'view-leaderboard',
       'view-admin',
       'view-teacher',
+      'view-passes',
       'view-403'
     ];
 
@@ -237,12 +239,26 @@ class App {
     // Update active nav styling
     document.querySelectorAll('[data-nav]').forEach(link => {
       const linkTarget = link.getAttribute('data-nav');
-      if (linkTarget === viewName || (linkTarget === 'tests' && (viewName === 'test' || viewName === 'tests'))) {
-        link.classList.add('text-blue-600', 'bg-blue-50', 'font-bold');
-        link.classList.remove('text-slate-600');
+      const isMatch = linkTarget === viewName || 
+                      (linkTarget === 'tests' && (viewName === 'test' || viewName === 'tests')) ||
+                      (linkTarget === 'passes' && (viewName === 'passes' || viewName === 'pricing'));
+      
+      if (isMatch) {
+        if (linkTarget === 'passes') {
+          link.classList.add('text-amber-900', 'bg-amber-100', 'font-bold');
+          link.classList.remove('text-slate-600', 'text-amber-800');
+        } else {
+          link.classList.add('text-blue-600', 'bg-blue-50', 'font-bold');
+          link.classList.remove('text-slate-600');
+        }
       } else {
-        link.classList.remove('text-blue-600', 'bg-blue-50', 'font-bold');
-        link.classList.add('text-slate-600');
+        if (linkTarget === 'passes') {
+          link.classList.remove('text-amber-900', 'bg-amber-100');
+          link.classList.add('text-amber-800');
+        } else {
+          link.classList.remove('text-blue-600', 'bg-blue-50', 'font-bold');
+          link.classList.add('text-slate-600');
+        }
       }
     });
 
@@ -257,6 +273,10 @@ class App {
       window.studentDashboard.render();
     } else if (viewName === 'profile') {
       this.renderProfilePage();
+    } else if (viewName === 'passes') {
+      if (window.subscriptionManager && typeof window.subscriptionManager.renderPassesPage === 'function') {
+        window.subscriptionManager.renderPassesPage();
+      }
     } else if (viewName === 'lectures') {
       window.lecturePlayer.renderCatalog();
     } else if (viewName === 'tests') {

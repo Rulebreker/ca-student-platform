@@ -68,6 +68,8 @@ class AssignmentPortal {
                 answerPdfName: bp.answerPdfName || null,
                 answerPdfId: bp.answerPdfId || null,
                 answerPdfData: bp.answerPdfData || null,
+                requiredTier: bp.requiredTier || 'free',
+                isTierLocked: !!bp.isTierLocked,
                 scheduledPublishTime: bp.scheduledPublishTime || null,
                 liveStartTime: bp.liveStartTime || null,
                 liveEndTime: bp.liveEndTime || null,
@@ -80,7 +82,7 @@ class AssignmentPortal {
             } else {
               // Existing paper — update metadata (title, status, PDF info)
               const existing = localAssignments[existIdx];
-              const updateFields = ['title', 'subject', 'subjectId', 'topic', 'maximumMarks', 'durationMinutes', 'description', 'status', 'questionPdfName', 'questionPdfId', 'answerPdfName', 'answerPdfId'];
+              const updateFields = ['title', 'subject', 'subjectId', 'topic', 'maximumMarks', 'durationMinutes', 'description', 'status', 'questionPdfName', 'questionPdfId', 'answerPdfName', 'answerPdfId', 'requiredTier', 'isTierLocked'];
               updateFields.forEach(f => {
                 if (bp[f] !== undefined && bp[f] !== null && existing[f] !== bp[f]) {
                   existing[f] = bp[f];
@@ -216,6 +218,16 @@ class AssignmentPortal {
         }
       }
 
+      // Tier Access Verification
+      const curUser = window.auth ? window.auth.getCurrentUser() : null;
+      const curEntitlements = window.store && curUser ? window.store.getUserEntitlements(curUser.id) : null;
+      const curUserTier = curEntitlements ? curEntitlements.tier.toLowerCase() : 'free';
+      const tierLevels = { free: 0, core: 1, plus: 2, elite: 3, trial: 3, admin: 99, teacher: 99 };
+      const curUserLevel = curUser && (curUser.role === 'admin' || curUser.role === 'teacher') ? 99 : (tierLevels[curUserTier] ?? 0);
+      const reqTier = (asg.requiredTier || 'free').toLowerCase();
+      const reqLevel = tierLevels[reqTier] ?? 0;
+      const isTierLocked = asg.isTierLocked || (curUserLevel < reqLevel);
+
       return `
         <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-xs hover:shadow-md transition-all flex flex-col h-full group box-border">
           <!-- 1. Top Badges/Status (Exact h-8 flex-shrink-0) -->
@@ -224,9 +236,18 @@ class AssignmentPortal {
               <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-100 truncate" title="${subject.name}">
                 ${subject.name}
               </span>
-              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
                 ${examLevel}
               </span>
+              ${reqTier !== 'free' ? `
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
+                  reqTier === 'core' ? 'bg-blue-100 text-blue-800 border-blue-200' :
+                  reqTier === 'plus' ? 'bg-indigo-100 text-indigo-800 border-indigo-200' :
+                  'bg-purple-100 text-purple-800 border-purple-200'
+                } flex-shrink-0">
+                  ${reqTier} Pass
+                </span>
+              ` : ''}
             </div>
             <div class="flex items-center gap-1.5 justify-end flex-shrink-0">
               <button 
@@ -264,24 +285,35 @@ class AssignmentPortal {
           <!-- 5. Question Paper (PDF) Section (Exact h-16 flex-shrink-0 mb-4) -->
           <div class="mb-4 bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex items-center justify-between h-16 flex-shrink-0 box-border">
             <div class="flex items-center gap-2 overflow-hidden mr-2">
-              <div class="w-8 h-8 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center font-bold flex-shrink-0">
-                <i data-lucide="file-text" class="w-4 h-4"></i>
+              <div class="w-8 h-8 rounded-lg ${isTierLocked ? 'bg-indigo-100 text-indigo-600' : 'bg-rose-100 text-rose-600'} flex items-center justify-center font-bold flex-shrink-0">
+                <i data-lucide="${isTierLocked ? 'lock' : 'file-text'}" class="w-4 h-4"></i>
               </div>
               <div class="truncate">
                 <span class="text-xs font-bold text-slate-800 block leading-tight">Question Paper (PDF)</span>
                 <span class="text-[10px] text-slate-500 font-mono truncate block" title="${asg.questionPdfName || 'Official_QP.pdf'}">
-                  ${asg.questionPdfName || 'Official_QP.pdf'}
+                  ${isTierLocked ? `${reqTier.toUpperCase()} Pass Required` : (asg.questionPdfName || 'Official_QP.pdf')}
                 </span>
               </div>
             </div>
-            <button 
-              type="button"
-              onclick="window.secureBackend.downloadProtectedFile('${asg.questionPdfId || 'qp.pdf'}', '${asg.id}', 'question', '${asg.questionPdfName || 'QuestionPaper.pdf'}')"
-              class="flex-shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg ${evalStatus.canDownloadQP ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer' : 'bg-slate-200 text-slate-400 cursor-not-allowed'} transition-colors flex items-center gap-1"
-              ${!evalStatus.canDownloadQP ? 'title="Locked until published/live"' : ''}
-            >
-              <i data-lucide="download" class="w-3.5 h-3.5"></i> Download PDF
-            </button>
+            ${isTierLocked ? `
+              <button 
+                type="button"
+                onclick="window.app.navigate('passes')"
+                class="flex-shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-xs transition-colors flex items-center gap-1 cursor-pointer"
+                title="Requires ${reqTier.toUpperCase()} Pass to unlock and download"
+              >
+                <i data-lucide="lock" class="w-3.5 h-3.5"></i> ${reqTier.toUpperCase()} Pass
+              </button>
+            ` : `
+              <button 
+                type="button"
+                onclick="window.secureBackend.downloadProtectedFile('${asg.questionPdfId || 'qp.pdf'}', '${asg.id}', 'question', '${asg.questionPdfName || 'QuestionPaper.pdf'}')"
+                class="flex-shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg ${evalStatus.canDownloadQP ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer' : 'bg-slate-200 text-slate-400 cursor-not-allowed'} transition-colors flex items-center gap-1"
+                ${!evalStatus.canDownloadQP ? 'title="Locked until published/live"' : ''}
+              >
+                <i data-lucide="download" class="w-3.5 h-3.5"></i> Download PDF
+              </button>
+            `}
           </div>
 
           <!-- 6. Metadata & 7. Bottom Action Button (Exact horizontal and vertical alignment) -->
@@ -304,6 +336,14 @@ class AssignmentPortal {
                 class="w-full h-10 px-4 text-xs font-bold rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors flex items-center justify-center gap-1.5 cursor-pointer box-border"
               >
                 <i data-lucide="check-circle" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i> <span class="truncate">Answer Sheet Submitted • View Details</span>
+              </button>
+            ` : isTierLocked ? `
+              <button 
+                type="button"
+                onclick="window.app.navigate('passes')"
+                class="w-full h-10 px-4 text-xs font-bold rounded-lg bg-gradient-to-r from-indigo-50 to-purple-50 hover:from-indigo-100 hover:to-purple-100 text-indigo-900 border border-indigo-200 transition-colors flex items-center justify-center gap-1.5 cursor-pointer box-border"
+              >
+                <i data-lucide="lock" class="w-4 h-4 text-indigo-600 flex-shrink-0"></i> <span class="truncate">Requires ${reqTier.toUpperCase()} Pass → Upgrade</span>
               </button>
             ` : evalStatus.canAttempt ? `
               <button 
@@ -769,7 +809,16 @@ class AssignmentPortal {
 
     const existingSubmission = window.store.getSubmissionsByUser(user.id).find(s => s.assignmentId === asg.id);
 
-    if (!existingSubmission && !evalStatus.canAttempt && user.role === 'student') {
+    // Tier Access Check
+    const curEntitlements = window.store && user ? window.store.getUserEntitlements(user.id) : null;
+    const curUserTier = curEntitlements ? curEntitlements.tier.toLowerCase() : 'free';
+    const tierLevels = { free: 0, core: 1, plus: 2, elite: 3, trial: 3, admin: 99, teacher: 99 };
+    const curUserLevel = user && (user.role === 'admin' || user.role === 'teacher') ? 99 : (tierLevels[curUserTier] ?? 0);
+    const paperReqTier = (asg.requiredTier || 'free').toLowerCase();
+    const paperReqLevel = tierLevels[paperReqTier] ?? 0;
+    const isModalPaperLocked = asg.isTierLocked || (curUserLevel < paperReqLevel);
+
+    if (!existingSubmission && !isModalPaperLocked && !evalStatus.canAttempt && user.role === 'student') {
       window.app.showToast(`Access Denied: ${evalStatus.badgeText}. Test cannot be attempted outside the active window.`, 'error');
       return;
     }
@@ -788,6 +837,15 @@ class AssignmentPortal {
               </span>
               <span class="text-xs font-semibold text-slate-500">• Max Marks: ${asg.maximumMarks}</span>
               <span class="text-xs font-semibold text-slate-500">• Duration: ${asg.durationMinutes || 180} Mins</span>
+              ${paperReqTier !== 'free' ? `
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase ${
+                  paperReqTier === 'core' ? 'bg-blue-100 text-blue-800 border border-blue-200' :
+                  paperReqTier === 'plus' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' :
+                  'bg-purple-100 text-purple-800 border border-purple-200'
+                }">
+                  ${paperReqTier} Pass Required
+                </span>
+              ` : ''}
             </div>
             <h3 class="text-base sm:text-lg font-bold text-slate-900">${asg.title}</h3>
             <span class="text-xs text-slate-500 font-medium">Topic: ${asg.topic}</span>
@@ -798,24 +856,45 @@ class AssignmentPortal {
         </div>
 
         <!-- Official Question Paper Download Box -->
-        <div class="bg-rose-50 border border-rose-200 rounded-xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center font-bold flex-shrink-0">
-              <i data-lucide="file-text" class="w-6 h-6"></i>
+        ${isModalPaperLocked ? `
+          <div class="bg-indigo-50/70 border border-indigo-200 rounded-xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold flex-shrink-0">
+                <i data-lucide="lock" class="w-6 h-6"></i>
+              </div>
+              <div>
+                <span class="text-xs font-bold text-indigo-950 block">${paperReqTier.toUpperCase()} PASS REQUIRED</span>
+                <span class="text-[11px] text-slate-600">Question Paper PDF is locked for your current membership pass.</span>
+              </div>
             </div>
-            <div>
-              <span class="text-xs font-bold text-rose-900 block">Official Test Question Paper (PDF)</span>
-              <span class="text-[11px] text-slate-500 font-mono">${asg.questionPdfName || 'QuestionPaper.pdf'}</span>
-            </div>
+            <button 
+              type="button"
+              onclick="window.app.closeModal('assignment-modal'); window.app.navigate('passes');"
+              class="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm inline-flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <i data-lucide="sparkles" class="w-4 h-4"></i> Upgrade to ${paperReqTier.toUpperCase()} Pass
+            </button>
           </div>
-          <button 
-            type="button"
-            onclick="window.secureBackend.downloadProtectedFile('${asg.questionPdfId || 'qp.pdf'}', '${asg.id}', 'question', '${asg.questionPdfName || 'QuestionPaper.pdf'}')"
-            class="w-full sm:w-auto px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg shadow-sm transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer"
-          >
-            <i data-lucide="download" class="w-4 h-4"></i> Download Question Paper (PDF)
-          </button>
-        </div>
+        ` : `
+          <div class="bg-rose-50 border border-rose-200 rounded-xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center font-bold flex-shrink-0">
+                <i data-lucide="file-text" class="w-6 h-6"></i>
+              </div>
+              <div>
+                <span class="text-xs font-bold text-rose-900 block">Official Test Question Paper (PDF)</span>
+                <span class="text-[11px] text-slate-500 font-mono">${asg.questionPdfName || 'QuestionPaper.pdf'}</span>
+              </div>
+            </div>
+            <button 
+              type="button"
+              onclick="window.secureBackend.downloadProtectedFile('${asg.questionPdfId || 'qp.pdf'}', '${asg.id}', 'question', '${asg.questionPdfName || 'QuestionPaper.pdf'}')"
+              class="w-full sm:w-auto px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg shadow-sm transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <i data-lucide="download" class="w-4 h-4"></i> Download Question Paper (PDF)
+            </button>
+          </div>
+        `}
 
         <!-- Problem Statement & Instructions -->
         <div class="bg-slate-50 border border-slate-200 rounded-xl p-5 mb-6 text-xs leading-relaxed text-slate-800 space-y-3">
@@ -863,7 +942,25 @@ class AssignmentPortal {
           </div>
         ` : ''}
 
-        ${existingSubmission ? `
+        ${isModalPaperLocked ? `
+          <!-- LOCKED SUBMISSION STATE -->
+          <div class="border-t border-slate-200 pt-6 text-center py-6">
+            <div class="w-12 h-12 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-600 mx-auto flex items-center justify-center mb-3">
+              <i data-lucide="lock" class="w-6 h-6"></i>
+            </div>
+            <h4 class="text-sm font-bold text-slate-900">Submission Locked</h4>
+            <p class="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
+              To download this question paper and submit your handwritten solution for faculty evaluation, an active ${paperReqTier.toUpperCase()} Pass is required.
+            </p>
+            <button 
+              type="button"
+              onclick="window.app.closeModal('assignment-modal'); window.app.navigate('passes');"
+              class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm cursor-pointer inline-flex items-center gap-1.5"
+            >
+              <i data-lucide="sparkles" class="w-4 h-4"></i> View Passes & Upgrade →
+            </button>
+          </div>
+        ` : existingSubmission ? `
           <!-- ALREADY SUBMITTED STATE -->
           <div class="border-t border-slate-200 pt-6">
             <div class="bg-slate-50 border border-slate-200 rounded-xl p-5 mb-5">
@@ -1111,6 +1208,18 @@ class AssignmentPortal {
     if (!evalStatus.canAttempt && user.role === 'student') {
       window.app.showToast(`Submission Blocked: ${evalStatus.badgeText}. Test cannot be submitted outside the active window.`, 'error');
       return;
+    }
+
+    // Security check 2b: Required Subscription Tier
+    const reqTier = (asg.requiredTier || 'free').toLowerCase();
+    if (reqTier !== 'free' && user.role === 'student') {
+      const entitlements = window.store ? window.store.getUserEntitlements(user.id) : null;
+      const userTier = entitlements ? entitlements.tier.toLowerCase() : 'free';
+      const tierLevels = { free: 0, core: 1, plus: 2, elite: 3, trial: 3, admin: 99, teacher: 99 };
+      if ((tierLevels[userTier] ?? 0) < (tierLevels[reqTier] ?? 0)) {
+        window.app.showToast(`Submission Blocked: This test paper requires an active ${reqTier.toUpperCase()} Pass or higher.`, 'error');
+        return;
+      }
     }
 
     // Security check 3: STRICT ONE-TIME SUBMISSION ENFORCEMENT (NO RE-UPLOAD)

@@ -744,47 +744,82 @@ def sync_historical_xp(d):
     d['_xp_historical_synced'] = True
     save_backend_data(d)
 
+TIER_LEVELS = {
+    'free': 0,
+    'core': 1,
+    'plus': 2,
+    'elite': 3,
+    'trial': 3
+}
+
+def get_user_tier(user_id, data):
+    if not user_id:
+        return 'free'
+    try:
+        ent = subscription_manager.get_user_entitlements(user_id, data, sync_to_firebase)
+        if ent and ent.get('isSubscribed'):
+            tier = str(ent.get('tier', 'free')).lower()
+            if tier in TIER_LEVELS:
+                return tier
+            plan_id = str(ent.get('planId', '')).lower()
+            if 'elite' in plan_id: return 'elite'
+            if 'plus' in plan_id: return 'plus'
+            if 'core' in plan_id: return 'core'
+    except Exception as e:
+        print(f"[GET_USER_TIER_ERROR] {e}", flush=True)
+    return 'free'
+
+def check_tier_access(user_tier, required_tier):
+    u_level = TIER_LEVELS.get(str(user_tier or 'free').lower(), 0)
+    r_level = TIER_LEVELS.get(str(required_tier or 'free').lower(), 0)
+    return u_level >= r_level
+
 def load_backend_data():
     if os.path.exists(DATA_STORE_FILE):
         try:
             with open(DATA_STORE_FILE, 'r', encoding='utf-8') as f:
                 d = json.load(f)
-                if 'tests' not in d: d['tests'] = []
-                if 'questions' not in d: d['questions'] = []
-                if 'test_attempts' not in d: d['test_attempts'] = []
-                if 'submissions' not in d: d['submissions'] = []
-                if 'papers' not in d: d['papers'] = []
-                if 'xp_transactions' not in d: d['xp_transactions'] = []
-                if 'notifications' not in d: d['notifications'] = []
-                if 'bookmarks' not in d: d['bookmarks'] = []
-                if 'subjects' not in d: d['subjects'] = []
-                if 'referrals' not in d: d['referrals'] = []
-                if 'referral_settings' not in d: d['referral_settings'] = {'referrerReward': 100, 'newStudentReward': 100}
-                if 'xp_reset_settings' not in d: d['xp_reset_settings'] = {'enabled': False, 'nextReset': None, 'intervalDays': 90, 'customSeconds': None, 'lastReset': None}
-                if 'xp_reset_history' not in d: d['xp_reset_history'] = []
-                # Sync seed users and hashed passwords
-                for email, init_u in INITIAL_USERS.items():
-                    if email not in d.get('users', {}):
-                        d.setdefault('users', {})[email] = dict(init_u)
-                    else:
-                        u = d['users'][email]
-                        if not u.get('password'):
-                            u['password'] = init_u['password']
-                        if not u.get('username') and init_u.get('username'):
-                            u['username'] = init_u['username']
-                        if not u.get('token') and init_u.get('token'):
-                            u['token'] = init_u['token']
-                for u in d.get('users', {}).values():
-                    if u.get('role') == 'student':
-                        if 'referralPoints' not in u:
-                            u['referralPoints'] = 0
-                        if 'referralCount' not in u:
-                            u['referralCount'] = 0
-                # Synchronized users loaded
+        except Exception as read_err:
+            print(f"[DATA_STORE_ERROR] Failed to read {DATA_STORE_FILE}: {read_err}", flush=True)
+            d = None
+
+        if d is not None:
+            if 'tests' not in d: d['tests'] = []
+            if 'questions' not in d: d['questions'] = []
+            if 'test_attempts' not in d: d['test_attempts'] = []
+            if 'submissions' not in d: d['submissions'] = []
+            if 'papers' not in d: d['papers'] = []
+            if 'xp_transactions' not in d: d['xp_transactions'] = []
+            if 'notifications' not in d: d['notifications'] = []
+            if 'bookmarks' not in d: d['bookmarks'] = []
+            if 'subjects' not in d: d['subjects'] = []
+            if 'referrals' not in d: d['referrals'] = []
+            if 'referral_settings' not in d: d['referral_settings'] = {'referrerReward': 100, 'newStudentReward': 100}
+            if 'xp_reset_settings' not in d: d['xp_reset_settings'] = {'enabled': False, 'nextReset': None, 'intervalDays': 90, 'customSeconds': None, 'lastReset': None}
+            if 'xp_reset_history' not in d: d['xp_reset_history'] = []
+            # Sync seed users and hashed passwords
+            for email, init_u in INITIAL_USERS.items():
+                if email not in d.get('users', {}):
+                    d.setdefault('users', {})[email] = dict(init_u)
+                else:
+                    u = d['users'][email]
+                    if not u.get('password'):
+                        u['password'] = init_u['password']
+                    if not u.get('username') and init_u.get('username'):
+                        u['username'] = init_u['username']
+                    if not u.get('token') and init_u.get('token'):
+                        u['token'] = init_u['token']
+            for u in d.get('users', {}).values():
+                if u.get('role') == 'student':
+                    if 'referralPoints' not in u:
+                        u['referralPoints'] = 0
+                    if 'referralCount' not in u:
+                        u['referralCount'] = 0
+            try:
                 sync_historical_xp(d)
-                return d
-        except Exception:
-            pass
+            except Exception as xp_err:
+                print(f"[SYNC_XP_WARNING] {xp_err}", flush=True)
+            return d
     data = {
         'users': INITIAL_USERS,
         'papers': INITIAL_PAPERS,
@@ -1461,6 +1496,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             papers = data.get('papers', [])
             now_iso = datetime.now(timezone.utc).isoformat()
             is_admin_or_teacher = user and user.get('role') in ['admin', 'teacher']
+            user_tier = get_user_tier(user.get('id') if user else None, data) if not is_admin_or_teacher else 'admin'
             result = []
             for p in papers:
                 p_copy = dict(p)
@@ -1468,6 +1504,19 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 live_start = p.get('liveStartTime')
                 live_end = p.get('liveEndTime')
                 base_status = p.get('status', 'Published')
+
+                req_tier = str(p.get('requiredTier', 'free')).lower()
+                p_copy['requiredTier'] = req_tier
+                has_tier = is_admin_or_teacher or check_tier_access(user_tier, req_tier)
+                p_copy['isTierLocked'] = not has_tier
+
+                if not has_tier:
+                    p_copy['questionPdfId'] = None
+                    p_copy['questionPdfName'] = None
+                    p_copy['questionPdfData'] = None
+                    p_copy['answerPdfId'] = None
+                    p_copy['answerPdfName'] = None
+                    p_copy['answerPdfData'] = None
 
                 if base_status == 'Draft':
                     if not is_admin_or_teacher: continue
@@ -1493,7 +1542,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     p_copy['effectiveStatus'] = 'Published'
                     p_copy['isAvailable'] = True
                 result.append(p_copy)
-            self.send_json(200, {'papers': result})
+            self.send_json(200, {'papers': result, 'userTier': user_tier})
             return
 
         # Descriptive Papers Submissions
@@ -1520,6 +1569,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             data = load_backend_data()
             tests = data.get('tests', [])
             test_id = query.get('testId', [None])[0]
+            user_tier = get_user_tier(user.get('id') if user else None, data) if not is_admin else 'admin'
 
             if test_id:
                 target_test = next((t for t in tests if t.get('id') == test_id), None)
@@ -1534,25 +1584,45 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 all_qs = [q for q in data.get('questions', []) if q.get('testId') == test_id]
                 all_qs.sort(key=lambda x: x.get('number', 0))
 
-                # If student taking test: STRIP ANSWER KEY & EXPLANATION!
+                # If student taking test: STRIP ANSWER KEY, EXPLANATIONS, AND LOCK HIGHER TIER QUESTIONS
                 if not is_admin:
                     sanitized_qs = []
                     for q in all_qs:
                         q_copy = dict(q)
-                        q_copy.pop('correctOption', None)
-                        q_copy.pop('explanation', None)
-                        q_copy.pop('aiSuggestedAnswer', None)
+                        req_tier = str(q.get('requiredTier', 'free')).lower()
+                        q_copy['requiredTier'] = req_tier
+                        has_access = check_tier_access(user_tier, req_tier)
+
+                        if not has_access:
+                            q_copy['isLocked'] = True
+                            q_copy['text'] = f"This question requires an active {req_tier.capitalize()} Pass or higher."
+                            q_copy['questionType'] = 'text'
+                            q_copy['questionImage'] = None
+                            q_copy['optionA'] = ''
+                            q_copy['optionB'] = ''
+                            q_copy['optionC'] = ''
+                            q_copy['optionD'] = ''
+                            q_copy['optionTypes'] = {'A': 'text', 'B': 'text', 'C': 'text', 'D': 'text'}
+                            q_copy['optionImages'] = {'A': None, 'B': None, 'C': None, 'D': None}
+                            q_copy.pop('correctOption', None)
+                            q_copy.pop('explanation', None)
+                            q_copy.pop('aiSuggestedAnswer', None)
+                        else:
+                            q_copy['isLocked'] = False
+                            q_copy.pop('correctOption', None)
+                            q_copy.pop('explanation', None)
+                            q_copy.pop('aiSuggestedAnswer', None)
                         sanitized_qs.append(q_copy)
-                    self.send_json(200, {'test': target_test, 'questions': sanitized_qs})
+                    self.send_json(200, {'test': target_test, 'questions': sanitized_qs, 'userTier': user_tier})
                 else:
-                    self.send_json(200, {'test': target_test, 'questions': all_qs})
+                    self.send_json(200, {'test': target_test, 'questions': all_qs, 'userTier': 'admin'})
                 return
             else:
                 if is_admin:
-                    self.send_json(200, {'tests': tests})
+                    self.send_json(200, {'tests': tests, 'userTier': 'admin'})
                 else:
                     pub_tests = [t for t in tests if t.get('isPublished', True)]
-                    self.send_json(200, {'tests': pub_tests})
+                    self.send_json(200, {'tests': pub_tests, 'userTier': user_tier})
                 return
 
         # Attempt History
@@ -1708,6 +1778,21 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             paper_id = query.get('paperId', [None])[0]
             doc_type = query.get('type', ['question'])[0]
 
+            if user.get('role') == 'student' and paper_id:
+                data = load_backend_data()
+                paper = next((p for p in data.get('papers', []) if p.get('id') == paper_id), None)
+                if paper:
+                    req_tier = str(paper.get('requiredTier', 'free')).lower()
+                    user_tier = get_user_tier(user.get('id'), data)
+                    if not check_tier_access(user_tier, req_tier):
+                        self.send_json(403, {
+                            'error': f'Access Denied: This test paper requires an active {req_tier.capitalize()} Pass or higher.',
+                            'code': 403,
+                            'requiredTier': req_tier,
+                            'isTierLocked': True
+                        })
+                        return
+
             if not file_id:
                 self.send_json(400, {'error': 'Missing fileId parameter', 'code': 400})
                 return
@@ -1735,6 +1820,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 data = load_backend_data()
                 paper = next((p for p in data.get('papers', []) if p.get('id') == paper_id), None)
                 if paper:
+
                     now_iso = datetime.now(timezone.utc).isoformat()
                     if paper.get('status') == 'Draft':
                         self.send_json(403, {'error': 'Paper is currently in Draft mode and cannot be downloaded.', 'code': 403})
@@ -3091,6 +3177,13 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 content_length = int(self.headers.get('Content-Length', 0))
                 body = self.rfile.read(content_length)
                 paper_data = json.loads(body.decode('utf-8'))
+
+                # Normalize requiredTier
+                tier = str(paper_data.get('requiredTier', 'free')).lower().strip()
+                if tier not in ['free', 'core', 'plus', 'elite']:
+                    tier = 'free'
+                paper_data['requiredTier'] = tier
+
                 data = load_backend_data()
                 papers = data.get('papers', [])
                 paper_id = paper_data.get('id')
@@ -3153,6 +3246,15 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         return
 
                 if user.get('role') == 'student':
+                    # Tier access check
+                    target_paper = next((p for p in data.get('papers', []) if p.get('id') == paper_id), None)
+                    if target_paper:
+                        req_tier = str(target_paper.get('requiredTier', 'free')).lower()
+                        user_tier = get_user_tier(user.get('id'), data)
+                        if not check_tier_access(user_tier, req_tier):
+                            self.send_json(403, {'error': f'Forbidden: This test paper requires an active {req_tier.capitalize()} Pass or higher.', 'code': 403})
+                            return
+
                     # STRICT ONE-TIME SUBMISSION CHECK (NO RE-UPLOAD)
                     existing = [s for s in submissions if (s.get('assignmentId') == paper_id or s.get('paperId') == paper_id) and s.get('studentId') == user.get('id')]
                     if existing:
@@ -3371,6 +3473,12 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     if not test_id:
                         self.send_json(400, {'error': 'Missing testId for question', 'code': 400})
                         return
+
+                    # Normalize requiredTier
+                    tier = str(req_data.get('requiredTier', 'free')).lower().strip()
+                    if tier not in ['free', 'core', 'plus', 'elite']:
+                        tier = 'free'
+                    req_data['requiredTier'] = tier
 
                     if q_id:
                         idx = next((i for i, q in enumerate(questions) if q.get('id') == q_id), None)
@@ -3794,7 +3902,13 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 wrong_count = 0
                 unattempted_count = 0
 
+                user_tier = get_user_tier(user.get('id'), data)
                 for q in questions:
+                    req_tier = str(q.get('requiredTier', 'free')).lower()
+                    if not check_tier_access(user_tier, req_tier):
+                        unattempted_count += 1
+                        continue
+
                     chosen = answers.get(q.get('id'))
                     if not chosen:
                         unattempted_count += 1

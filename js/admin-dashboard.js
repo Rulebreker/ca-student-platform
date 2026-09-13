@@ -1469,7 +1469,15 @@ class AdminDashboard {
                   <tr class="hover:bg-slate-50 transition-colors">
                     <td class="py-3 px-3.5">
                       <span class="font-bold text-slate-900 block max-w-xs line-clamp-2">${a.title}</span>
-                      <span class="text-[10px] text-slate-400 block font-mono">ID: ${a.id}</span>
+                      <div class="flex items-center gap-2 mt-1">
+                        ${{
+                          free: '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">FREE</span>',
+                          core: '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">CORE PASS</span>',
+                          plus: '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">PLUS PASS</span>',
+                          elite: '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">ELITE PASS</span>'
+                        }[String(a.requiredTier || 'free').toLowerCase()] || '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">FREE</span>'}
+                        <span class="text-[10px] text-slate-400 font-mono">ID: ${a.id}</span>
+                      </div>
                     </td>
                     <td class="py-3 px-3">
                       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-800 border border-blue-200 whitespace-nowrap">
@@ -1726,15 +1734,26 @@ class AdminDashboard {
             <div id="ans-file-status" class="hidden mt-1 text-[11px] font-semibold text-emerald-700"></div>
           </div>
 
-          <!-- Initial Status -->
-          <div>
-            <label class="block font-bold text-slate-700 mb-1">Paper Status</label>
-            <select id="admin-paper-status" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-blue-500 bg-white">
-              <option value="Published" ${paper && paper.status === 'Published' ? 'selected' : ''}>Published (Available Immediately)</option>
-              <option value="Draft" ${paper && paper.status === 'Draft' ? 'selected' : ''}>Draft (Hidden from Students)</option>
-              <option value="Scheduled" ${paper && paper.status === 'Scheduled' ? 'selected' : ''}>Scheduled (Available on Scheduled Date)</option>
-              <option value="Live" ${paper && paper.status === 'Live' ? 'selected' : ''}>Live (Active Exam Window)</option>
-            </select>
+          <!-- Paper Status & Required Subscription Tier -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Paper Status</label>
+              <select id="admin-paper-status" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-blue-500 bg-white">
+                <option value="Published" ${paper && paper.status === 'Published' ? 'selected' : ''}>Published (Available Immediately)</option>
+                <option value="Draft" ${paper && paper.status === 'Draft' ? 'selected' : ''}>Draft (Hidden from Students)</option>
+                <option value="Scheduled" ${paper && paper.status === 'Scheduled' ? 'selected' : ''}>Scheduled (Available on Scheduled Date)</option>
+                <option value="Live" ${paper && paper.status === 'Live' ? 'selected' : ''}>Live (Active Exam Window)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Required Subscription Tier</label>
+              <select id="admin-paper-required-tier" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold focus:ring-2 focus:ring-blue-500 bg-white text-slate-800">
+                <option value="free" ${!paper || paper.requiredTier === 'free' ? 'selected' : ''}>Free (All Students)</option>
+                <option value="core" ${paper && paper.requiredTier === 'core' ? 'selected' : ''}>Core Pass or Higher</option>
+                <option value="plus" ${paper && paper.requiredTier === 'plus' ? 'selected' : ''}>Plus Pass or Higher</option>
+                <option value="elite" ${paper && paper.requiredTier === 'elite' ? 'selected' : ''}>Elite Pass Only</option>
+              </select>
+            </div>
           </div>
 
           <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
@@ -1831,6 +1850,8 @@ class AdminDashboard {
       answerPdfData = upRes.fileData;
     }
 
+    const requiredTier = document.getElementById('admin-paper-required-tier') ? document.getElementById('admin-paper-required-tier').value : 'free';
+
     const paperObj = {
       id: isEdit ? existing.id : ('asg-' + Date.now()),
       title,
@@ -1842,6 +1863,7 @@ class AdminDashboard {
       durationMinutes,
       description,
       status,
+      requiredTier,
       isPublished: status !== 'Draft',
       isLive: status === 'Live',
       scheduledPublishTime: existing ? existing.scheduledPublishTime : (status === 'Scheduled' ? new Date(Date.now() + 86400000).toISOString() : null),
@@ -3062,6 +3084,16 @@ This will remove the question paper, attached answer keys, and student submissio
                     ` : ''}
                     ${hasQImage ? `<span class="px-2 py-0.5 text-[10px] font-semibold rounded bg-purple-50 text-purple-700">Image Prompt</span>` : ''}
                     ${hasOptImages ? `<span class="px-2 py-0.5 text-[10px] font-semibold rounded bg-indigo-50 text-indigo-700">Image Options</span>` : ''}
+                    ${(() => {
+                      const reqTier = (q.requiredTier || 'free').toLowerCase();
+                      const tierBadgeStyle = {
+                        free: 'bg-slate-100 text-slate-700 border-slate-200',
+                        core: 'bg-blue-100 text-blue-800 border-blue-200',
+                        plus: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+                        elite: 'bg-purple-100 text-purple-800 border-purple-200'
+                      }[reqTier] || 'bg-slate-100 text-slate-700 border-slate-200';
+                      return `<span class="px-2 py-0.5 text-[10px] font-bold uppercase rounded border ${tierBadgeStyle}">Tier: ${reqTier}</span>`;
+                    })()}
                     <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-50 text-emerald-700 border border-emerald-200">+${typeof q.marks === 'number' ? q.marks : 2.0} Pts</span>
                   </div>
 
@@ -3353,6 +3385,26 @@ This will remove the question paper, attached answer keys, and student submissio
             </div>
           </div>
 
+          <!-- Required Subscription Tier -->
+          <div class="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="font-bold text-indigo-950 text-sm">Required Subscription Tier *</label>
+              <span class="text-[10px] font-bold text-indigo-700 bg-white px-2 py-0.5 rounded border border-indigo-200">
+                Access Level
+              </span>
+            </div>
+            <p class="text-[11px] text-indigo-800">Specify which membership pass is required to unlock and solve this MCQ question.</p>
+            <select 
+              id="q-required-tier" 
+              class="w-full sm:w-60 px-3 py-2 border border-indigo-300 rounded-lg text-xs font-bold bg-white text-slate-800 focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="free" ${!existingQ || existingQ.requiredTier === 'free' ? 'selected' : ''}>Free (Open to All Students)</option>
+              <option value="core" ${existingQ && existingQ.requiredTier === 'core' ? 'selected' : ''}>Core Pass or Higher</option>
+              <option value="plus" ${existingQ && existingQ.requiredTier === 'plus' ? 'selected' : ''}>Plus Pass or Higher</option>
+              <option value="elite" ${existingQ && existingQ.requiredTier === 'elite' ? 'selected' : ''}>Elite Pass Only</option>
+            </select>
+          </div>
+
           <!-- Points / Marks for this MCQ -->
           <div class="bg-blue-50/70 border border-blue-200 rounded-xl p-4 space-y-2">
             <div class="flex items-center justify-between">
@@ -3518,6 +3570,9 @@ This will remove the question paper, attached answer keys, and student submissio
     const marksVal = marksInput ? parseFloat(marksInput.value) : null;
     const qMarks = (marksVal && !isNaN(marksVal) && marksVal > 0) ? marksVal : (test && typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0);
 
+    const tierSelect = document.getElementById('q-required-tier');
+    const requiredTier = tierSelect ? tierSelect.value : 'free';
+
     const qPayload = {
       id: existingQId || ('q-' + Date.now()),
       testId: testId,
@@ -3543,6 +3598,7 @@ This will remove the question paper, attached answer keys, and student submissio
       },
       correctOption,
       marks: qMarks,
+      requiredTier: requiredTier || 'free',
       explanation: explanation || 'Refer to ICAI Module.',
       isDraft: false, // Explicit admin authoring is verified
       isDuplicate: false

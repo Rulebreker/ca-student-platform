@@ -2609,8 +2609,32 @@ class AppStore {
   // MCQ Question & Test Management Upgrades
   getSanitizedQuestions(testId) {
     const questions = this.getQuestionsByTestId(testId);
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    const entitlements = user ? this.getUserEntitlements(user.id) : null;
+    const userTier = entitlements ? entitlements.tier.toLowerCase() : 'free';
+    const tierLevels = { free: 0, core: 1, plus: 2, elite: 3, trial: 3, admin: 99, teacher: 99 };
+    const userLevel = tierLevels[userTier] ?? 0;
+
     return questions.map(q => {
       const copy = { ...q };
+      const reqTier = (copy.requiredTier || 'free').toLowerCase();
+      const reqLevel = tierLevels[reqTier] ?? 0;
+      copy.requiredTier = reqTier;
+
+      if (userLevel < reqLevel) {
+        copy.isLocked = true;
+        copy.text = `This question requires an active ${reqTier.charAt(0).toUpperCase() + reqTier.slice(1)} Pass or higher.`;
+        copy.questionType = 'text';
+        copy.questionImage = null;
+        copy.optionA = '';
+        copy.optionB = '';
+        copy.optionC = '';
+        copy.optionD = '';
+        copy.optionTypes = { A: 'text', B: 'text', C: 'text', D: 'text' };
+        copy.optionImages = { A: null, B: null, C: null, D: null };
+      } else {
+        copy.isLocked = false;
+      }
       delete copy.correctOption;
       delete copy.explanation;
       delete copy.aiSuggestedAnswer;

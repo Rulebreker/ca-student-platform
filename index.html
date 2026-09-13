@@ -182,8 +182,8 @@
           <button data-nav="leaderboard" class="px-3 py-2 text-xs font-semibold rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors flex items-center gap-1.5">
             <i data-lucide="award" class="w-4 h-4"></i> Leaderboard
           </button>
-          <button id="nav-pricing-btn" onclick="window.subscriptionManager && window.subscriptionManager.openPricingModal()" class="px-3 py-2 text-xs font-semibold rounded-lg text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors flex items-center gap-1.5 cursor-pointer">
-            <i data-lucide="sparkles" class="w-4 h-4 text-amber-500"></i> Passes & Pricing
+          <button data-nav="passes" id="nav-pricing-btn" class="px-3 py-2 text-xs font-semibold rounded-lg text-amber-800 bg-amber-50 hover:bg-amber-100 transition-colors flex items-center gap-1.5 cursor-pointer">
+            <i data-lucide="sparkles" class="w-4 h-4 text-amber-600"></i> Passes & Pricing
           </button>
           <button id="nav-teacher" data-nav="teacher" class="px-3 py-2 text-xs font-semibold rounded-lg text-amber-800 bg-amber-50 hover:bg-amber-100 transition-colors flex items-center gap-1.5" style="display: none;">
             <i data-lucide="user-check" class="w-4 h-4 text-amber-700"></i> Teacher Portal
@@ -304,7 +304,7 @@
       <button data-nav="leaderboard" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
         <i data-lucide="award" class="w-4 h-4 text-slate-500"></i> Leaderboard
       </button>
-      <button id="mobile-nav-pricing" onclick="window.subscriptionManager && window.subscriptionManager.openPricingModal(); window.app.toggleMobileMenu(false);" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-amber-800 bg-amber-50 flex items-center gap-2.5 transition-colors cursor-pointer">
+      <button data-nav="passes" id="mobile-nav-pricing" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-amber-800 bg-amber-50 hover:bg-amber-100 flex items-center gap-2.5 transition-colors cursor-pointer">
         <i data-lucide="sparkles" class="w-4 h-4 text-amber-600"></i> Passes & Pricing
       </button>
       <button id="mobile-nav-teacher" data-nav="teacher" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-amber-800 bg-amber-50 flex items-center gap-2.5 transition-colors" style="display: none;">
@@ -1447,6 +1447,13 @@
             <i data-lucide="check-square" class="w-4 h-4"></i> Take MCQ Test
           </button>
         </div>
+      </div>
+    </section>
+
+    <!-- VIEW: DEDICATED PASSES & PRICING PAGE (/#passes) -->
+    <section id="view-passes" class="hidden space-y-8 animate-in fade-in duration-200">
+      <div id="passes-page-container">
+        <!-- Dynamically rendered by subscription.js renderPassesPage() -->
       </div>
     </section>
 

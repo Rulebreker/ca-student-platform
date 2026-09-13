@@ -603,9 +603,29 @@ class TestEngine {
     }
 
     // Question delivery: For students, deliver sanitized questions (NO answer keys or explanations in memory)
-    const questions = this.isPreview 
-      ? window.store.getQuestionsByTestId(test.id) 
-      : window.store.getSanitizedQuestions(test.id);
+    let questions = [];
+    if (this.isPreview) {
+      questions = window.store.getQuestionsByTestId(test.id);
+    } else {
+      try {
+        const user = window.auth ? window.auth.getCurrentUser() : null;
+        const token = user ? (user.token || user.email) : '';
+        const res = await fetch(`/api/tests?testId=${encodeURIComponent(test.id)}`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        if (res.ok) {
+          const body = await res.json();
+          if (body && Array.isArray(body.questions) && body.questions.length > 0) {
+            questions = body.questions;
+          }
+        }
+      } catch (err) {
+        console.warn('Backend test question fetch error, fallback to store:', err);
+      }
+      if (!questions || questions.length === 0) {
+        questions = window.store.getSanitizedQuestions(test.id);
+      }
+    }
 
     if (questions.length === 0) {
       window.app.showToast('No questions available in this test yet.', 'error');
@@ -738,9 +758,16 @@ class TestEngine {
             <div class="bg-white border border-slate-200 rounded-xl p-4 sm:p-8 shadow-sm">
               <!-- Question Header Meta -->
               <div class="flex items-center justify-between border-b border-slate-100 pb-3 sm:pb-4 mb-4 sm:mb-6">
-                <span class="text-xs font-bold px-3 py-1 bg-blue-50 text-blue-700 rounded-full">
-                  Question ${this.currentIndex + 1}
-                </span>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-bold px-3 py-1 bg-blue-50 text-blue-700 rounded-full">
+                    Question ${this.currentIndex + 1}
+                  </span>
+                  ${currentQ.isLocked ? `
+                    <span class="px-2.5 py-0.5 text-[10px] font-bold uppercase rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200 flex items-center gap-1">
+                      <i data-lucide="lock" class="w-3 h-3"></i> ${(currentQ.requiredTier || 'plus').toUpperCase()} PASS
+                    </span>
+                  ` : ''}
+                </div>
                 <div class="flex items-center gap-2 text-xs font-semibold">
                   <span class="text-emerald-600">+${(typeof currentQ.marks === 'number' && currentQ.marks > 0) ? currentQ.marks : (this.activeTest.marksPerCorrect || 2.0)} Marks</span>
                   <span class="text-slate-300">•</span>
@@ -748,41 +775,68 @@ class TestEngine {
                 </div>
               </div>
 
-              <!-- Question Prompt (Text & Optional Image) -->
-              <div class="space-y-4 mb-6">
-                <div class="text-base sm:text-lg font-medium text-slate-900 leading-relaxed">
-                  ${currentQ.text}
-                </div>
-                ${hasQImage ? `
-                  <div class="max-w-md mx-auto rounded-xl overflow-hidden border border-slate-200 bg-slate-50 p-2 text-center">
-                    <img src="${currentQ.questionImage}" alt="Question Diagram" class="w-full h-auto object-contain max-h-64 rounded-lg mx-auto">
+              ${currentQ.isLocked ? `
+                <!-- Locked Question State -->
+                <div class="bg-gradient-to-br from-indigo-50/70 via-white to-purple-50/70 border-2 border-dashed border-indigo-200 rounded-2xl p-6 sm:p-10 text-center space-y-4 my-2">
+                  <div class="w-14 h-14 mx-auto rounded-2xl bg-indigo-100 border border-indigo-200 flex items-center justify-center text-indigo-600 shadow-sm">
+                    <i data-lucide="lock" class="w-7 h-7"></i>
                   </div>
-                ` : ''}
-              </div>
-
-              <!-- Options A, B, C, D (Supporting Text & Mixed Images) -->
-              <div class="space-y-3">
-                ${['A', 'B', 'C', 'D'].map(optKey => {
-                  const optText = currentQ['option' + optKey];
-                  const optImg = currentQ.optionImages ? currentQ.optionImages[optKey] : null;
-                  const isSelected = this.userAnswers[currentQ.id] === optKey;
-
-                  return `
-                    <div 
-                      onclick="window.testEngine.selectOption('${currentQ.id}', '${optKey}')"
-                      class="option-card p-3 sm:p-4 rounded-xl border ${isSelected ? 'border-blue-600 bg-blue-50/70 ring-1 ring-blue-500' : 'border-slate-200 bg-white hover:border-slate-300'} flex items-start sm:items-center gap-3 sm:gap-4 transition-all cursor-pointer"
+                  <div>
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-indigo-100 text-indigo-800 border border-indigo-200 mb-2">
+                      <i data-lucide="shield" class="w-3.5 h-3.5"></i> ${(currentQ.requiredTier || 'plus').toUpperCase()} PASS REQUIRED
+                    </span>
+                    <h3 class="text-base sm:text-lg font-bold text-slate-900 mt-2">This Question is Locked</h3>
+                    <p class="text-xs sm:text-sm text-slate-600 max-w-md mx-auto mt-1 leading-relaxed">
+                      This premium MCQ requires an active ${(currentQ.requiredTier || 'plus').toUpperCase()} Pass or higher. Upgrade your membership pass to unlock this question and complete the full test paper.
+                    </p>
+                  </div>
+                  <div class="pt-3 flex flex-wrap items-center justify-center gap-3">
+                    <button 
+                      type="button"
+                      onclick="window.app.navigate('passes')" 
+                      class="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
                     >
-                      <div class="w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0 ${isSelected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 border border-slate-300'}">
-                        ${optKey}
-                      </div>
-                      <div class="text-xs sm:text-sm font-medium text-slate-800 flex-1 space-y-2">
-                        ${optText ? `<div>${optText}</div>` : ''}
-                        ${optImg ? `<div><img src="${optImg}" class="max-h-20 sm:max-h-24 rounded border border-slate-200 object-contain"></div>` : ''}
-                      </div>
+                      <i data-lucide="sparkles" class="w-4 h-4"></i> View Passes & Upgrade
+                    </button>
+                  </div>
+                </div>
+              ` : `
+                <!-- Question Prompt (Text & Optional Image) -->
+                <div class="space-y-4 mb-6">
+                  <div class="text-base sm:text-lg font-medium text-slate-900 leading-relaxed">
+                    ${currentQ.text}
+                  </div>
+                  ${hasQImage ? `
+                    <div class="max-w-md mx-auto rounded-xl overflow-hidden border border-slate-200 bg-slate-50 p-2 text-center">
+                      <img src="${currentQ.questionImage}" alt="Question Diagram" class="w-full h-auto object-contain max-h-64 rounded-lg mx-auto">
                     </div>
-                  `;
-                }).join('')}
-              </div>
+                  ` : ''}
+                </div>
+
+                <!-- Options A, B, C, D (Supporting Text & Mixed Images) -->
+                <div class="space-y-3">
+                  ${['A', 'B', 'C', 'D'].map(optKey => {
+                    const optText = currentQ['option' + optKey];
+                    const optImg = currentQ.optionImages ? currentQ.optionImages[optKey] : null;
+                    const isSelected = this.userAnswers[currentQ.id] === optKey;
+
+                    return `
+                      <div 
+                        onclick="window.testEngine.selectOption('${currentQ.id}', '${optKey}')"
+                        class="option-card p-3 sm:p-4 rounded-xl border ${isSelected ? 'border-blue-600 bg-blue-50/70 ring-1 ring-blue-500' : 'border-slate-200 bg-white hover:border-slate-300'} flex items-start sm:items-center gap-3 sm:gap-4 transition-all cursor-pointer"
+                      >
+                        <div class="w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0 ${isSelected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 border border-slate-300'}">
+                          ${optKey}
+                        </div>
+                        <div class="text-xs sm:text-sm font-medium text-slate-800 flex-1 space-y-2">
+                          ${optText ? `<div>${optText}</div>` : ''}
+                          ${optImg ? `<div><img src="${optImg}" class="max-h-20 sm:max-h-24 rounded border border-slate-200 object-contain"></div>` : ''}
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              `}
 
               <!-- Question Action Bar -->
               <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-6 sm:mt-8 pt-5 sm:pt-6 border-t border-slate-100">
@@ -843,7 +897,7 @@ class TestEngine {
                   <span class="w-3 h-3 rounded bg-purple-500"></span> Review
                 </div>
                 <div class="flex items-center gap-1.5">
-                  <span class="w-3 h-3 rounded bg-blue-600"></span> Current
+                  <span class="w-3 h-3 rounded bg-slate-100 border border-dashed border-slate-400 flex items-center justify-center text-[8px] leading-none">🔒</span> Locked
                 </div>
               </div>
 
@@ -853,18 +907,22 @@ class TestEngine {
                   const isCurrent = idx === this.currentIndex;
                   const isAnswered = !!this.userAnswers[q.id];
                   const isReview = !!this.markedForReview[q.id];
+                  const isLocked = !!q.isLocked;
 
                   let colorClass = 'btn-palette unanswered';
-                  if (isCurrent) colorClass = 'btn-palette current';
+                  if (isCurrent) colorClass = 'btn-palette current ring-2 ring-blue-500';
                   else if (isReview) colorClass = 'btn-palette marked';
                   else if (isAnswered) colorClass = 'btn-palette answered';
+                  else if (isLocked) colorClass = 'btn-palette locked bg-slate-100 text-slate-400 border border-dashed border-slate-300';
 
                   return `
                     <button 
                       onclick="window.testEngine.jumpToQuestion(${idx})"
-                      class="h-9 w-full rounded-lg text-xs font-bold border ${colorClass} flex items-center justify-center transition-transform hover:scale-105 cursor-pointer"
+                      class="h-9 w-full rounded-lg text-xs font-bold border ${colorClass} flex items-center justify-center transition-transform hover:scale-105 cursor-pointer gap-0.5"
+                      title="${isLocked ? 'Locked (' + (q.requiredTier || 'plus').toUpperCase() + ' Pass)' : 'Question ' + (idx + 1)}"
                     >
-                      ${idx + 1}
+                      ${isLocked ? '<i data-lucide="lock" class="w-2.5 h-2.5 inline-block opacity-70"></i>' : ''}
+                      <span>${idx + 1}</span>
                     </button>
                   `;
                 }).join('')}
@@ -897,6 +955,8 @@ class TestEngine {
   }
 
   selectOption(questionId, optionKey) {
+    const q = this.questions.find(x => x.id === questionId);
+    if (q && q.isLocked) return;
     this.userAnswers[questionId] = optionKey;
     this.renderExamInterface();
   }
