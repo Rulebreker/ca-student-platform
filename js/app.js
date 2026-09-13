@@ -483,41 +483,55 @@ class App {
     this.openModal('auth-modal');
   }
 
-  handleLoginSubmit(e) {
+  async handleLoginSubmit(e) {
     if (e && e.preventDefault) e.preventDefault();
     const identifier = document.getElementById('auth-email').value;
     const pass = document.getElementById('auth-password').value;
 
-    const res = window.auth.login(identifier, pass);
-    if (res.success) {
-      this.closeModal('auth-modal');
-      this.showToast(`Welcome back, ${res.user.name}!`, 'success');
+    const submitBtn = e && e.target ? e.target.querySelector('button[type="submit"]') : null;
+    const originalBtnText = submitBtn ? submitBtn.innerHTML : '';
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="inline-block animate-spin mr-2">⏳</span> Signing in...';
+    }
 
-      let target = 'dashboard';
-      if (this.redirectAfterLogin) {
-        target = this.redirectAfterLogin;
-        this.redirectAfterLogin = null;
-      } else if (res.user.role === 'admin') {
-        target = 'admin';
-      } else if (res.user.role === 'teacher') {
-        target = 'teacher';
-      } else {
-        target = 'dashboard';
-      }
+    try {
+      const res = await window.auth.login(identifier, pass);
+      if (res.success) {
+        this.closeModal('auth-modal');
+        this.showToast(`Welcome back, ${res.user.name}!`, 'success');
 
-      // Synchronously navigate and render target view immediately without page refresh
-      this.navigate(target);
-
-      // Keep address bar URL hash synchronized
-      if (window.location.hash !== `#${target}` && window.location.hash !== target) {
-        if (window.history && window.history.replaceState) {
-          window.history.replaceState(null, '', `#${target}`);
+        let target = 'dashboard';
+        if (this.redirectAfterLogin) {
+          target = this.redirectAfterLogin;
+          this.redirectAfterLogin = null;
+        } else if (res.user.role === 'admin') {
+          target = 'admin';
+        } else if (res.user.role === 'teacher') {
+          target = 'teacher';
         } else {
-          window.location.hash = target;
+          target = 'dashboard';
         }
+
+        // Synchronously navigate and render target view immediately without page refresh
+        this.navigate(target);
+
+        // Keep address bar URL hash synchronized
+        if (window.location.hash !== `#${target}` && window.location.hash !== target) {
+          if (window.history && window.history.replaceState) {
+            window.history.replaceState(null, '', `#${target}`);
+          } else {
+            window.location.hash = target;
+          }
+        }
+      } else {
+        this.showToast(res.error, 'error');
       }
-    } else {
-      this.showToast(res.error, 'error');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalBtnText;
+      }
     }
   }
 

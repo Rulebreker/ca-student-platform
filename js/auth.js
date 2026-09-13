@@ -236,69 +236,122 @@ class AuthManager {
     return { valid: true, cleanUsername: clean };
   }
 
-  login(identifier, password) {
+  async login(identifier, password) {
     if (!identifier || !password) {
       return { success: false, error: 'Login Failed: Please enter your email/username and password.' };
     }
 
-    const cleanId = String(identifier || '').trim().toLowerCase();
+    const cleanRaw = String(identifier || '').trim();
+    const cleanId = cleanRaw.toLowerCase();
+    const cleanUname = cleanId.replace(/^@+/, '');
     const rawPass = String(password || '');
-    const users = window.store.getUsers();
-    
-    // Match by email OR username (case-insensitive & trimmed)
-    const user = users.find(u => 
-      (u.email && u.email.trim().toLowerCase() === cleanId) || 
-      (u.username && u.username.trim().toLowerCase() === cleanId)
-    );
-    
-    if (!user || !this.verifyPassword(rawPass, user.password)) {
-      return { success: false, error: 'Login Failed: Invalid username or password.' };
-    }
 
-    if (user.isActive === false) {
-      return { 
-        success: false, 
-        error: 'Login Failed: Your account has been deactivated by the Administrator. Please contact faculty support.' 
-      };
-    }
-
-    // Transparently upgrade legacy plain-text password to salted SHA-256 hash
-    if (!user.password || !String(user.password).startsWith('sha256:')) {
-      user.password = this.hashPassword(rawPass);
-      window.store.updateUser(user);
-    }
-
-    // Ensure session token
-    if (!user.token) {
-      user.token = `token_${user.role || 'student'}_${Date.now()}`;
-      window.store.updateUser(user);
-    }
-
-    this.currentUser = user;
-    window.store.setCurrentUser(user);
-    this.onAuthChange();
-
-    // Asynchronously synchronize session token with backend if server is reachable
+    // 1. Primary: Server-Authoritative Authentication via /api/auth/login
+    let serverAvailable = false;
     if (typeof fetch !== 'undefined') {
-      fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: cleanId, password: rawPass })
-      }).then(res => res.ok ? res.json() : null)
-        .then(data => {
-          if (data && data.token && user) {
-            user.token = data.token;
-            window.store.setCurrentUser(user);
+      try {
+        const resp = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identifier: cleanRaw, password: rawPass })
+        });
+
+        serverAvailable = true;
+        const text = await resp.text();
+        let data = null;
+        try {
+          data = JSON.parse(text);
+        } catch (jsonErr) {
+          console.warn('[AuthManager] Non-JSON login response:', text);
+        }
+
+        if (resp.status === 403) {
+          return { 
+            success: false, 
+            error: (data && data.error) || 'Login Failed: Your account has been deactivated by the Administrator. Please contact faculty support.' 
+          };
+        }
+
+        if (resp.status === 401 || (data && data.success === false)) {
+          return { 
+            success: false, 
+            error: (data && data.error) || 'Login Failed: Invalid username or password.' 
+          };
+        }
+
+        if (resp.ok && data && data.success && data.user) {
+          const authUser = data.user;
+          if (data.token) {
+            authUser.token = data.token;
           }
-        }).catch(() => {});
+
+          // Merge / update into local store
+          if (window.store) {
+            const localUsers = window.store.getUsers();
+            const existingIdx = localUsers.findIndex(u => u.id === authUser.id || (u.email && u.email.toLowerCase() === (authUser.email || '').toLowerCase()));
+            if (existingIdx !== -1) {
+              localUsers[existingIdx] = { ...localUsers[existingIdx], ...authUser };
+              window.store.saveUsers(localUsers);
+            } else {
+              window.store.addUser(authUser);
+            }
+            window.store.setCurrentUser(authUser);
+          }
+
+          this.currentUser = authUser;
+          this.onAuthChange();
+
+          if (window.firebaseSync && typeof window.firebaseSync.attachCurrentUserListener === 'function') {
+            window.firebaseSync.attachCurrentUserListener(authUser.id);
+          }
+          this.startSessionWatchdog(authUser);
+
+          return { success: true, user: authUser };
+        }
+      } catch (netErr) {
+        // Network offline or connection failed - proceed to offline fallback
+        console.warn('[AuthManager] Backend login request failed, falling back to local store:', netErr);
+      }
     }
 
-    if (window.firebaseSync && typeof window.firebaseSync.attachCurrentUserListener === 'function') {
-      window.firebaseSync.attachCurrentUserListener(user.id);
-    }
-    this.startSessionWatchdog(user);
+    // 2. Offline Fallback: Local store authentication if server is unreachable
+    if (!serverAvailable && window.store) {
+      const users = window.store.getUsers();
+      const user = users.find(u => 
+        (u.email && u.email.trim().toLowerCase() === cleanId) || 
+        (u.username && u.username.trim().toLowerCase() === cleanId) ||
+        (u.username && u.username.trim().toLowerCase().replace(/^@+/, '') === cleanUname)
+      );
 
-    return { success: true, user };
+      if (!user || !this.verifyPassword(rawPass, user.password)) {
+        return { success: false, error: 'Login Failed: Invalid username or password.' };
+      }
+
+      if (user.isActive === false) {
+        return { 
+          success: false, 
+          error: 'Login Failed: Your account has been deactivated by the Administrator. Please contact faculty support.' 
+        };
+      }
+
+      if (!user.token) {
+        user.token = `token_${user.role || 'student'}_${Date.now()}`;
+        window.store.updateUser(user);
+      }
+
+      this.currentUser = user;
+      window.store.setCurrentUser(user);
+      this.onAuthChange();
+
+      if (window.firebaseSync && typeof window.firebaseSync.attachCurrentUserListener === 'function') {
+        window.firebaseSync.attachCurrentUserListener(user.id);
+      }
+      this.startSessionWatchdog(user);
+
+      return { success: true, user };
+    }
+
+    return { success: false, error: 'Login Failed: Invalid username or password.' };
   }
 
   async register(username, fullName, email, phone, caLevel, password, confirmPassword, role = 'student', state = 'Uttar Pradesh', district = 'Meerut', referredBy = '') {
@@ -364,7 +417,18 @@ class AuthManager {
         })
       });
 
-      const data = await resp.json();
+      const text = await resp.text();
+      let data = null;
+      try {
+        data = JSON.parse(text);
+      } catch (jsonErr) {
+        console.error('[AuthManager] Non-JSON response from registration server:', text);
+        return { 
+          success: false, 
+          error: 'Registration service error: Unexpected response from server. Please try again in a moment.' 
+        };
+      }
+
       if (!resp.ok || !data.success) {
         return { success: false, error: data.error || 'Registration failed. Please check your inputs and try again.' };
       }
@@ -396,7 +460,7 @@ class AuthManager {
       };
     } catch (err) {
       console.error('[AuthManager] Registration network error:', err);
-      return { success: false, error: 'Failed to communicate with authentication server: ' + err.message };
+      return { success: false, error: 'Registration service error: Unable to connect to server. Please check your connection and try again.' };
     }
   }
 
@@ -531,12 +595,25 @@ class AuthManager {
             'X-Auth-Token': token
           }
         });
-        if (res.status === 401 || res.status === 404) {
-          this.handleSessionRevoked('Your account has been deleted or deactivated by the administrator.');
+
+        if (res.status === 403) {
+          this.handleSessionRevoked('Your account has been deactivated by the administrator.');
           return;
         }
+
+        if (res.status === 401 || res.status === 404) {
+          const text = await res.text();
+          let data = null;
+          try { data = JSON.parse(text); } catch (e) {}
+          const msg = (data && data.error) ? data.error : 'Your account has been deleted or deactivated by the administrator.';
+          this.handleSessionRevoked(msg);
+          return;
+        }
+
         if (res.ok) {
-          const data = await res.json();
+          const text = await res.text();
+          let data = null;
+          try { data = JSON.parse(text); } catch (e) {}
           if (data && data.authenticated === false) {
             this.handleSessionRevoked('Your session is no longer active.');
           }
@@ -546,7 +623,7 @@ class AuthManager {
       }
     };
 
-    this._sessionWatchdogTimer = setInterval(checkSession, 2500);
+    this._sessionWatchdogTimer = setInterval(checkSession, 3000);
 
     this._visibilityHandler = () => {
       if (document.visibilityState === 'visible') {

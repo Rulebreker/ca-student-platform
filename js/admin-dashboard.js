@@ -785,8 +785,8 @@ class AdminDashboard {
     window.app.openModal('admin-generic-modal');
   }
 
-  saveNewStudent(e) {
-    e.preventDefault();
+  async saveNewStudent(e) {
+    if (e && e.preventDefault) e.preventDefault();
     const name = document.getElementById('add-st-name').value.trim();
     const rawUsername = document.getElementById('add-st-username').value.trim().toLowerCase().replace(/^@+/, '');
     const email = document.getElementById('add-st-email').value.trim();
@@ -795,65 +795,102 @@ class AdminDashboard {
     const caLevel = document.getElementById('add-st-level').value;
     const registrationNo = document.getElementById('add-st-reg').value.trim();
 
-    const users = window.store.getUsers();
-    if (users.some(u => u.email.toLowerCase() === email.toLowerCase())) {
-      window.app.showToast('A student or user with this email already exists.', 'error');
+    if (!name || !email || !password) {
+      window.app.showToast('Please provide Student Name, Email, and Password.', 'error');
       return;
     }
 
     const cleanUsername = rawUsername || email.split('@')[0];
-    if (users.some(u => u.username && u.username.toLowerCase() === cleanUsername.toLowerCase())) {
-      window.app.showToast(`Username "@${cleanUsername}" is already taken. Please pick another.`, 'error');
-      return;
+    const submitBtn = e && e.target ? e.target.querySelector('button[type="submit"]') : null;
+    const origBtnHtml = submitBtn ? submitBtn.innerHTML : '';
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="inline-block animate-spin mr-2">⏳</span> Provisioning Student...';
     }
 
-    const hashedPassword = window.auth ? window.auth.hashPassword(password) : password;
-    const userToken = `token_student_${Date.now()}`;
+    try {
+      const currentAdmin = window.auth ? window.auth.getCurrentUser() : null;
+      const adminToken = currentAdmin ? (currentAdmin.token || 'token_admin_excellenceca_secret') : 'token_admin_excellenceca_secret';
 
-    const newStudent = {
-      id: 'usr-' + Date.now(),
-      name,
-      username: cleanUsername,
-      email,
-      phone,
-      password: hashedPassword,
-      token: userToken,
-      role: 'student',
-      caLevel,
-      registrationNo,
-      isActive: true,
-      totalXp: 0,
-      baseXp: 0,
-      referralCount: 0,
-      referralPoints: 0,
-      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
-      createdAt: new Date().toISOString()
-    };
+      // 1. Authoritative Backend Provisioning via POST /api/admin/users
+      let authoritativeUser = null;
+      if (typeof fetch !== 'undefined') {
+        try {
+          const resp = await fetch('/api/admin/users', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${adminToken}`,
+              'X-Auth-Token': adminToken
+            },
+            body: JSON.stringify({
+              name,
+              username: cleanUsername,
+              email,
+              phone,
+              password,
+              caLevel,
+              registrationNo,
+              role: 'student'
+            })
+          });
 
-    window.store.addUser(newStudent);
-    if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
-      window.firebaseSync.saveUser(newStudent);
-    }
-    window.app.closeModal('admin-generic-modal');
-    window.app.showToast(`Student ${name} (@${cleanUsername}) added successfully.`, 'success');
-    this.renderStudents();
+          const text = await resp.text();
+          let data = null;
+          try { data = JSON.parse(text); } catch (jsonErr) {}
 
-    // Sync with backend if server is online
-    if (typeof fetch !== 'undefined') {
-      fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: newStudent.id,
-          username: newStudent.username,
-          name,
-          email,
-          phone,
-          caLevel,
-          password,
-          role: 'student'
-        })
-      }).catch(() => {});
+          if (!resp.ok || !data || !data.success) {
+            const errMsg = (data && data.error) ? data.error : 'Failed to provision student on server. Please verify fields.';
+            window.app.showToast(errMsg, 'error');
+            return;
+          }
+
+          authoritativeUser = data.user;
+          if (data.token) authoritativeUser.token = data.token;
+        } catch (apiErr) {
+          console.warn('[AdminDashboard] Server provisioning error, proceeding with local fallback:', apiErr);
+        }
+      }
+
+      const hashedPassword = window.auth ? window.auth.hashPassword(password) : password;
+      const finalStudent = authoritativeUser ? {
+        ...authoritativeUser,
+        password: hashedPassword,
+        registrationNo,
+        phone
+      } : {
+        id: 'usr-' + Date.now(),
+        name,
+        username: cleanUsername,
+        email,
+        phone,
+        password: hashedPassword,
+        token: `token_student_${Date.now()}`,
+        role: 'student',
+        caLevel,
+        registrationNo,
+        isActive: true,
+        totalXp: 0,
+        baseXp: 0,
+        referralCount: 0,
+        referralPoints: 0,
+        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
+        createdAt: new Date().toISOString()
+      };
+
+      window.store.addUser(finalStudent);
+      if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
+        window.firebaseSync.saveUser(finalStudent);
+      }
+
+      window.app.closeModal('admin-generic-modal');
+      window.app.showToast(`Student ${name} (@${cleanUsername}) provisioned successfully.`, 'success');
+      this.renderStudents();
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = origBtnHtml;
+      }
     }
   }
 

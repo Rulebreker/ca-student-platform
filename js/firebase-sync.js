@@ -351,6 +351,7 @@ class FirebaseSyncManager {
           const existing = localUsers[idx];
           let userModified = false;
           Object.keys(ru).forEach(k => {
+            if (k === 'password' && !ru[k] && existing.password) return;
             if (JSON.stringify(existing[k]) !== JSON.stringify(ru[k])) {
               existing[k] = ru[k];
               userModified = true;
@@ -369,13 +370,19 @@ class FirebaseSyncManager {
         const current = window.store ? window.store.getCurrentUser() : null;
         if (current && current.role === 'student') {
           const freshCurrent = localUsers.find(u => u.id === current.id);
-          if (!freshCurrent || freshCurrent.isActive === false || freshCurrent.isDeleted === true) {
+          if (freshCurrent && (freshCurrent.isActive === false || freshCurrent.isDeleted === true)) {
             console.warn('[FirebaseSync] Logged-in student account was deleted or deactivated by admin. Revoking session.');
             if (window.auth && typeof window.auth.handleSessionRevoked === 'function') {
-              window.auth.handleSessionRevoked('Your account has been deleted or deactivated by the administrator.');
+              const reason = freshCurrent.isActive === false ? 
+                'Your account has been deactivated by the administrator.' : 
+                'Your account has been deleted by the administrator.';
+              window.auth.handleSessionRevoked(reason);
               return;
             }
-          } else {
+          } else if (freshCurrent) {
+            if (!freshCurrent.password && current.password) {
+              freshCurrent.password = current.password;
+            }
             window.store.setCurrentUser(freshCurrent);
             if (window.auth) window.auth.currentUser = freshCurrent;
             this.updateUserPointsUi(freshCurrent);
@@ -903,18 +910,29 @@ class FirebaseSyncManager {
         const current = window.store ? window.store.getCurrentUser() : null;
         if (!current || current.id !== userId) return;
 
-        if (!val || val.isActive === false || val.isDeleted === true) {
-          console.warn('[FirebaseSync] Direct user listener detected deletion for user:', userId);
+        // If snapshot is null, user might not yet exist in Firebase or is propagating; do not false-revoke active session
+        if (!val) return;
+
+        if (val.isActive === false || val.isDeleted === true) {
+          console.warn('[FirebaseSync] Direct user listener detected deactivation/deletion for user:', userId);
           if (window.auth && typeof window.auth.handleSessionRevoked === 'function') {
-            window.auth.handleSessionRevoked('Your account has been deleted or deactivated by the administrator.');
+            const reason = val.isActive === false ? 
+              'Your account has been deactivated by the administrator.' : 
+              'Your account has been deleted by the administrator.';
+            window.auth.handleSessionRevoked(reason);
           }
           return;
         }
 
-        // Account is active; update current user in store & auth, and refresh points UI
-        window.store.setCurrentUser(val);
-        if (window.auth) window.auth.currentUser = val;
-        this.updateUserPointsUi(val);
+        // Account is active; update current user in store & auth preserving local password, and refresh points UI
+        const merged = {
+          ...current,
+          ...val,
+          password: current.password || val.password
+        };
+        window.store.setCurrentUser(merged);
+        if (window.auth) window.auth.currentUser = merged;
+        this.updateUserPointsUi(merged);
       }, err => {
         console.warn('[FirebaseSync] Current user listener error:', err);
       });
