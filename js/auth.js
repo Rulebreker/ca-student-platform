@@ -122,6 +122,14 @@ function generateSalt(len = 16) {
 class AuthManager {
   constructor() {
     this.currentUser = window.store ? window.store.getCurrentUser() : null;
+    this._sessionWatchdogTimer = null;
+    this._visibilityHandler = null;
+    if (this.currentUser) {
+      document.documentElement.classList.add('user-is-authenticated');
+      this.startSessionWatchdog(this.currentUser);
+    } else {
+      document.documentElement.classList.remove('user-is-authenticated');
+    }
   }
 
   hashPassword(plainPassword, salt = null) {
@@ -285,10 +293,15 @@ class AuthManager {
         }).catch(() => {});
     }
 
+    if (window.firebaseSync && typeof window.firebaseSync.attachCurrentUserListener === 'function') {
+      window.firebaseSync.attachCurrentUserListener(user.id);
+    }
+    this.startSessionWatchdog(user);
+
     return { success: true, user };
   }
 
-  register(username, fullName, email, phone, caLevel, password, confirmPassword, role = 'student', state = 'Uttar Pradesh', district = 'Meerut', referredBy = '') {
+  async register(username, fullName, email, phone, caLevel, password, confirmPassword, role = 'student', state = 'Uttar Pradesh', district = 'Meerut', referredBy = '') {
     // Security check: Never allow public registration of admin or teacher roles
     if (role && (role.toLowerCase() === 'admin' || role.toLowerCase() === 'teacher')) {
       return { 
@@ -308,26 +321,20 @@ class AuthManager {
     }
     const cleanUsername = uValidation.cleanUsername;
 
-    // 2. Email uniqueness
-    const users = window.store.getUsers();
-    if (users.some(u => u.email.toLowerCase() === email.toLowerCase().trim())) {
-      return { success: false, error: 'An account with this email address already exists. Please sign in instead.' };
-    }
-
-    // 3. Phone validation
+    // 2. Phone validation
     const cleanPhone = phone.trim();
     if (cleanPhone.length < 8) {
       return { success: false, error: 'Please enter a valid mobile number (e.g. +91 98765 43210 or 10-digit number).' };
     }
 
-    // 4. Exam Level validation
+    // 3. Exam Level validation
     const validLevels = ['CA FOUNDATION', 'CA INTER', 'CA INTERMEDIATE', 'CA FINAL'];
     const normLevel = caLevel ? caLevel.toUpperCase().trim() : '';
     if (!validLevels.includes(normLevel)) {
       return { success: false, error: 'Please select your CA Exam Level (CA FOUNDATION, CA INTERMEDIATE, or CA FINAL).' };
     }
 
-    // 5. Password security validation
+    // 4. Password security validation
     if (password !== confirmPassword) {
       return { success: false, error: 'New password and confirmation do not match.' };
     }
@@ -336,168 +343,61 @@ class AuthManager {
       return { success: false, error: pValidation.error };
     }
 
-    // Referral code resolution: strip optional leading '@' and match case-insensitively
-    const cleanReferredBy = (referredBy || '').trim().replace(/^@+/, '').toLowerCase();
-    let referrer = null;
-    if (cleanReferredBy) {
-      referrer = users.find(u => 
-        (u.username && u.username.replace(/^@+/, '').toLowerCase() === cleanReferredBy) ||
-        (u.id && u.id.toLowerCase() === cleanReferredBy)
-      );
-      if (!referrer) {
-        return { success: false, error: 'Invalid referral code. Please enter a valid referral code or leave the field blank.' };
-      }
-    }
+    const cleanReferredBy = (referredBy || '').trim().replace(/^@+/, '');
 
-    const hashedPassword = this.hashPassword(password);
-    const userToken = `token_student_${Date.now()}`;
-
-    const newUser = {
-      id: 'usr-' + Date.now(),
-      username: cleanUsername,
-      name: fullName.trim(),
-      email: email.toLowerCase().trim(),
-      phone: cleanPhone,
-      caLevel: normLevel.includes('INTER') ? 'CA INTER' : normLevel,
-      password: hashedPassword,
-      token: userToken,
-      role: role,
-      state: state || 'Uttar Pradesh',
-      district: district || 'Meerut',
-      city: district || 'Meerut',
-      isActive: true,
-      referralCount: 0,
-      referralPoints: 0,
-      referredBy: referrer ? referrer.username.replace(/^@+/, '') : null,
-      baseXp: 0,
-      subjectXp: { 'Accounting': 0, 'Business Law': 0, 'Business Economics': 0, 'Quantitative Aptitude': 0 },
-      achievementBadges: ['First Solve'],
-      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
-      createdAt: new Date().toISOString()
-    };
-
-    // Process referral reward (dynamic, configurable by admin)
-    if (referrer && referrer.id !== newUser.id) {
-      const existingRefs = window.store.getReferrals ? window.store.getReferrals() : [];
-      const alreadyReferred = existingRefs.some(r => 
-        r.referredId === newUser.id || 
-        (r.referredUsername && r.referredUsername.replace(/^@+/, '').toLowerCase() === newUser.username.toLowerCase())
-      );
-      if (!alreadyReferred) {
-        // Fetch dynamic reward settings
-        const refSettings = window.store.getReferralSettings ? window.store.getReferralSettings() : { referrerReward: 100, newStudentReward: 100 };
-        const referrerReward = Number(refSettings.referrerReward) || 100;
-        const newStudentReward = Number(refSettings.newStudentReward) || 100;
-
-        // 1. Credit Referrer Points
-        referrer.referralPoints = (referrer.referralPoints || 0) + referrerReward;
-        referrer.referralCount = (referrer.referralCount || 0) + 1;
-        // IMPORTANT: DO NOT add to referrer.totalXp — referralPoints are separate
-        window.store.updateUser(referrer);
-        if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
-          window.firebaseSync.saveUser(referrer);
-        }
-
-        // 2. Credit New Student Referral Reward
-        newUser.referralPoints = newStudentReward;
-        // IMPORTANT: DO NOT add to newUser.totalXp
-
-        // 3. Log referral record
-        const refRecord = {
-          id: 'ref-' + Date.now(),
-          referrerId: referrer.id,
-          referrerName: referrer.name,
-          referrerUsername: referrer.username.replace(/^@+/, ''),
-          referredId: newUser.id,
-          referredName: newUser.name,
-          referredUsername: newUser.username.replace(/^@+/, ''),
-          examLevel: newUser.caLevel,
-          referrerReward: referrerReward,
-          referredReward: newStudentReward,
-          pointsAwarded: referrerReward,
-          status: 'completed',
-          createdAt: new Date().toISOString()
-        };
-        if (window.store.addReferral) {
-          window.store.addReferral(refRecord);
-        }
-
-        // 4. Real-time notification to referrer
-        if (window.store.addNotification) {
-          window.store.addNotification({
-            userId: referrer.id,
-            type: 'referral',
-            title: 'Referral Bonus Credited! 🎉',
-            message: `${newUser.name} (@${newUser.username}) registered using your link! You earned +${referrerReward} Referral Points.`,
-            link: 'profile',
-            metadata: { referredUserId: newUser.id, points: referrerReward }
-          });
-          // 5. Notification to new student about their reward
-          window.store.addNotification({
-            userId: newUser.id,
-            type: 'referral',
-            title: 'Referral Bonus for You! 🎁',
-            message: `You joined using ${referrer.name}'s referral code and earned +${newStudentReward} Referral Points!`,
-            link: 'profile',
-            metadata: { referrerUserId: referrer.id, points: newStudentReward }
-          });
-        }
-      }
-    }
-
-    // Welcome notification to newly registered student
-    if (window.store.addNotification) {
-      window.store.addNotification({
-        userId: newUser.id,
-        type: 'general',
-        title: 'Welcome to ExcellenceCA! 🎓',
-        message: 'Your account is active. Start practicing MCQ Tests and downloading Question Papers!',
-        link: 'dashboard'
-      });
-    }
-
-    users.unshift(newUser);
-    window.store.saveUsers(users);
-    if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
-      window.firebaseSync.saveUser(newUser);
-    }
-    this.currentUser = newUser;
-    window.store.setCurrentUser(newUser);
-    this.onAuthChange();
-
-    // Asynchronously persist student registration to backend if online
-    if (typeof fetch !== 'undefined') {
-      fetch('/api/auth/register', {
+    // 5. Server-Authoritative Registration & Atomic Referral Processing
+    try {
+      const resp = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: newUser.id,
           username: cleanUsername,
           name: fullName.trim(),
-          email: newUser.email,
+          email: email.toLowerCase().trim(),
           phone: cleanPhone,
-          caLevel: newUser.caLevel,
+          caLevel: normLevel.includes('INTER') ? 'CA INTER' : normLevel,
           password: password,
           role: 'student',
+          state: state || 'Uttar Pradesh',
+          district: district || 'Meerut',
           referralCode: cleanReferredBy || ''
         })
-      }).then(r => r.ok ? r.json() : null)
-        .then(data => {
-          if (data && data.token) {
-            newUser.token = data.token;
-            window.store.setCurrentUser(newUser);
-            if (window.store.updateUser) {
-              window.store.updateUser(newUser);
-            }
-          }
-        }).catch(() => {});
-    }
+      });
 
-    return { 
-      success: true, 
-      user: newUser,
-      referredBy: referrer ? referrer.name : null
-    };
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        return { success: false, error: data.error || 'Registration failed. Please check your inputs and try again.' };
+      }
+
+      const authoritativeUser = data.user;
+      if (data.token) {
+        authoritativeUser.token = data.token;
+      }
+
+      // Synchronize into local store
+      if (window.store) {
+        window.store.addUser(authoritativeUser);
+        window.store.setCurrentUser(authoritativeUser);
+      }
+      this.currentUser = authoritativeUser;
+
+      // Start watchdog and attach real-time listener for the new student
+      if (window.firebaseSync && typeof window.firebaseSync.attachCurrentUserListener === 'function') {
+        window.firebaseSync.attachCurrentUserListener(authoritativeUser.id);
+      }
+      this.startSessionWatchdog(authoritativeUser);
+
+      this.onAuthChange();
+
+      return {
+        success: true,
+        user: authoritativeUser,
+        referredBy: authoritativeUser.referredBy || null
+      };
+    } catch (err) {
+      console.error('[AuthManager] Registration network error:', err);
+      return { success: false, error: 'Failed to communicate with authentication server: ' + err.message };
+    }
   }
 
   changePassword(userId, oldPassword, newPassword, confirmPassword) {
@@ -534,10 +434,72 @@ class AuthManager {
     return { success: true };
   }
 
-  logout() {
+  handleSessionRevoked(reason = 'Your session has ended.') {
+    console.warn('[AuthManager] Session revoked / logged out:', reason);
     this.currentUser = null;
-    window.store.setCurrentUser(null);
+    if (window.store) {
+      window.store.setCurrentUser(null);
+    }
+    
+    // 1. Remove HTML authentication class lock immediately
+    if (typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.classList.remove('user-is-authenticated');
+    }
+
+    // 2. Clear all authentication tokens and identifiers from local/session storage
+    try {
+      localStorage.removeItem('excellenceca_current_user');
+      localStorage.removeItem('ca_platform_current_user');
+      sessionStorage.clear();
+    } catch (e) {}
+
+    // 3. Clear all user DOM elements
+    const userDisplay = document.getElementById('user-display-name');
+    if (userDisplay) userDisplay.textContent = '';
+    const userRoleBadge = document.getElementById('user-role-badge');
+    if (userRoleBadge) {
+      userRoleBadge.textContent = '';
+      userRoleBadge.className = 'hidden';
+    }
+    const userAvatar = document.getElementById('user-avatar');
+    if (userAvatar) userAvatar.src = '';
+    const dashboardWelcomeName = document.getElementById('dashboard-welcome-name');
+    if (dashboardWelcomeName) dashboardWelcomeName.textContent = '';
+
+    // Clear profile page text fields
+    const profileFields = [
+      'profile-page-name', 'profile-page-email', 'profile-page-username', 'profile-page-phone',
+      'profile-page-referral-code', 'profile-page-referral-points', 'profile-page-referral-count'
+    ];
+    profileFields.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = '';
+    });
+    const profileTbody = document.getElementById('profile-page-referred-tbody');
+    if (profileTbody) profileTbody.innerHTML = '';
+
+    // Clear notification badges
+    const navNotifBadge = document.getElementById('nav-notification-badge');
+    if (navNotifBadge) {
+      navNotifBadge.textContent = '0';
+      navNotifBadge.classList.add('hidden');
+    }
+    const mobileNotifBadge = document.getElementById('mobile-notification-count');
+    if (mobileNotifBadge) {
+      mobileNotifBadge.textContent = '0';
+      mobileNotifBadge.classList.add('hidden');
+    }
+
+    // 4. Detach real-time listeners and stop watchdog heartbeat
+    if (window.firebaseSync && typeof window.firebaseSync.detachUserListeners === 'function') {
+      window.firebaseSync.detachUserListeners();
+    }
+    this.stopSessionWatchdog();
+
+    // 5. Update UI navigation immediately
     this.onAuthChange();
+
+    // 6. Redirect to public home
     if (window.app) {
       window.app.navigate('home');
       if (window.history && window.history.replaceState) {
@@ -545,7 +507,63 @@ class AuthManager {
       } else {
         window.location.hash = 'home';
       }
-      window.app.showToast('You have been securely signed out.', 'info');
+      if (reason) {
+        window.app.showToast(reason, 'info');
+      }
+    }
+  }
+
+  logout() {
+    this.handleSessionRevoked('You have been securely signed out.');
+  }
+
+  startSessionWatchdog(user) {
+    this.stopSessionWatchdog();
+    if (!user || user.role === 'admin') return;
+
+    const checkSession = async () => {
+      if (!this.currentUser) return;
+      try {
+        const token = this.currentUser.token || this.currentUser.id;
+        const res = await fetch('/api/auth/verify', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-Auth-Token': token
+          }
+        });
+        if (res.status === 401 || res.status === 404) {
+          this.handleSessionRevoked('Your account has been deleted or deactivated by the administrator.');
+          return;
+        }
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.authenticated === false) {
+            this.handleSessionRevoked('Your session is no longer active.');
+          }
+        }
+      } catch (err) {
+        // Network offline, skip
+      }
+    };
+
+    this._sessionWatchdogTimer = setInterval(checkSession, 2500);
+
+    this._visibilityHandler = () => {
+      if (document.visibilityState === 'visible') {
+        checkSession();
+      }
+    };
+    document.addEventListener('visibilitychange', this._visibilityHandler);
+  }
+
+  stopSessionWatchdog() {
+    if (this._sessionWatchdogTimer) {
+      clearInterval(this._sessionWatchdogTimer);
+      this._sessionWatchdogTimer = null;
+    }
+    if (this._visibilityHandler) {
+      document.removeEventListener('visibilitychange', this._visibilityHandler);
+      this._visibilityHandler = null;
     }
   }
 
@@ -587,11 +605,15 @@ class AuthManager {
     const navRegister = document.getElementById('nav-register');
     const navLogin = document.getElementById('nav-login');
     const navUserContainer = document.getElementById('nav-user-container');
+    const navNotificationContainer = document.getElementById('nav-notification-container');
     const navGuestActions = document.getElementById('nav-guest-actions');
     const mobileNavRegister = document.getElementById('mobile-nav-register');
+    const mobileNavDashboard = document.getElementById('mobile-nav-dashboard');
     const mobileNavProfile = document.getElementById('mobile-nav-profile');
+    const mobileNavNotifications = document.getElementById('mobile-nav-notifications');
     const mobileNavTeacher = document.getElementById('mobile-nav-teacher');
     const mobileNavAdmin = document.getElementById('mobile-nav-admin');
+    const mobileNavLogout = document.getElementById('mobile-nav-logout');
 
     // Homepage Hero Buttons & CTA
     const heroSignInBtn = document.getElementById('hero-signin-btn');
@@ -599,7 +621,12 @@ class AuthManager {
     const heroDashboardBtn = document.getElementById('hero-dashboard-btn');
     const homepageEnrollLink = document.getElementById('homepage-enroll-link');
 
-    if (user) {
+    if (user && user.isActive !== false && !user.isDeleted) {
+      // Add authentication class lock
+      if (typeof document !== 'undefined' && document.documentElement) {
+        document.documentElement.classList.add('user-is-authenticated');
+      }
+
       if (userDisplay) userDisplay.textContent = user.name;
       if (userRoleBadge) {
         userRoleBadge.textContent = user.role.toUpperCase();
@@ -613,15 +640,21 @@ class AuthManager {
       }
       if (userAvatar) userAvatar.src = user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120';
       
-      // Logged in: HIDE register link and guest actions from dashboard/navbar
+      // Desktop Nav: Show user, hide guest
       if (navRegister) navRegister.style.display = 'none';
-      if (mobileNavRegister) mobileNavRegister.style.display = 'none';
-      if (mobileNavProfile) mobileNavProfile.style.display = 'flex';
       if (navLogin) navLogin.style.display = 'none';
       if (navGuestActions) navGuestActions.style.display = 'none';
       if (navUserContainer) navUserContainer.style.display = 'flex';
+      if (navNotificationContainer) navNotificationContainer.style.display = 'block';
 
-      // Logged in: HIDE Homepage Sign In & Register buttons, SHOW Go to Dashboard CTA
+      // Mobile Nav: Show student items, strictly hide registration
+      if (mobileNavRegister) mobileNavRegister.style.display = 'none';
+      if (mobileNavDashboard) mobileNavDashboard.style.display = 'flex';
+      if (mobileNavProfile) mobileNavProfile.style.display = 'flex';
+      if (mobileNavNotifications) mobileNavNotifications.style.display = 'flex';
+      if (mobileNavLogout) mobileNavLogout.style.display = 'flex';
+
+      // Logged in Hero CTAs
       if (heroSignInBtn) heroSignInBtn.classList.add('hidden');
       if (heroRegisterBtn) heroRegisterBtn.classList.add('hidden');
       if (heroDashboardBtn) {
@@ -651,19 +684,31 @@ class AuthManager {
         mobileNavTeacher.style.display = (user.role === 'teacher' || user.role === 'admin') ? 'flex' : 'none';
       }
     } else {
-      // Logged out: SHOW login & register buttons, HIDE user profile container
+      // Remove authentication class lock
+      if (typeof document !== 'undefined' && document.documentElement) {
+        document.documentElement.classList.remove('user-is-authenticated');
+      }
+
+      // Desktop Nav: Show guest, hide user & notifications
       if (navRegister) navRegister.style.display = 'inline-flex';
-      if (mobileNavRegister) mobileNavRegister.style.display = 'flex';
-      if (mobileNavProfile) mobileNavProfile.style.display = 'none';
       if (navLogin) navLogin.style.display = 'inline-flex';
       if (navGuestActions) navGuestActions.style.display = 'flex';
       if (navUserContainer) navUserContainer.style.display = 'none';
+      if (navNotificationContainer) navNotificationContainer.style.display = 'none';
       if (adminNavTab) adminNavTab.style.display = 'none';
-      if (mobileNavAdmin) mobileNavAdmin.style.display = 'none';
       if (teacherNavTab) teacherNavTab.style.display = 'none';
-      if (mobileNavTeacher) mobileNavTeacher.style.display = 'none';
 
-      // Logged out: SHOW Homepage Sign In & Register buttons, HIDE Go to Dashboard
+      // Mobile Nav: Strictly hide all private items and student registration!
+      // In logged-out state, only Home, MCQ Tests, Test Papers, Leaderboard show!
+      if (mobileNavRegister) mobileNavRegister.style.display = 'none';
+      if (mobileNavDashboard) mobileNavDashboard.style.display = 'none';
+      if (mobileNavProfile) mobileNavProfile.style.display = 'none';
+      if (mobileNavNotifications) mobileNavNotifications.style.display = 'none';
+      if (mobileNavTeacher) mobileNavTeacher.style.display = 'none';
+      if (mobileNavAdmin) mobileNavAdmin.style.display = 'none';
+      if (mobileNavLogout) mobileNavLogout.style.display = 'none';
+
+      // Logged out Hero CTAs
       if (heroSignInBtn) heroSignInBtn.classList.remove('hidden');
       if (heroRegisterBtn) heroRegisterBtn.classList.remove('hidden');
       if (heroDashboardBtn) heroDashboardBtn.classList.add('hidden');

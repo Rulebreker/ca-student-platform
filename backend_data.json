@@ -21,8 +21,8 @@
       "password": "sha256:rohan_salt_2026:4bc09285fc316fdb16fabcc092c15d15b9b9fbb7a19e926d55796dd509278baa",
       "username": "rohan_sharma",
       "totalXp": 1000,
-      "referralPoints": 500,
-      "referralCount": 5,
+      "referralPoints": 600,
+      "referralCount": 6,
       "baseXp": 0
     },
     "priya.patel@castudent.in": {
@@ -153,6 +153,58 @@
       "referralPoints": 0,
       "referralCount": 0,
       "createdAt": "2026-09-13T10:44:06.354796+00:00"
+    },
+    "ref_13c7af@castudent.in": {
+      "id": "usr-student-1789299436212",
+      "name": "Referrer Student 13c7af",
+      "username": "refa13c7af",
+      "email": "ref_13c7af@castudent.in",
+      "phone": "9876543211",
+      "caLevel": "CA INTER",
+      "password": "sha256:908f55c165f549fc:aa96b22ab8d5dc0bdcf87c53c59450350d9543ac86252c813304dbd68fb13d47",
+      "role": "student",
+      "token": "token_student_191aef60a926419b",
+      "isActive": true,
+      "totalXp": 1000,
+      "baseXp": 0,
+      "referralPoints": 100,
+      "referralCount": 1,
+      "createdAt": "2026-09-13T11:37:16.213194+00:00"
+    },
+    "new_3e948b@castudent.in": {
+      "id": "usr-student-1789299436305",
+      "name": "Referred Student 3e948b",
+      "username": "newb3e948b",
+      "email": "new_3e948b@castudent.in",
+      "phone": "9876543212",
+      "caLevel": "CA FOUNDATION",
+      "password": "sha256:b43e177d0c9640fa:ada380ca6e4903e95981cf46c1f6a936f830f4d9b60ab522154a3560a4e2e180",
+      "role": "student",
+      "token": "token_student_5321548147854509",
+      "isActive": true,
+      "totalXp": 1000,
+      "baseXp": 0,
+      "referralPoints": 100,
+      "referralCount": 0,
+      "createdAt": "2026-09-13T11:37:16.305001+00:00",
+      "referredBy": "refa13c7af"
+    },
+    "st_noref_1789299442@castudent.in": {
+      "id": "usr-student-1789299442504",
+      "name": "Clean Student",
+      "username": "st_noref_1789299442",
+      "email": "st_noref_1789299442@castudent.in",
+      "phone": "9876543211",
+      "caLevel": "CA FOUNDATION",
+      "password": "sha256:6ec75d40849e40ad:1fbd8667197fe4a7641b3e59b348a184700be404f3efa469fb393864cd756434",
+      "role": "student",
+      "token": "token_student_b603c2a0a7754408",
+      "isActive": true,
+      "totalXp": 1000,
+      "baseXp": 0,
+      "referralPoints": 0,
+      "referralCount": 0,
+      "createdAt": "2026-09-13T11:37:22.504680+00:00"
     }
   },
   "papers": [
@@ -308,7 +360,7 @@
       "description": "Speed practice covering offer, acceptance, and consideration.",
       "subject": "Business Law",
       "topic": "The Indian Contract Act 1872",
-      "maximumMarks": 16.0,
+      "maximumMarks": 20.0,
       "durationMinutes": 15,
       "marksPerCorrect": 1.0,
       "negativeMarksPerWrong": 0.25,
@@ -319,7 +371,7 @@
       "subjectId": "sub-2",
       "id": "tst-1789221563664",
       "createdAt": "2026-09-12T13:59:23.664324+00:00",
-      "totalQuestions": 9,
+      "totalQuestions": 11,
       "attemptsCount": 0
     },
     {
@@ -2898,6 +2950,44 @@
       "explanation": "Step 3 is determining the transaction price.",
       "isDraft": false,
       "createdAt": "2026-09-13T10:44:08.548344+00:00"
+    },
+    {
+      "id": "q-1789299445060-1",
+      "testId": "tst-1789221563664",
+      "subjectId": "sub-2",
+      "number": 10,
+      "text": "What is the statutory notice period required for calling a board meeting under Section 173(3) of Companies Act 2013?",
+      "options": {
+        "A": "Not less than 3 days",
+        "B": "Not less than 7 days",
+        "C": "Not less than 14 days",
+        "D": "Not less than 21 days"
+      },
+      "correctOption": "B",
+      "marks": 2.0,
+      "negativeMarks": 0.5,
+      "explanation": "Section 173(3) requires at least 7 days written notice to every director.",
+      "isDraft": false,
+      "createdAt": "2026-09-13T11:37:25.060433+00:00"
+    },
+    {
+      "id": "q-1789299445060-2",
+      "testId": "tst-1789221563664",
+      "subjectId": "sub-2",
+      "number": 11,
+      "text": "Under Ind AS 115, which of the following is Step 3 of the 5-step revenue recognition model?",
+      "options": {
+        "A": "Identify the contract with customer",
+        "B": "Identify performance obligations",
+        "C": "Determine the transaction price",
+        "D": "Allocate transaction price"
+      },
+      "correctOption": "C",
+      "marks": 2.0,
+      "negativeMarks": 0.5,
+      "explanation": "Step 3 is determining the transaction price.",
+      "isDraft": false,
+      "createdAt": "2026-09-13T11:37:25.060433+00:00"
     }
   ],
   "test_attempts": [
@@ -3726,6 +3816,50 @@
   ],
   "notifications": [
     {
+      "id": "notif-1789299442608",
+      "userId": "usr-student-1",
+      "type": "referral",
+      "title": "Referral Bonus Credited! \ud83c\udf89",
+      "message": "Referred Student (@st_withref_1789299442) registered using your code! +100 Referral Points credited.",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "points": 100,
+        "referredId": "usr-student-1789299442607",
+        "referredUsername": "st_withref_1789299442"
+      },
+      "createdAt": "2026-09-13T11:37:22.608232+00:00"
+    },
+    {
+      "id": "notif-1789299436306",
+      "userId": "usr-student-1789299436305",
+      "type": "referral",
+      "title": "Welcome Referral Bonus! \ud83c\udf81",
+      "message": "You joined with referral code @refa13c7af! +100 Referral Points credited to your account.",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "points": 100,
+        "referrerId": "usr-student-1789299436212"
+      },
+      "createdAt": "2026-09-13T11:37:16.305001+00:00"
+    },
+    {
+      "id": "notif-1789299436305",
+      "userId": "usr-student-1789299436212",
+      "type": "referral",
+      "title": "Referral Bonus Credited! \ud83c\udf89",
+      "message": "Referred Student 3e948b (@newb3e948b) registered using your code! +100 Referral Points credited.",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "points": 100,
+        "referredId": "usr-student-1789299436305",
+        "referredUsername": "newb3e948b"
+      },
+      "createdAt": "2026-09-13T11:37:16.305001+00:00"
+    },
+    {
       "id": "notif-1789296246446",
       "userId": "usr-student-1",
       "type": "referral",
@@ -4358,6 +4492,350 @@
   ],
   "bookmarks": [],
   "xp_transactions": [
+    {
+      "id": "tx-bulk-1789299443262-609bc7",
+      "idempotencyKey": "bulk_set_usr-student-1789299442607_1789299443262",
+      "userId": "usr-student-1789299442607",
+      "studentName": "Legitimately Updated Name",
+      "studentUsername": "st_withref_1789299442",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin Bulk Set: 1000 XP",
+      "description": "All India Mock Exam Calibration",
+      "points": 1000,
+      "previousXp": 0,
+      "newXp": 1000,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 0 XP \u2192 New: 1000 XP",
+      "metadata": {
+        "action": "bulk_set",
+        "amount": 1000,
+        "reason": "All India Mock Exam Calibration"
+      },
+      "createdAt": "2026-09-13T11:37:23.262566+00:00"
+    },
+    {
+      "id": "tx-bulk-1789299443262-ea39aa",
+      "idempotencyKey": "bulk_set_usr-student-1789299442504_1789299443262",
+      "userId": "usr-student-1789299442504",
+      "studentName": "Clean Student",
+      "studentUsername": "st_noref_1789299442",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin Bulk Set: 1000 XP",
+      "description": "All India Mock Exam Calibration",
+      "points": 1000,
+      "previousXp": 0,
+      "newXp": 1000,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 0 XP \u2192 New: 1000 XP",
+      "metadata": {
+        "action": "bulk_set",
+        "amount": 1000,
+        "reason": "All India Mock Exam Calibration"
+      },
+      "createdAt": "2026-09-13T11:37:23.262566+00:00"
+    },
+    {
+      "id": "tx-bulk-1789299443262-b5ef03",
+      "idempotencyKey": "bulk_set_usr-student-1789299436305_1789299443262",
+      "userId": "usr-student-1789299436305",
+      "studentName": "Referred Student 3e948b",
+      "studentUsername": "newb3e948b",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin Bulk Set: 1000 XP",
+      "description": "All India Mock Exam Calibration",
+      "points": 1000,
+      "previousXp": 0,
+      "newXp": 1000,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 0 XP \u2192 New: 1000 XP",
+      "metadata": {
+        "action": "bulk_set",
+        "amount": 1000,
+        "reason": "All India Mock Exam Calibration"
+      },
+      "createdAt": "2026-09-13T11:37:23.262566+00:00"
+    },
+    {
+      "id": "tx-bulk-1789299443262-5d2d3e",
+      "idempotencyKey": "bulk_set_usr-student-1789299436212_1789299443262",
+      "userId": "usr-student-1789299436212",
+      "studentName": "Referrer Student 13c7af",
+      "studentUsername": "refa13c7af",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin Bulk Set: 1000 XP",
+      "description": "All India Mock Exam Calibration",
+      "points": 1000,
+      "previousXp": 0,
+      "newXp": 1000,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 0 XP \u2192 New: 1000 XP",
+      "metadata": {
+        "action": "bulk_set",
+        "amount": 1000,
+        "reason": "All India Mock Exam Calibration"
+      },
+      "createdAt": "2026-09-13T11:37:23.262566+00:00"
+    },
+    {
+      "id": "tx-bulk-1789299443262-84f2fb",
+      "idempotencyKey": "bulk_set_usr-student-1789296246354_1789299443262",
+      "userId": "usr-student-1789296246354",
+      "studentName": "Clean Student",
+      "studentUsername": "st_noref_1789296246",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin Bulk Set: 1000 XP",
+      "description": "All India Mock Exam Calibration",
+      "points": 0,
+      "previousXp": 1000,
+      "newXp": 1000,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 1000 XP \u2192 New: 1000 XP",
+      "metadata": {
+        "action": "bulk_set",
+        "amount": 1000,
+        "reason": "All India Mock Exam Calibration"
+      },
+      "createdAt": "2026-09-13T11:37:23.262566+00:00"
+    },
+    {
+      "id": "tx-bulk-1789299443262-9ef262",
+      "idempotencyKey": "bulk_set_usr-student-1789296215462_1789299443262",
+      "userId": "usr-student-1789296215462",
+      "studentName": "Clean Student",
+      "studentUsername": "st_noref_1789296215",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin Bulk Set: 1000 XP",
+      "description": "All India Mock Exam Calibration",
+      "points": 0,
+      "previousXp": 1000,
+      "newXp": 1000,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 1000 XP \u2192 New: 1000 XP",
+      "metadata": {
+        "action": "bulk_set",
+        "amount": 1000,
+        "reason": "All India Mock Exam Calibration"
+      },
+      "createdAt": "2026-09-13T11:37:23.262566+00:00"
+    },
+    {
+      "id": "tx-bulk-1789299443262-b3767d",
+      "idempotencyKey": "bulk_set_usr-student-1789296138691_1789299443262",
+      "userId": "usr-student-1789296138691",
+      "studentName": "Legitimately Updated Name",
+      "studentUsername": "st_withref_1789296138",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin Bulk Set: 1000 XP",
+      "description": "All India Mock Exam Calibration",
+      "points": 0,
+      "previousXp": 1000,
+      "newXp": 1000,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 1000 XP \u2192 New: 1000 XP",
+      "metadata": {
+        "action": "bulk_set",
+        "amount": 1000,
+        "reason": "All India Mock Exam Calibration"
+      },
+      "createdAt": "2026-09-13T11:37:23.262566+00:00"
+    },
+    {
+      "id": "tx-bulk-1789299443262-68d2fb",
+      "idempotencyKey": "bulk_set_usr-student-1789296138597_1789299443262",
+      "userId": "usr-student-1789296138597",
+      "studentName": "Clean Student",
+      "studentUsername": "st_noref_1789296138",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin Bulk Set: 1000 XP",
+      "description": "All India Mock Exam Calibration",
+      "points": 0,
+      "previousXp": 1000,
+      "newXp": 1000,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 1000 XP \u2192 New: 1000 XP",
+      "metadata": {
+        "action": "bulk_set",
+        "amount": 1000,
+        "reason": "All India Mock Exam Calibration"
+      },
+      "createdAt": "2026-09-13T11:37:23.262566+00:00"
+    },
+    {
+      "id": "tx-bulk-1789299443262-52463b",
+      "idempotencyKey": "bulk_set_usr-student-1789296086576_1789299443262",
+      "userId": "usr-student-1789296086576",
+      "studentName": "Legitimately Updated Name",
+      "studentUsername": "st_withref_1789296086",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin Bulk Set: 1000 XP",
+      "description": "All India Mock Exam Calibration",
+      "points": 0,
+      "previousXp": 1000,
+      "newXp": 1000,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 1000 XP \u2192 New: 1000 XP",
+      "metadata": {
+        "action": "bulk_set",
+        "amount": 1000,
+        "reason": "All India Mock Exam Calibration"
+      },
+      "createdAt": "2026-09-13T11:37:23.262566+00:00"
+    },
+    {
+      "id": "tx-bulk-1789299443262-73552d",
+      "idempotencyKey": "bulk_set_usr-student-1789296086486_1789299443262",
+      "userId": "usr-student-1789296086486",
+      "studentName": "Clean Student",
+      "studentUsername": "st_noref_1789296086",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin Bulk Set: 1000 XP",
+      "description": "All India Mock Exam Calibration",
+      "points": 0,
+      "previousXp": 1000,
+      "newXp": 1000,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 1000 XP \u2192 New: 1000 XP",
+      "metadata": {
+        "action": "bulk_set",
+        "amount": 1000,
+        "reason": "All India Mock Exam Calibration"
+      },
+      "createdAt": "2026-09-13T11:37:23.262566+00:00"
+    },
+    {
+      "id": "tx-bulk-1789299443262-49cff0",
+      "idempotencyKey": "bulk_set_usr-student-2_1789299443262",
+      "userId": "usr-student-2",
+      "studentName": "Priya Patel",
+      "studentUsername": "priya_patel",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin Bulk Set: 1000 XP",
+      "description": "All India Mock Exam Calibration",
+      "points": 0,
+      "previousXp": 1000,
+      "newXp": 1000,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 1000 XP \u2192 New: 1000 XP",
+      "metadata": {
+        "action": "bulk_set",
+        "amount": 1000,
+        "reason": "All India Mock Exam Calibration"
+      },
+      "createdAt": "2026-09-13T11:37:23.262566+00:00"
+    },
+    {
+      "id": "tx-bulk-1789299443262-43d8bf",
+      "idempotencyKey": "bulk_set_usr-student-1_1789299443262",
+      "userId": "usr-student-1",
+      "studentName": "Rohan Sharma",
+      "studentUsername": "rohan_sharma",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin Bulk Set: 1000 XP",
+      "description": "All India Mock Exam Calibration",
+      "points": 0,
+      "previousXp": 1000,
+      "newXp": 1000,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 1000 XP \u2192 New: 1000 XP",
+      "metadata": {
+        "action": "bulk_set",
+        "amount": 1000,
+        "reason": "All India Mock Exam Calibration"
+      },
+      "createdAt": "2026-09-13T11:37:23.262566+00:00"
+    },
+    {
+      "id": "tx-admin-1789299443092-5b784f",
+      "idempotencyKey": "admin_adj_usr-student-1789299442607_1789299443092",
+      "userId": "usr-student-1789299442607",
+      "studentName": "Legitimately Updated Name",
+      "studentUsername": "st_withref_1789299442",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin XP Set: Set to 0 XP",
+      "description": "Point reset test",
+      "points": -500,
+      "previousXp": 500,
+      "newXp": 0,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 500 XP \u2192 New: 0 XP",
+      "metadata": {
+        "action": "set",
+        "amount": 0,
+        "previousXp": 500,
+        "newXp": 0,
+        "adminName": "Administrator",
+        "adminUsername": "adminrulebreker@rulebrekerdothunter.com",
+        "reason": "Point reset test"
+      },
+      "createdAt": "2026-09-13T11:37:23.092417+00:00"
+    },
+    {
+      "id": "tx-admin-1789299442931-abe3a7",
+      "idempotencyKey": "admin_adj_usr-student-1789299442607_1789299442931",
+      "userId": "usr-student-1789299442607",
+      "studentName": "Legitimately Updated Name",
+      "studentUsername": "st_withref_1789299442",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin XP Set: Set to 500 XP",
+      "description": "Initial test award",
+      "points": 500,
+      "previousXp": 0,
+      "newXp": 500,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 0 XP \u2192 New: 500 XP",
+      "metadata": {
+        "action": "set",
+        "amount": 500,
+        "previousXp": 0,
+        "newXp": 500,
+        "adminName": "Administrator",
+        "adminUsername": "adminrulebreker@rulebrekerdothunter.com",
+        "reason": "Initial test award"
+      },
+      "createdAt": "2026-09-13T11:37:22.931403+00:00"
+    },
     {
       "id": "tx-bulk-1789296247124-5dd253",
       "idempotencyKey": "bulk_set_usr-student-1789296246446_1789296247124",
@@ -6111,6 +6589,38 @@
   ],
   "referrals": [
     {
+      "id": "ref-1789299442608-a92df4",
+      "referrerId": "usr-student-1",
+      "referrerUsername": "rohan_sharma",
+      "referrerName": "Rohan Sharma",
+      "referredId": "usr-student-1789299442607",
+      "referredUsername": "st_withref_1789299442",
+      "referredName": "Referred Student",
+      "referralCode": "rohan_sharma",
+      "referrerReward": 100,
+      "referredReward": 100,
+      "pointsAwarded": 100,
+      "examLevel": "CA FOUNDATION",
+      "createdAt": "2026-09-13T11:37:22.608232+00:00",
+      "status": "completed"
+    },
+    {
+      "id": "ref-1789299436305-88d8d7",
+      "referrerId": "usr-student-1789299436212",
+      "referrerUsername": "refa13c7af",
+      "referrerName": "Referrer Student 13c7af",
+      "referredId": "usr-student-1789299436305",
+      "referredUsername": "newb3e948b",
+      "referredName": "Referred Student 3e948b",
+      "referralCode": "refa13c7af",
+      "referrerReward": 100,
+      "referredReward": 100,
+      "pointsAwarded": 100,
+      "examLevel": "CA FOUNDATION",
+      "createdAt": "2026-09-13T11:37:16.305001+00:00",
+      "status": "completed"
+    },
+    {
       "id": "ref-1789296246446-352519",
       "referrerId": "usr-student-1",
       "referrerUsername": "rohan_sharma",
@@ -6187,7 +6697,7 @@
     "intervalDays": 90,
     "customSeconds": null,
     "lastReset": "2026-09-13T09:45:16.798183+00:00",
-    "updatedAt": "2026-09-13T10:44:08.890940+00:00",
+    "updatedAt": "2026-09-13T11:37:25.429687+00:00",
     "updatedBy": "Administrator",
     "lastResetStudentsCount": 1,
     "interval": "daily",
@@ -6237,5 +6747,15 @@
       "nextScheduledReset": "2026-12-12T08:45:34.392302+00:00"
     }
   ],
-  "_xp_historical_synced": true
+  "_xp_historical_synced": true,
+  "revoked_tokens": [
+    "token_student_dc96707de83b47ef",
+    "token_student_54c59534f9c84860"
+  ],
+  "revoked_users": [
+    "usr-student-1789299436023",
+    "testdel_ca7357@castudent.in",
+    "usr-student-1789299442607",
+    "st_withref_1789299442@castudent.in"
+  ]
 }

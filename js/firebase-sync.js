@@ -54,6 +54,12 @@ class FirebaseSyncManager {
 
       // 3. Setup real-time listeners for all collections
       this.attachListeners();
+
+      // 4. Attach dedicated real-time listener to current user session if authenticated
+      const curUser = window.store ? window.store.getCurrentUser() : null;
+      if (curUser && curUser.id) {
+        this.attachCurrentUserListener(curUser.id);
+      }
     } catch (err) {
       console.error('[FirebaseSync] Initialization error:', err);
     }
@@ -361,7 +367,20 @@ class FirebaseSyncManager {
 
         // Real-time synchronization of current active user session
         const current = window.store ? window.store.getCurrentUser() : null;
-        if (current) {
+        if (current && current.role === 'student') {
+          const freshCurrent = localUsers.find(u => u.id === current.id);
+          if (!freshCurrent || freshCurrent.isActive === false || freshCurrent.isDeleted === true) {
+            console.warn('[FirebaseSync] Logged-in student account was deleted or deactivated by admin. Revoking session.');
+            if (window.auth && typeof window.auth.handleSessionRevoked === 'function') {
+              window.auth.handleSessionRevoked('Your account has been deleted or deactivated by the administrator.');
+              return;
+            }
+          } else {
+            window.store.setCurrentUser(freshCurrent);
+            if (window.auth) window.auth.currentUser = freshCurrent;
+            this.updateUserPointsUi(freshCurrent);
+          }
+        } else if (current) {
           const freshCurrent = localUsers.find(u => u.id === current.id);
           if (freshCurrent) {
             window.store.setCurrentUser(freshCurrent);
@@ -870,6 +889,64 @@ class FirebaseSyncManager {
       console.warn('[FirebaseSync] Error merging referrals:', e);
     } finally {
       this._isMergingReferrals = false;
+    }
+  }
+
+  attachCurrentUserListener(userId) {
+    if (!this.db || !userId) return;
+    this.detachUserListeners();
+
+    try {
+      this._currentUserRef = this.db.ref('users/' + userId);
+      this._currentUserRef.on('value', snap => {
+        const val = snap.val();
+        const current = window.store ? window.store.getCurrentUser() : null;
+        if (!current || current.id !== userId) return;
+
+        if (!val || val.isActive === false || val.isDeleted === true) {
+          console.warn('[FirebaseSync] Direct user listener detected deletion for user:', userId);
+          if (window.auth && typeof window.auth.handleSessionRevoked === 'function') {
+            window.auth.handleSessionRevoked('Your account has been deleted or deactivated by the administrator.');
+          }
+          return;
+        }
+
+        // Account is active; update current user in store & auth, and refresh points UI
+        window.store.setCurrentUser(val);
+        if (window.auth) window.auth.currentUser = val;
+        this.updateUserPointsUi(val);
+      }, err => {
+        console.warn('[FirebaseSync] Current user listener error:', err);
+      });
+    } catch (e) {
+      console.warn('[FirebaseSync] Could not attach current user listener:', e);
+    }
+  }
+
+  detachUserListeners() {
+    if (this._currentUserRef) {
+      try {
+        this._currentUserRef.off();
+      } catch (e) {}
+      this._currentUserRef = null;
+    }
+  }
+
+  updateUserPointsUi(user) {
+    if (!user) return;
+    const refPointsEl = document.getElementById('profile-page-referral-points');
+    if (refPointsEl) {
+      refPointsEl.textContent = user.referralPoints !== undefined ? user.referralPoints : 0;
+    }
+    const refCountEl = document.getElementById('profile-page-referral-count');
+    if (refCountEl) {
+      refCountEl.textContent = user.referralCount !== undefined ? user.referralCount : 0;
+    }
+    if (window.app && window.app.currentView === 'profile' && typeof window.app.renderProfilePage === 'function') {
+      window.app.renderProfilePage();
+    }
+    if (window.app && window.app.currentView === 'dashboard' && window.studentDashboard && typeof window.studentDashboard.render === 'function') {
+      window.studentDashboard.render();
     }
   }
 

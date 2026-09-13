@@ -462,50 +462,49 @@ def xp_reset_background_worker():
         except Exception as e:
             print(f"[XP Reset Engine] Worker loop error: {e}")
 
+REVOKED_TOKENS = set()
+REVOKED_USERS = set()
+
 def authenticate_token(token_or_email):
     if not token_or_email:
         return None
-    data = load_backend_data()
     clean_token = str(token_or_email).strip()
-    
+    if clean_token in REVOKED_TOKENS or clean_token.lower() in REVOKED_USERS:
+        return None
+
+    data = load_backend_data()
+    persisted_revoked_tokens = set(data.get('revoked_tokens', []))
+    persisted_revoked_users = set(data.get('revoked_users', []))
+    if clean_token in persisted_revoked_tokens or clean_token.lower() in persisted_revoked_users:
+        return None
+
+    # 1. Authoritative lookup in stored users
     for email, u in data.get('users', {}).items():
         if (u.get('token') == clean_token or 
             u.get('id') == clean_token or 
             (u.get('email') and u.get('email').lower() == clean_token.lower()) or 
             (u.get('username') and u.get('username').lower() == clean_token.lower())):
-            if u.get('isActive', True):
+            # Check revocation
+            if (u.get('token') and (u.get('token') in REVOKED_TOKENS or u.get('token') in persisted_revoked_tokens)) or \
+               (u.get('id') and (u.get('id').lower() in REVOKED_USERS or u.get('id').lower() in persisted_revoked_users)) or \
+               (u.get('email') and (u.get('email').lower() in REVOKED_USERS or u.get('email').lower() in persisted_revoked_users)):
+                return None
+            if u.get('isActive', True) and not u.get('isDeleted', False):
                 return u
+            return None
 
-    if clean_token.startswith('token_admin') or clean_token.lower() in ['admin', 'adminrulebreker', 'adminrulebreker@rulebrekerdothunter.com', 'admin@excellenceca.com'] or 'admin' in clean_token.lower():
+    # 2. Recognized administrator credentials
+    if clean_token == 'token_admin_excellenceca_secret' or clean_token.lower() in ['admin', 'adminrulebreker', 'adminrulebreker@rulebrekerdothunter.com']:
         admin_u = next((u for u in data.get('users', {}).values() if u.get('role') == 'admin'), None)
         if admin_u and admin_u.get('isActive', True):
             return admin_u
 
-    if clean_token.startswith('token_teacher') or clean_token.lower() in ['teacher', 'faculty']:
+    # 3. Recognized teacher credentials
+    if clean_token == 'token_prof_sharma_teacher' or clean_token.lower() == 'prof.sharma@excellenceca.com':
         teach_u = next((u for u in data.get('users', {}).values() if u.get('role') == 'teacher'), None)
         if teach_u and teach_u.get('isActive', True):
             return teach_u
 
-    if '@' in clean_token:
-        u = data.get('users', {}).get(clean_token.lower())
-        if u and u.get('isActive', True):
-            return u
-        # Recognized active student user with email
-        return {
-            'id': f'usr-student-{abs(hash(clean_token)) % 100000}',
-            'name': clean_token.split('@')[0],
-            'email': clean_token.lower(),
-            'role': 'student',
-            'isActive': True
-        }
-    if clean_token.startswith('token_') or clean_token.startswith('usr-'):
-        return {
-            'id': clean_token,
-            'name': 'Student',
-            'email': f'{clean_token}@castudent.in',
-            'role': 'student',
-            'isActive': True
-        }
     return None
 
 def extract_text_from_pdf(pdf_bytes):
@@ -1923,9 +1922,34 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json(403, {'error': 'Security Policy: Administrator accounts cannot be deleted.', 'code': 403})
                     return
 
+                # Invalidate all active session tokens immediately
+                st_id = target_student.get('id')
+                st_token = target_student.get('token')
+                st_email = (target_student.get('email') or '').lower()
+                st_uname = (target_student.get('username') or '').lower().lstrip('@')
+
+                if st_token:
+                    REVOKED_TOKENS.add(str(st_token).strip())
+                if st_id:
+                    REVOKED_USERS.add(str(st_id).strip().lower())
+                if st_email:
+                    REVOKED_USERS.add(st_email)
+                if st_uname:
+                    REVOKED_USERS.add(st_uname)
+
+                if 'revoked_tokens' not in data:
+                    data['revoked_tokens'] = []
+                if 'revoked_users' not in data:
+                    data['revoked_users'] = []
+                if st_token and st_token not in data['revoked_tokens']:
+                    data['revoked_tokens'].append(str(st_token).strip())
+                if st_id and st_id.lower() not in data['revoked_users']:
+                    data['revoked_users'].append(str(st_id).strip().lower())
+                if st_email and st_email not in data['revoked_users']:
+                    data['revoked_users'].append(st_email)
+
                 # Permanently remove student
                 del users[target_key]
-                st_id = target_student.get('id')
 
                 # Clean up associated student records
                 if 'submissions' in data:

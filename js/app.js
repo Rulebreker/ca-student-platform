@@ -521,7 +521,7 @@ class App {
     }
   }
 
-  handleSignupSubmit(e) {
+  async handleSignupSubmit(e) {
     if (e && e.preventDefault) e.preventDefault();
     const username = document.getElementById('reg-username').value.trim();
     const name = document.getElementById('reg-name').value.trim();
@@ -532,26 +532,43 @@ class App {
     const confirm = document.getElementById('reg-confirm').value;
     const ref = document.getElementById('reg-ref') ? document.getElementById('reg-ref').value.trim() : '';
 
-    const res = window.auth.register(username, name, email, phone, caLevel, pass, confirm, 'student', 'Uttar Pradesh', 'Meerut', ref);
-    if (res.success) {
-      this.closeModal('auth-modal');
-      let msg = `Registration complete! Welcome to ExcellenceCA, ${res.user.name} (${res.user.caLevel}).`;
-      if (res.referredBy) {
-        msg += ` Referred by ${res.referredBy} (+100 pts awarded).`;
-      }
-      this.showToast(msg, 'success');
-      this.navigate('dashboard');
-      if (window.history && window.history.replaceState) {
-        window.history.replaceState(null, '', '#dashboard');
+    const submitBtn = e && e.target ? e.target.querySelector('button[type="submit"]') : null;
+    const originalBtnHtml = submitBtn ? submitBtn.innerHTML : '';
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="inline-flex items-center gap-2"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Registering...</span>';
+    }
+
+    try {
+      const res = await window.auth.register(username, name, email, phone, caLevel, pass, confirm, 'student', 'Uttar Pradesh', 'Meerut', ref);
+      if (res.success) {
+        this.closeModal('auth-modal');
+        let msg = `Registration complete! Welcome to ExcellenceCA, ${res.user.name} (${res.user.caLevel}).`;
+        if (res.referredBy) {
+          msg += ` Referred by ${res.referredBy} (+100 pts awarded).`;
+        }
+        this.showToast(msg, 'success');
+        this.navigate('dashboard');
+        if (window.history && window.history.replaceState) {
+          window.history.replaceState(null, '', '#dashboard');
+        } else {
+          window.location.hash = 'dashboard';
+        }
       } else {
-        window.location.hash = 'dashboard';
+        this.showToast(res.error, 'error');
       }
-    } else {
-      this.showToast(res.error, 'error');
+    } catch (err) {
+      this.showToast('Registration error: ' + err.message, 'error');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalBtnHtml;
+        if (window.lucide) window.lucide.createIcons();
+      }
     }
   }
 
-  handlePageSignupSubmit(e) {
+  async handlePageSignupSubmit(e) {
     if (e && e.preventDefault) e.preventDefault();
     const username = document.getElementById('page-reg-username').value.trim();
     const name = document.getElementById('page-reg-name').value.trim();
@@ -562,23 +579,40 @@ class App {
     const confirm = document.getElementById('page-reg-confirm').value;
     const ref = document.getElementById('page-reg-ref') ? document.getElementById('page-reg-ref').value.trim() : '';
 
-    const res = window.auth.register(username, name, email, phone, caLevel, pass, confirm, 'student', 'Uttar Pradesh', 'Meerut', ref);
-    if (res.success) {
-      let msg = `Account created successfully! Welcome to ExcellenceCA, ${res.user.name} (${res.user.caLevel}).`;
-      if (res.referredBy) {
-        msg += ` Referred by ${res.referredBy} (+100 pts awarded).`;
-      }
-      this.showToast(msg, 'success');
-      const form = document.getElementById('page-registration-form');
-      if (form) form.reset();
-      this.navigate('dashboard');
-      if (window.history && window.history.replaceState) {
-        window.history.replaceState(null, '', '#dashboard');
+    const submitBtn = e && e.target ? e.target.querySelector('button[type="submit"]') : null;
+    const originalBtnHtml = submitBtn ? submitBtn.innerHTML : '';
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="inline-flex items-center gap-2"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Creating Account...</span>';
+    }
+
+    try {
+      const res = await window.auth.register(username, name, email, phone, caLevel, pass, confirm, 'student', 'Uttar Pradesh', 'Meerut', ref);
+      if (res.success) {
+        let msg = `Account created successfully! Welcome to ExcellenceCA, ${res.user.name} (${res.user.caLevel}).`;
+        if (res.referredBy) {
+          msg += ` Referred by ${res.referredBy} (+100 pts awarded).`;
+        }
+        this.showToast(msg, 'success');
+        const form = document.getElementById('page-registration-form');
+        if (form) form.reset();
+        this.navigate('dashboard');
+        if (window.history && window.history.replaceState) {
+          window.history.replaceState(null, '', '#dashboard');
+        } else {
+          window.location.hash = 'dashboard';
+        }
       } else {
-        window.location.hash = 'dashboard';
+        this.showToast(res.error, 'error');
       }
-    } else {
-      this.showToast(res.error, 'error');
+    } catch (err) {
+      this.showToast('Registration error: ' + err.message, 'error');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalBtnHtml;
+        if (window.lucide) window.lucide.createIcons();
+      }
     }
   }
 

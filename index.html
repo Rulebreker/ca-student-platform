@@ -62,6 +62,7 @@
     })();
   </script>
   <style>
+    /* Authenticated User state */
     html.user-is-authenticated #nav-guest-actions,
     html.user-is-authenticated #hero-signin-btn,
     html.user-is-authenticated #hero-register-btn,
@@ -73,6 +74,23 @@
     }
     html.user-is-authenticated #hero-dashboard-btn {
       display: inline-flex !important;
+    }
+
+    /* Unauthenticated / Logged-out state: strictly hide all private & student drawer items */
+    html:not(.user-is-authenticated) #nav-user-container,
+    html:not(.user-is-authenticated) #nav-notification-container,
+    html:not(.user-is-authenticated) #hero-dashboard-btn,
+    html:not(.user-is-authenticated) #mobile-nav-register,
+    html:not(.user-is-authenticated) #mobile-nav-dashboard,
+    html:not(.user-is-authenticated) #mobile-nav-profile,
+    html:not(.user-is-authenticated) #mobile-nav-notifications,
+    html:not(.user-is-authenticated) #mobile-nav-teacher,
+    html:not(.user-is-authenticated) #mobile-nav-admin,
+    html:not(.user-is-authenticated) #mobile-nav-logout {
+      display: none !important;
+    }
+    html:not(.user-is-authenticated) #nav-guest-actions {
+      display: flex !important;
     }
   </style>
 
@@ -208,11 +226,11 @@
       <button id="mobile-nav-profile" data-nav="profile" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
         <i data-lucide="user" class="w-4 h-4 text-slate-500"></i> My Profile
       </button>
-      <button onclick="window.app.toggleNotificationPanel(); window.app.toggleMobileMenu(false);" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-50 flex items-center justify-between transition-colors">
+      <button id="mobile-nav-notifications" onclick="window.app.toggleNotificationPanel(); window.app.toggleMobileMenu(false);" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-50 flex items-center justify-between transition-colors">
         <span class="flex items-center gap-2.5"><i data-lucide="bell" class="w-4 h-4 text-slate-500"></i> Notifications</span>
         <span id="mobile-notification-count" class="hidden px-2 py-0.5 text-[10px] font-bold rounded-full bg-rose-500 text-white">0</span>
       </button>
-      <button id="mobile-nav-register" data-nav="register" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-emerald-700 bg-emerald-50 flex items-center gap-2.5 transition-colors">
+      <button id="mobile-nav-register" data-nav="register" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-emerald-700 bg-emerald-50 flex items-center gap-2.5 transition-colors" style="display: none !important;">
         <i data-lucide="user-plus" class="w-4 h-4 text-emerald-600"></i> Student Registration
       </button>
       <button data-nav="tests" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 transition-colors">
@@ -229,6 +247,9 @@
       </button>
       <button id="mobile-nav-admin" data-nav="admin" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-rose-800 bg-rose-50 flex items-center gap-2.5 transition-colors" style="display: none;">
         <i data-lucide="shield-check" class="w-4 h-4 text-rose-700"></i> Admin Portal
+      </button>
+      <button id="mobile-nav-logout" onclick="window.auth.logout(); window.app.toggleMobileMenu(false);" class="w-full text-left px-3.5 py-2.5 min-h-[44px] text-xs font-semibold rounded-xl text-rose-700 hover:bg-rose-50 flex items-center gap-2.5 transition-colors" style="display: none;">
+        <i data-lucide="log-out" class="w-4 h-4 text-rose-600"></i> Sign Out
       </button>
     </div>
   </header>
