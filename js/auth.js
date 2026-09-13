@@ -479,8 +479,115 @@ class AuthManager {
         referredBy: authoritativeUser.referredBy || null
       };
     } catch (err) {
-      console.error('[AuthManager] Registration network error:', err);
-      return { success: false, error: 'Registration service error: Unable to connect to server. Please check your connection and try again.' };
+      console.warn(`[AuthManager] Primary backend registration unreachable (${err.name}: ${err.message}). Activating Firebase RTDB & local store cloud registration fallback.`);
+
+      try {
+        // Fallback: Client & Firebase-Authoritative Registration for Cloud / Static Deployments
+        if (window.store) {
+          const existingUsers = window.store.getUsers();
+          const cleanEmailLower = email.toLowerCase().trim();
+          if (existingUsers.some(u => u.email && u.email.toLowerCase() === cleanEmailLower)) {
+            return { success: false, error: 'Registration Failed: A user with this email address already exists.' };
+          }
+          if (existingUsers.some(u => u.username && u.username.toLowerCase().replace(/^@+/, '') === cleanUsername.toLowerCase())) {
+            return { success: false, error: `Registration Failed: Username "@${cleanUsername}" is already taken.` };
+          }
+        }
+
+        // Process referral bonus if valid referral code provided
+        let referralPoints = 0;
+        let referrerUser = null;
+        if (cleanReferredBy && window.store) {
+          const users = window.store.getUsers();
+          referrerUser = users.find(u => 
+            (u.username && u.username.toLowerCase().replace(/^@+/, '') === cleanReferredBy.toLowerCase()) ||
+            (u.email && u.email.toLowerCase() === cleanReferredBy.toLowerCase())
+          );
+
+          if (referrerUser) {
+            referralPoints = 100;
+            referrerUser.referralPoints = (referrerUser.referralPoints || 0) + 100;
+            referrerUser.referralCount = (referrerUser.referralCount || 0) + 1;
+            window.store.updateUser(referrerUser);
+            if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
+              window.firebaseSync.saveUser(referrerUser);
+            }
+
+            const refRecord = {
+              id: `ref-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+              referrerId: referrerUser.id,
+              referrerUsername: referrerUser.username,
+              referrerName: referrerUser.name,
+              referredUsername: cleanUsername,
+              referredName: fullName.trim(),
+              referralCode: cleanReferredBy,
+              referrerReward: 100,
+              referredReward: 100,
+              pointsAwarded: 100,
+              examLevel: normLevel.includes('INTER') ? 'CA INTER' : normLevel,
+              createdAt: new Date().toISOString(),
+              status: 'completed'
+            };
+            if (window.firebaseSync && typeof window.firebaseSync.saveReferral === 'function') {
+              window.firebaseSync.saveReferral(refRecord);
+            }
+          }
+        }
+
+        const newUserId = `usr-student-${Date.now()}`;
+        const newToken = `token_student_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const hashedPassword = this.hashPassword(password);
+        const newUser = {
+          id: newUserId,
+          name: fullName.trim(),
+          username: cleanUsername,
+          email: email.toLowerCase().trim(),
+          phone: cleanPhone,
+          caLevel: normLevel.includes('INTER') ? 'CA INTER' : normLevel,
+          password: hashedPassword,
+          role: 'student',
+          state: state || 'Uttar Pradesh',
+          district: district || 'Meerut',
+          token: newToken,
+          isActive: true,
+          totalXp: referralPoints,
+          baseXp: 0,
+          referralPoints: referralPoints,
+          referralCount: 0,
+          referredBy: referrerUser ? (referrerUser.username || referrerUser.name) : null,
+          createdAt: new Date().toISOString()
+        };
+
+        if (window.store) {
+          window.store.addUser(newUser);
+          window.store.setCurrentUser(newUser);
+        }
+        if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
+          window.firebaseSync.saveUser(newUser);
+        }
+
+        this.currentUser = newUser;
+        this.onAuthChange();
+
+        if (window.firebaseSync && typeof window.firebaseSync.attachCurrentUserListener === 'function') {
+          window.firebaseSync.attachCurrentUserListener(newUser.id);
+        }
+        this.startSessionWatchdog(newUser);
+
+        console.log('[AuthManager] Registration fallback succeeded via Firebase RTDB and local store.');
+        return {
+          success: true,
+          user: newUser,
+          referredBy: newUser.referredBy || null
+        };
+      } catch (fallbackErr) {
+        console.error('[AuthManager] Complete registration failure:', fallbackErr);
+        const endpointUrl = window.API_BASE_URL ? `${window.API_BASE_URL}/api/auth/register` : '/api/auth/register';
+        return { 
+          success: false, 
+          error: `Registration service error: Unable to connect to server at ${endpointUrl} (${err.message || 'NetworkError'}). Fallback error: ${fallbackErr.message}` 
+        };
+      }
     }
   }
 

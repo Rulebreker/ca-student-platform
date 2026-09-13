@@ -523,6 +523,23 @@
       "referralPoints": 0,
       "referralCount": 0,
       "createdAt": "2026-09-13T13:03:23.462338+00:00"
+    },
+    "test2@gmail.com": {
+      "id": "usr-student-1789306795151",
+      "name": "test2",
+      "username": "test2",
+      "email": "test2@gmail.com",
+      "phone": "9638527415",
+      "caLevel": "CA FOUNDATION",
+      "password": "sha256:e0468d47387148c7:0d4732bd55155896e38294abb3b80a5daea495294f766d0bf9f07d5b8098f4fd",
+      "role": "student",
+      "token": "token_student_de991d2b417c4073",
+      "isActive": true,
+      "totalXp": 0,
+      "baseXp": 0,
+      "referralPoints": 0,
+      "referralCount": 0,
+      "createdAt": "2026-09-13T13:39:55.151548+00:00"
     }
   },
   "papers": [

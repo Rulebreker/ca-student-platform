@@ -13,24 +13,63 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <!-- Universal Backend API Router: Ensures seamless communication with port 8000 across all origins/hosts -->
+  <!-- Backend API Configuration & Environment Routing -->
+  <meta name="api-base-url" content="">
   <script>
     (function() {
+      // Resolve API Base URL from environment variables, meta tags, or host context
+      function resolveApiBaseUrl() {
+        // 1. Explicit window.ENV config (e.g. injected by production CDN or serverless runtime)
+        if (window.ENV && window.ENV.API_BASE_URL) {
+          return String(window.ENV.API_BASE_URL).replace(/\/+$/, '');
+        }
+
+        // 2. HTML Meta tag config (<meta name="api-base-url" content="https://api.yourdomain.com">)
+        const metaTag = document.querySelector('meta[name="api-base-url"]');
+        if (metaTag && metaTag.content && metaTag.content.trim()) {
+          return metaTag.content.trim().replace(/\/+$/, '');
+        }
+
+        // 3. LocalStorage override for runtime testing & staging overrides
+        try {
+          const stored = localStorage.getItem('EXCELLENCECA_API_BASE');
+          if (stored && stored.trim()) return stored.trim().replace(/\/+$/, '');
+        } catch (e) {}
+
+        const hostname = window.location.hostname || '';
+        const protocol = window.location.protocol || '';
+        const isLocalDevelopment = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0';
+
+        // 4. Local Development: If running via Live Server (port 5500), Vite/Webpack dev, or file://
+        // Route to the active local Python HTTP backend on http://127.0.0.1:8000
+        if (isLocalDevelopment && window.location.port !== '8000') {
+          return 'http://127.0.0.1:8000';
+        }
+        if (protocol === 'file:') {
+          return 'http://127.0.0.1:8000';
+        }
+
+        // 5. Production Host (e.g. *.vercel.app, *.netlify.app, custom domains) or direct port 8000:
+        // Use relative path ('') to keep requests securely on the same origin over HTTPS without Mixed Content errors
+        return '';
+      }
+
+      const API_BASE = resolveApiBaseUrl();
+      window.API_BASE_URL = API_BASE;
+
       const origFetch = window.fetch;
-      const BACKEND_PORT = '8000';
-      const BACKEND_ORIGIN = 'http://127.0.0.1:8000';
       window.fetch = function(resource, init) {
-        if (typeof resource === 'string' && resource.startsWith('/api/')) {
-          if (window.location.port !== BACKEND_PORT || window.location.protocol === 'file:') {
-            resource = BACKEND_ORIGIN + resource;
-          }
-        } else if (resource && typeof resource.url === 'string' && resource.url.startsWith('/api/')) {
-          if (window.location.port !== BACKEND_PORT || window.location.protocol === 'file:') {
-            resource = new Request(BACKEND_ORIGIN + resource.url, resource);
+        if (API_BASE) {
+          if (typeof resource === 'string' && resource.startsWith('/api/')) {
+            resource = API_BASE + resource;
+          } else if (resource && typeof resource.url === 'string' && resource.url.startsWith('/api/')) {
+            resource = new Request(API_BASE + resource.url, resource);
           }
         }
         return origFetch.call(this, resource, init);
       };
+
+      console.log(`[ExcellenceCA] API Router initialized. Origin: ${window.location.origin || 'file://'}, Resolved API Base: "${API_BASE || '(same-origin / relative)'}"`);
     })();
   </script>
 

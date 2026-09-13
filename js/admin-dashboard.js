@@ -840,14 +840,17 @@ class AdminDashboard {
           try { data = JSON.parse(text); } catch (jsonErr) {}
 
           if (!resp.ok || !data || !data.success) {
-            const errMsg = (data && data.error) ? data.error : 
-              (resp.status === 403 ? 'Administrator authorization required to provision students.' :
-               resp.status === 409 ? (data && data.error ? data.error : 'A student with this username or email already exists.') :
-               resp.status === 404 ? 'User provisioning endpoint not found (404). Please ensure backend server is running on port 8000.' :
-               resp.status >= 500 ? 'Server error occurred while provisioning student. Please try again.' :
-               'Failed to provision student on server. Please verify fields.');
-            window.app.showToast(errMsg, 'error');
-            return;
+            if (resp.status === 404) {
+              console.warn('[AdminDashboard] Backend provisioning endpoint returned 404, proceeding with Firebase cloud provisioning.');
+            } else {
+              const errMsg = (data && data.error) ? data.error : 
+                (resp.status === 403 ? 'Administrator authorization required to provision students.' :
+                 resp.status === 409 ? (data && data.error ? data.error : 'A student with this username or email already exists.') :
+                 resp.status >= 500 ? 'Server error occurred while provisioning student. Please try again.' :
+                 'Failed to provision student on server. Please verify fields.');
+              window.app.showToast(errMsg, 'error');
+              return;
+            }
           }
 
           authoritativeUser = data.user;

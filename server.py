@@ -1113,14 +1113,20 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=BASE_DIR, **kwargs)
 
+    def _send_cors_headers(self):
+        req_origin = self.headers.get('Origin', '') if hasattr(self, 'headers') and self.headers else ''
+        self.send_header('Access-Control-Allow-Origin', req_origin if req_origin else '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Auth-Token, Origin, Accept')
+        self.send_header('Access-Control-Allow-Credentials', 'true')
+        self.send_header('Access-Control-Max-Age', '86400')
+
     def send_json(self, status_code, data):
         payload = json.dumps(data).encode('utf-8')
         self.send_response(status_code)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(payload)))
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Auth-Token')
+        self._send_cors_headers()
         self.end_headers()
         self.wfile.write(payload)
         try:
@@ -1130,9 +1136,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Auth-Token')
+        self._send_cors_headers()
         self.end_headers()
         try:
             self.wfile.flush()
