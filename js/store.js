@@ -1870,34 +1870,20 @@ class AppStore {
       localStorage.setItem(STORAGE_KEYS.LECTURES, JSON.stringify(DEFAULT_LECTURES));
     }
 
-    // Ensure tests are updated to the 10 CA Foundation tests
+    // Ensure tests are seeded once and respect admin deletions
     const existingTests = localStorage.getItem(STORAGE_KEYS.TESTS);
-    if (!existingTests) {
+    const testsSeededVersion = localStorage.getItem('excellenceca_tests_seeded_v2');
+    if (!existingTests || !testsSeededVersion) {
       localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(DEFAULT_TESTS));
-    } else {
-      try {
-        const tests = JSON.parse(existingTests);
-        if (tests.length < 10 || tests.some(t => t.subjectId === 'sub-5' || t.subjectId === 'sub-6')) {
-          localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(DEFAULT_TESTS));
-        }
-      } catch (e) {
-        localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(DEFAULT_TESTS));
-      }
+      localStorage.setItem('excellenceca_tests_seeded_v2', 'true');
     }
 
-    // Ensure questions are up to date
+    // Ensure questions are seeded once and respect admin deletions
     const existingQuestions = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
-    if (!existingQuestions) {
+    const questionsSeededVersion = localStorage.getItem('excellenceca_questions_seeded_v2');
+    if (!existingQuestions || !questionsSeededVersion) {
       localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(DEFAULT_QUESTIONS));
-    } else {
-      try {
-        const qList = JSON.parse(existingQuestions);
-        if (qList.length < DEFAULT_QUESTIONS.length) {
-          localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(DEFAULT_QUESTIONS));
-        }
-      } catch (e) {
-        localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(DEFAULT_QUESTIONS));
-      }
+      localStorage.setItem('excellenceca_questions_seeded_v2', 'true');
     }
 
     if (!localStorage.getItem(STORAGE_KEYS.ATTEMPTS)) {

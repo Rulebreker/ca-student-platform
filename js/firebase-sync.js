@@ -78,76 +78,77 @@ class FirebaseSyncManager {
   checkAndSeedDatabase() {
     if (!this.db) return;
 
-    // Check if users collection exists in Firebase
-    this.db.ref('users').once('value').then(snap => {
-      const val = snap.val();
-      if (!val) {
-        console.info('[FirebaseSync] Seeding initial users into cloud database...');
-        const localUsers = window.store ? window.store.getUsers() : [];
-        if (localUsers && localUsers.length) {
-          const map = {};
-          localUsers.forEach(u => {
-            if (u && u.id) map[u.id] = u;
-          });
-          this.db.ref('users').set(map);
-        }
+    // Check meta to see if cloud database has already been initialized
+    this.db.ref('meta/initialized').once('value').then(snap => {
+      if (snap.val() === true) {
+        // Cloud database is already initialized; never overwrite or resurrect deleted items
+        return;
       }
-    }).catch(err => {
-      console.warn('[FirebaseSync] Check seed users warning:', err);
-    });
 
-    // Check if assignments collection exists
-    this.db.ref('assignments').once('value').then(snap => {
-      const val = snap.val();
-      if (!val) {
-        console.info('[FirebaseSync] Seeding initial test papers into cloud database...');
-        const localAsgs = window.store ? window.store.getAssignments() : [];
-        if (localAsgs && localAsgs.length) {
-          const map = {};
-          localAsgs.forEach(a => {
-            if (a && a.id) map[a.id] = a;
-          });
-          this.db.ref('assignments').set(map);
-        }
-      }
-    }).catch(err => {
-      console.warn('[FirebaseSync] Check seed assignments warning:', err);
-    });
+      console.info('[FirebaseSync] Initializing fresh cloud database...');
+      this.db.ref('meta').set({ initialized: true, version: 2 });
 
-    // Check if tests collection exists
-    this.db.ref('tests').once('value').then(snap => {
-      const val = snap.val();
-      if (!val) {
-        console.info('[FirebaseSync] Seeding initial mock tests into cloud database...');
-        const localTests = window.store ? window.store.getTests() : [];
-        if (localTests && localTests.length) {
-          const map = {};
-          localTests.forEach(t => {
-            if (t && t.id) map[t.id] = t;
-          });
-          this.db.ref('tests').set(map);
+      // Check if users collection exists in Firebase
+      this.db.ref('users').once('value').then(userSnap => {
+        if (!userSnap.val()) {
+          console.info('[FirebaseSync] Seeding initial users into cloud database...');
+          const localUsers = window.store ? window.store.getUsers() : [];
+          if (localUsers && localUsers.length) {
+            const map = {};
+            localUsers.forEach(u => {
+              if (u && u.id) map[u.id] = u;
+            });
+            this.db.ref('users').set(map);
+          }
         }
-      }
-    }).catch(err => {
-      console.warn('[FirebaseSync] Check seed tests warning:', err);
-    });
+      });
 
-    // Check if questions collection exists
-    this.db.ref('questions').once('value').then(snap => {
-      const val = snap.val();
-      if (!val) {
-        console.info('[FirebaseSync] Seeding initial questions into cloud database...');
-        const localQs = window.store ? window.store.getQuestions() : [];
-        if (localQs && localQs.length) {
-          const map = {};
-          localQs.forEach(q => {
-            if (q && q.id) map[q.id] = q;
-          });
-          this.db.ref('questions').set(map);
+      // Check if assignments collection exists
+      this.db.ref('assignments').once('value').then(asgSnap => {
+        if (!asgSnap.val()) {
+          console.info('[FirebaseSync] Seeding initial test papers into cloud database...');
+          const localAsgs = window.store ? window.store.getAssignments() : [];
+          if (localAsgs && localAsgs.length) {
+            const map = {};
+            localAsgs.forEach(a => {
+              if (a && a.id) map[a.id] = a;
+            });
+            this.db.ref('assignments').set(map);
+          }
         }
-      }
+      });
+
+      // Check if tests collection exists
+      this.db.ref('tests').once('value').then(tstSnap => {
+        if (!tstSnap.val()) {
+          console.info('[FirebaseSync] Seeding initial mock tests into cloud database...');
+          const localTests = window.store ? window.store.getTests() : [];
+          if (localTests && localTests.length) {
+            const map = {};
+            localTests.forEach(t => {
+              if (t && t.id) map[t.id] = t;
+            });
+            this.db.ref('tests').set(map);
+          }
+        }
+      });
+
+      // Check if questions collection exists
+      this.db.ref('questions').once('value').then(qSnap => {
+        if (!qSnap.val()) {
+          console.info('[FirebaseSync] Seeding initial questions into cloud database...');
+          const localQs = window.store ? window.store.getQuestions() : [];
+          if (localQs && localQs.length) {
+            const map = {};
+            localQs.forEach(q => {
+              if (q && q.id) map[q.id] = q;
+            });
+            this.db.ref('questions').set(map);
+          }
+        }
+      });
     }).catch(err => {
-      console.warn('[FirebaseSync] Check seed questions warning:', err);
+      console.warn('[FirebaseSync] Check seed warning:', err);
     });
   }
 
@@ -156,12 +157,9 @@ class FirebaseSyncManager {
 
     // --- USERS REALTIME LISTENER ---
     this.db.ref('users').on('value', snap => {
+      if (this._isMergingUsers) return;
       const val = snap.val();
-      if (!val || this._isMergingUsers) return;
-
-      const remoteUsers = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
-      if (!remoteUsers.length) return;
-
+      const remoteUsers = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
       this.mergeRemoteUsers(remoteUsers);
     }, err => {
       console.warn('[FirebaseSync] Users listener error:', err);
@@ -169,12 +167,9 @@ class FirebaseSyncManager {
 
     // --- ASSIGNMENTS REALTIME LISTENER ---
     this.db.ref('assignments').on('value', snap => {
+      if (this._isMergingAssignments) return;
       const val = snap.val();
-      if (!val || this._isMergingAssignments) return;
-
-      const remoteAssignments = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
-      if (!remoteAssignments.length) return;
-
+      const remoteAssignments = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
       this.mergeRemoteAssignments(remoteAssignments);
     }, err => {
       console.warn('[FirebaseSync] Assignments listener error:', err);
@@ -182,12 +177,9 @@ class FirebaseSyncManager {
 
     // --- SUBMISSIONS REALTIME LISTENER ---
     this.db.ref('submissions').on('value', snap => {
+      if (this._isMergingSubmissions) return;
       const val = snap.val();
-      if (!val || this._isMergingSubmissions) return;
-
-      const remoteSubs = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
-      if (!remoteSubs.length) return;
-
+      const remoteSubs = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
       this.mergeRemoteSubmissions(remoteSubs);
     }, err => {
       console.warn('[FirebaseSync] Submissions listener error:', err);
@@ -195,12 +187,9 @@ class FirebaseSyncManager {
 
     // --- TESTS REALTIME LISTENER ---
     this.db.ref('tests').on('value', snap => {
+      if (this._isMergingTests) return;
       const val = snap.val();
-      if (!val || this._isMergingTests) return;
-
-      const remoteTests = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
-      if (!remoteTests.length) return;
-
+      const remoteTests = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
       this.mergeRemoteTests(remoteTests);
     }, err => {
       console.warn('[FirebaseSync] Tests listener error:', err);
@@ -208,12 +197,9 @@ class FirebaseSyncManager {
 
     // --- QUESTIONS REALTIME LISTENER ---
     this.db.ref('questions').on('value', snap => {
+      if (this._isMergingQuestions) return;
       const val = snap.val();
-      if (!val || this._isMergingQuestions) return;
-
-      const remoteQs = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
-      if (!remoteQs.length) return;
-
+      const remoteQs = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
       this.mergeRemoteQuestions(remoteQs);
     }, err => {
       console.warn('[FirebaseSync] Questions listener error:', err);
@@ -225,13 +211,27 @@ class FirebaseSyncManager {
     this._isMergingUsers = true;
 
     try {
-      const localUsers = window.store.getUsers();
+      let localUsers = window.store.getUsers();
       let changed = false;
       let newStudentArrived = null;
 
       // Populate known set on first run
       if (this._knownUserIds.size === 0) {
         localUsers.forEach(u => this._knownUserIds.add(u.id));
+      }
+
+      // Synchronize deleted student accounts
+      if (remoteUsers.length > 0) {
+        const remoteIds = new Set(remoteUsers.map(ru => ru && ru.id).filter(Boolean));
+        const originalCount = localUsers.length;
+        localUsers = localUsers.filter(lu => {
+          if (!lu || !lu.id) return false;
+          if (lu.role === 'admin' || lu.id.includes('admin')) return true;
+          return remoteIds.has(lu.id);
+        });
+        if (localUsers.length !== originalCount) {
+          changed = true;
+        }
       }
 
       remoteUsers.forEach(ru => {
@@ -290,16 +290,24 @@ class FirebaseSyncManager {
 
     try {
       const localAsgs = window.store.getAssignments();
+      const remoteIds = new Set(remoteAssignments.map(ra => ra && ra.id).filter(Boolean));
       let changed = false;
 
+      // 1. Remove local assignments that were deleted in Firebase
+      let filteredAsgs = localAsgs.filter(la => remoteIds.has(la.id));
+      if (filteredAsgs.length !== localAsgs.length) {
+        changed = true;
+      }
+
+      // 2. Add or update assignments from remote
       remoteAssignments.forEach(ra => {
         if (!ra || !ra.id) return;
-        const idx = localAsgs.findIndex(la => la.id === ra.id);
+        const idx = filteredAsgs.findIndex(la => la.id === ra.id);
         if (idx === -1) {
-          localAsgs.unshift(ra);
+          filteredAsgs.unshift(ra);
           changed = true;
         } else {
-          const existing = localAsgs[idx];
+          const existing = filteredAsgs[idx];
           let asgModified = false;
           Object.keys(ra).forEach(k => {
             if (JSON.stringify(existing[k]) !== JSON.stringify(ra[k])) {
@@ -312,7 +320,7 @@ class FirebaseSyncManager {
       });
 
       if (changed) {
-        window.store.saveAssignments(localAsgs);
+        window.store.saveAssignments(filteredAsgs);
 
         // Re-render student assignment portal if active
         if (window.assignmentPortal && typeof window.assignmentPortal.render === 'function') {
@@ -388,16 +396,24 @@ class FirebaseSyncManager {
 
     try {
       const localTests = window.store.getTests();
+      const remoteIds = new Set(remoteTests.map(rt => rt && rt.id).filter(Boolean));
       let changed = false;
 
+      // 1. Remove any local tests that were deleted in Firebase
+      let filteredTests = localTests.filter(lt => remoteIds.has(lt.id));
+      if (filteredTests.length !== localTests.length) {
+        changed = true;
+      }
+
+      // 2. Add or update tests from remote
       remoteTests.forEach(rt => {
         if (!rt || !rt.id) return;
-        const idx = localTests.findIndex(lt => lt.id === rt.id);
+        const idx = filteredTests.findIndex(lt => lt.id === rt.id);
         if (idx === -1) {
-          localTests.unshift(rt);
+          filteredTests.unshift(rt);
           changed = true;
         } else {
-          const existing = localTests[idx];
+          const existing = filteredTests[idx];
           let testModified = false;
           Object.keys(rt).forEach(k => {
             if (JSON.stringify(existing[k]) !== JSON.stringify(rt[k])) {
@@ -410,7 +426,7 @@ class FirebaseSyncManager {
       });
 
       if (changed) {
-        window.store.saveTests(localTests);
+        window.store.saveTests(filteredTests);
 
         // Re-render student MCQ test list if student is viewing tests
         if (window.testEngine && typeof window.testEngine.renderTestList === 'function') {
@@ -438,16 +454,24 @@ class FirebaseSyncManager {
 
     try {
       const localQs = window.store.getQuestions();
+      const remoteIds = new Set(remoteQuestions.map(rq => rq && rq.id).filter(Boolean));
       let changed = false;
 
+      // 1. Remove any local questions that were deleted in Firebase
+      let filteredQs = localQs.filter(lq => remoteIds.has(lq.id));
+      if (filteredQs.length !== localQs.length) {
+        changed = true;
+      }
+
+      // 2. Add or update questions from remote
       remoteQuestions.forEach(rq => {
         if (!rq || !rq.id) return;
-        const idx = localQs.findIndex(lq => lq.id === rq.id);
+        const idx = filteredQs.findIndex(lq => lq.id === rq.id);
         if (idx === -1) {
-          localQs.push(rq);
+          filteredQs.push(rq);
           changed = true;
         } else {
-          const existing = localQs[idx];
+          const existing = filteredQs[idx];
           let qModified = false;
           Object.keys(rq).forEach(k => {
             if (JSON.stringify(existing[k]) !== JSON.stringify(rq[k])) {
@@ -460,11 +484,19 @@ class FirebaseSyncManager {
       });
 
       if (changed) {
-        window.store.saveQuestions(localQs);
+        window.store.saveQuestions(filteredQs);
 
         // If admin is currently in question builder for a test, update view
         if (window.adminDashboard && window.adminDashboard.activeTestQuestionsId) {
           window.adminDashboard.openQuestionBuilder(window.adminDashboard.activeTestQuestionsId);
+        }
+
+        // If student is viewing tests, refresh question count / test details
+        if (window.testEngine && typeof window.testEngine.renderTestList === 'function') {
+          const curView = window.app ? window.app.currentView : '';
+          if (curView === 'tests') {
+            window.testEngine.renderTestList();
+          }
         }
       }
     } catch (e) {
@@ -520,7 +552,22 @@ class FirebaseSyncManager {
 
   deleteTest(testId) {
     if (!this.db || !testId) return Promise.resolve();
-    return this.db.ref('tests/' + testId).remove().catch(err => {
+    return this.db.ref('tests/' + testId).remove().then(() => {
+      // Also cascade delete all questions with this testId in Firebase
+      return this.db.ref('questions').once('value').then(snap => {
+        const val = snap.val();
+        if (!val) return;
+        const updates = {};
+        Object.keys(val).forEach(key => {
+          if (val[key] && val[key].testId === testId) {
+            updates[key] = null;
+          }
+        });
+        if (Object.keys(updates).length > 0) {
+          return this.db.ref('questions').update(updates);
+        }
+      });
+    }).catch(err => {
       console.warn('[FirebaseSync] deleteTest error:', err);
     });
   }

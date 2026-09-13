@@ -693,7 +693,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         path = parsed_url.path
 
         # Test Reporter Endpoint
-        if path == '/api/test-report':
+        if path in ('/api/test-report', '/api/test_report'):
             try:
                 content_length = int(self.headers.get('Content-Length', 0))
                 body = self.rfile.read(content_length)
