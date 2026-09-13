@@ -60,7 +60,6 @@ class StudentDashboard {
     // Video lectures hidden from student dashboard
     this.renderPendingAssignments();
     this.renderRecentAttempts(userAttempts);
-    this.renderPaymentHistory();
   }
 
   renderAvailableTests() {
@@ -271,6 +270,16 @@ class StudentDashboard {
       return;
     }
 
+    this.recentAttemptsPage = this.recentAttemptsPage || 1;
+    const pageSize = 5;
+    const totalItems = userAttempts.length;
+    const totalPages = Math.ceil(totalItems / pageSize) || 1;
+    if (this.recentAttemptsPage > totalPages) this.recentAttemptsPage = totalPages;
+    if (this.recentAttemptsPage < 1) this.recentAttemptsPage = 1;
+    const startIndex = (this.recentAttemptsPage - 1) * pageSize;
+    const endIndex = Math.min(startIndex + pageSize, totalItems);
+    const pagedAttempts = userAttempts.slice(startIndex, endIndex);
+
     container.innerHTML = `
       <div class="overflow-x-auto">
         <table class="w-full text-left text-sm">
@@ -285,7 +294,7 @@ class StudentDashboard {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            ${userAttempts.slice(0, 5).map(att => {
+            ${pagedAttempts.map(att => {
               const test = window.store.getTestById(att.testId);
               const dateStr = new Date(att.submittedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
               const minutes = Math.floor((att.timeTakenSeconds || 0) / 60);
@@ -319,8 +328,40 @@ class StudentDashboard {
           </tbody>
         </table>
       </div>
+      ${totalPages > 1 ? `
+        <div class="px-4 py-3 bg-slate-50/70 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs mt-2 rounded-b-xl">
+          <div class="text-slate-600">
+            Showing <span class="font-semibold text-slate-900">${startIndex + 1}</span> to <span class="font-semibold text-slate-900">${endIndex}</span> of <span class="font-bold text-slate-900">${totalItems}</span> attempts
+          </div>
+          <div class="flex items-center gap-1">
+            <button 
+              onclick="window.studentDashboard.setRecentAttemptsPage(${this.recentAttemptsPage - 1})"
+              ${this.recentAttemptsPage <= 1 ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 bg-white cursor-not-allowed text-xs"' : 'class="px-2.5 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-100 text-xs font-medium cursor-pointer"'}
+            >
+              Previous
+            </button>
+            <span class="px-3 py-1 font-bold text-xs text-slate-700 bg-white border border-slate-200 rounded">
+              Page ${this.recentAttemptsPage} of ${totalPages}
+            </span>
+            <button 
+              onclick="window.studentDashboard.setRecentAttemptsPage(${this.recentAttemptsPage + 1})"
+              ${this.recentAttemptsPage >= totalPages ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 bg-white cursor-not-allowed text-xs"' : 'class="px-2.5 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-100 text-xs font-medium cursor-pointer"'}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      ` : ''}
     `;
     if (window.lucide) window.lucide.createIcons();
+  }
+
+  setRecentAttemptsPage(page) {
+    this.recentAttemptsPage = page;
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    if (!user) return;
+    const userAttempts = window.store ? window.store.getAttemptsByUser(user.id) : [];
+    this.renderRecentAttempts(userAttempts);
   }
 
   renderPassBadge() {
@@ -433,84 +474,9 @@ class StudentDashboard {
   }
 
   renderPaymentHistory() {
-    const container = document.getElementById('dashboard-payment-history');
-    if (!container) return;
-
-    const user = window.auth ? window.auth.getCurrentUser() : null;
-    if (!user) return;
-
-    const sessions = window.store ? (window.store.getPaymentSessions(user.id) || []) : [];
-
-    if (sessions.length === 0) {
-      container.innerHTML = `
-        <div class="text-center py-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-          <i data-lucide="receipt" class="w-8 h-8 text-slate-400 mx-auto mb-2"></i>
-          <p class="text-sm font-semibold text-slate-700">No payment transactions recorded yet</p>
-          <p class="text-xs text-slate-400 mt-0.5">Your UPI payment verifications and pass activation receipts will show here.</p>
-          <button onclick="window.subscriptionManager && window.subscriptionManager.openPricingModal()" class="mt-3.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-xs transition-colors cursor-pointer">
-            Explore Passes & Plans
-          </button>
-        </div>
-      `;
-      if (window.lucide) window.lucide.createIcons();
-      return;
+    if (window.subscriptionManager && typeof window.subscriptionManager.renderPassesPaymentHistory === 'function') {
+      window.subscriptionManager.renderPassesPaymentHistory();
     }
-
-    container.innerHTML = `
-      <div class="overflow-x-auto">
-        <table class="w-full text-left text-sm">
-          <thead>
-            <tr class="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-              <th class="py-3 px-4">Plan / Pass</th>
-              <th class="py-3 px-4">Amount</th>
-              <th class="py-3 px-4">UTR / Ref #</th>
-              <th class="py-3 px-4">UPI Channel</th>
-              <th class="py-3 px-4">Submitted At</th>
-              <th class="py-3 px-4">Status</th>
-              <th class="py-3 px-4 text-right">Details</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100">
-            ${sessions.map(s => {
-              const dateStr = s.submittedAt 
-                ? new Date(s.submittedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-                : (s.createdAt ? new Date(s.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '--');
-
-              let statusBadge = '';
-              if (s.status === 'approved') {
-                statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200"><i data-lucide="check-circle" class="w-3 h-3"></i> Approved</span>';
-              } else if (s.status === 'pending_verification') {
-                statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200"><i data-lucide="clock" class="w-3 h-3 animate-spin"></i> Verifying</span>';
-              } else if (s.status === 'late_payment') {
-                statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-orange-100 text-orange-800 border border-orange-200"><i data-lucide="alert-triangle" class="w-3 h-3"></i> Late Payment (In Review)</span>';
-              } else if (s.status === 'rejected') {
-                statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200"><i data-lucide="x-circle" class="w-3 h-3"></i> Rejected</span>';
-              } else {
-                statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">Expired / Cancelled</span>';
-              }
-
-              return `
-                <tr class="hover:bg-slate-50 transition-colors">
-                  <td class="py-3 px-4">
-                    <span class="font-bold text-slate-900 block">${s.planName || s.planId}</span>
-                    <span class="text-[11px] text-slate-500">${s.billingCycle === '4_months' ? '4-Month Cycle' : (s.billingCycle === 'trial' ? '10-Day Trial' : 'Monthly')}</span>
-                  </td>
-                  <td class="py-3 px-4 font-black text-slate-900">₹${s.amount}</td>
-                  <td class="py-3 px-4 font-mono text-xs font-bold text-slate-700">${s.utr || '<span class="text-slate-400">Not submitted</span>'}</td>
-                  <td class="py-3 px-4 text-xs text-slate-600 font-mono">${s.channelUpiId || (s.channelSnapshot ? s.channelSnapshot.upiId : 'HDFC UPI')}</td>
-                  <td class="py-3 px-4 text-xs text-slate-500">${dateStr}</td>
-                  <td class="py-3 px-4">${statusBadge}</td>
-                  <td class="py-3 px-4 text-right">
-                    ${s.rejectionReason ? `<span class="text-xs text-rose-600 font-semibold" title="${s.rejectionReason}">Reason: ${s.rejectionReason}</span>` : (s.status === 'approved' ? '<span class="text-xs text-emerald-700 font-semibold">Pass Activated</span>' : '<span class="text-xs text-slate-400">--</span>')}
-                  </td>
-                </tr>
-              `;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-    `;
-    if (window.lucide) window.lucide.createIcons();
   }
 }
 

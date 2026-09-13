@@ -1756,6 +1756,22 @@ class AdminDashboard {
             </div>
           </div>
 
+          <!-- Hide from non-eligible students toggle -->
+          <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+            <div>
+              <p class="text-xs font-bold text-slate-800">Hide from non-eligible students</p>
+              <p class="text-[11px] text-slate-500">When enabled, students without the required pass will not see this paper at all instead of seeing it locked.</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input 
+                type="checkbox" 
+                id="admin-paper-hide-non-eligible" 
+                ${paper && paper.hideFromNonEligible ? 'checked' : ''} 
+                class="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500"
+              />
+            </label>
+          </div>
+
           <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
             <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
             <button type="submit" class="px-6 py-2 font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm">
@@ -1851,6 +1867,7 @@ class AdminDashboard {
     }
 
     const requiredTier = document.getElementById('admin-paper-required-tier') ? document.getElementById('admin-paper-required-tier').value : 'free';
+    const hideFromNonEligible = document.getElementById('admin-paper-hide-non-eligible') ? document.getElementById('admin-paper-hide-non-eligible').checked : false;
 
     const paperObj = {
       id: isEdit ? existing.id : ('asg-' + Date.now()),
@@ -1864,6 +1881,7 @@ class AdminDashboard {
       description,
       status,
       requiredTier,
+      hideFromNonEligible,
       isPublished: status !== 'Draft',
       isLive: status === 'Live',
       scheduledPublishTime: existing ? existing.scheduledPublishTime : (status === 'Scheduled' ? new Date(Date.now() + 86400000).toISOString() : null),
@@ -2546,9 +2564,26 @@ This will remove the question paper, attached answer keys, and student submissio
     if (!container) return;
 
     const tests = window.store.getTests();
+    const search = (this.mcqSearch || '').toLowerCase().trim();
+
+    const filteredTests = tests.filter(tst => {
+      if (!search) return true;
+      const subject = window.store.getSubjectById(tst.subjectId);
+      const subjectName = (subject ? subject.name : (tst.subject || '')).toLowerCase();
+      const title = (tst.title || '').toLowerCase();
+      const topic = (tst.topic || tst.chapter || '').toLowerCase();
+      return title.includes(search) || subjectName.includes(search) || topic.includes(search);
+    });
+
+    this.mcqPage = this.mcqPage || 1;
+    const pageSize = 10;
+    const totalPages = Math.max(1, Math.ceil(filteredTests.length / pageSize));
+    if (this.mcqPage > totalPages) this.mcqPage = totalPages;
+    const startIndex = (this.mcqPage - 1) * pageSize;
+    const pagedTests = filteredTests.slice(startIndex, startIndex + pageSize);
 
     container.innerHTML = `
-      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
         <div>
           <h3 class="text-base font-bold text-slate-900">MCQ Mock Examination Management</h3>
           <p class="text-xs text-slate-500 mt-0.5">Author tests, configure dynamic marking schemes, manage attempt limits, import PDFs, and preview student experience</p>
@@ -2563,11 +2598,25 @@ This will remove the question paper, attached answer keys, and student submissio
         </div>
       </div>
 
+      <!-- Search & Filter Bar -->
+      <div class="mb-4 bg-white p-3 border border-slate-200 rounded-xl shadow-2xs">
+        <div class="relative">
+          <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+          <input 
+            type="text" 
+            placeholder="Search MCQ tests by title, subject, or topic..."
+            value="${this.mcqSearch || ''}"
+            oninput="window.adminDashboard.mcqSearch = this.value; window.adminDashboard.mcqPage = 1; window.adminDashboard.renderMCQTests();"
+            class="w-full pl-9 pr-3.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white transition-colors"
+          />
+        </div>
+      </div>
+
       <div class="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
         <table class="w-full text-left text-xs min-w-[950px]">
           <thead>
             <tr class="border-b border-slate-200 bg-slate-50/80 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              <th class="py-3 px-3">Test Title</th>
+              <th class="py-3 px-3">Test Title & Tier</th>
               <th class="py-3 px-3">Subject</th>
               <th class="py-3 px-3">Topic</th>
               <th class="py-3 px-2 text-center">Questions</th>
@@ -2580,13 +2629,13 @@ This will remove the question paper, attached answer keys, and student submissio
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            ${tests.length === 0 ? `
+            ${filteredTests.length === 0 ? `
               <tr>
                 <td colspan="10" class="py-12 text-center text-slate-400 text-xs">
-                  No mock tests registered yet. Click "Create MCQ Test" to start.
+                  ${tests.length === 0 ? 'No mock tests registered yet. Click "Create MCQ Test" to start.' : 'No tests found matching search criteria.'}
                 </td>
               </tr>
-            ` : tests.map(tst => {
+            ` : pagedTests.map(tst => {
               const subject = window.store.getSubjectById(tst.subjectId);
               const subjectName = subject ? subject.name : (tst.subject || 'Accounting');
               const qCount = window.store.getQuestionsByTestId(tst.id).length;
@@ -2601,11 +2650,23 @@ This will remove the question paper, attached answer keys, and student submissio
               else if (status === 'Scheduled') statusBadgeClass = 'bg-purple-50 text-purple-800 border-purple-200';
               else if (status === 'Completed/Expired') statusBadgeClass = 'bg-rose-50 text-rose-800 border-rose-200';
 
+              const reqTier = (tst.requiredTier || tst.tier || 'free').toLowerCase();
+              let tierBadge = '<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-600 border border-slate-200">FREE</span>';
+              if (reqTier === 'elite') tierBadge = '<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-100 text-purple-800 border border-purple-200">ELITE</span>';
+              else if (reqTier === 'plus') tierBadge = '<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">PLUS</span>';
+              else if (reqTier === 'core') tierBadge = '<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-800 border border-blue-200">CORE</span>';
+
               return `
                 <tr class="hover:bg-slate-50/70 transition-colors">
                   <td class="py-3 px-3 max-w-[220px]">
-                    <div class="font-bold text-slate-900 line-clamp-1">${tst.title}</div>
-                    <span class="text-[10px] text-slate-400">${new Date(tst.createdAt || Date.now()).toLocaleDateString()}</span>
+                    <div class="flex items-center gap-1.5">
+                      <span class="font-bold text-slate-900 line-clamp-1">${tst.title}</span>
+                      ${tierBadge}
+                    </div>
+                    <div class="flex items-center gap-2 mt-0.5">
+                      <span class="text-[10px] text-slate-400">${new Date(tst.createdAt || Date.now()).toLocaleDateString()}</span>
+                      ${tst.hideFromNonEligible ? '<span class="text-[10px] font-semibold text-rose-600">Hidden if ineligible</span>' : ''}
+                    </div>
                   </td>
                   <td class="py-3 px-3">
                     <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700">
@@ -2678,9 +2739,52 @@ This will remove the question paper, attached answer keys, and student submissio
           </tbody>
         </table>
       </div>
+
+      <!-- Pagination Controls (10/page) -->
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-semibold text-slate-500 pt-3 px-1">
+        <div>
+          Showing <span class="font-bold text-slate-800">${filteredTests.length === 0 ? 0 : startIndex + 1}</span> to <span class="font-bold text-slate-800">${Math.min(startIndex + pageSize, filteredTests.length)}</span> of <span class="font-bold text-slate-800">${filteredTests.length}</span> tests
+        </div>
+        <div class="flex items-center gap-1.5">
+          <button 
+            onclick="window.adminDashboard.setMcqPage(${this.mcqPage - 1})"
+            ${this.mcqPage <= 1 ? 'disabled' : ''}
+            class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 transition-colors cursor-pointer flex items-center gap-1"
+          >
+            <i data-lucide="chevron-left" class="w-3.5 h-3.5"></i> Prev
+          </button>
+          ${Array.from({ length: totalPages }, (_, i) => i + 1)
+            .filter(p => p === 1 || p === totalPages || Math.abs(p - this.mcqPage) <= 2)
+            .map((p, idx, arr) => {
+              const prev = arr[idx - 1];
+              const showEllipsis = prev && p - prev > 1;
+              return `
+                ${showEllipsis ? '<span class="px-1.5 text-slate-400">...</span>' : ''}
+                <button 
+                  onclick="window.adminDashboard.setMcqPage(${p})"
+                  class="px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${this.mcqPage === p ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'}"
+                >
+                  ${p}
+                </button>
+              `;
+            }).join('')}
+          <button 
+            onclick="window.adminDashboard.setMcqPage(${this.mcqPage + 1})"
+            ${this.mcqPage >= totalPages ? 'disabled' : ''}
+            class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 transition-colors cursor-pointer flex items-center gap-1"
+          >
+            Next <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+      </div>
     `;
 
     if (window.lucide) window.lucide.createIcons();
+  }
+
+  setMcqPage(page) {
+    this.mcqPage = page;
+    this.renderMCQTests();
   }
 
   openTestModal(testId = null) {
@@ -2837,30 +2941,55 @@ This will remove the question paper, attached answer keys, and student submissio
             </div>
           </div>
 
-          <!-- Plan-based visibility multi-select -->
-          <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
-            <label class="block font-bold text-slate-700 mb-1.5">Visible to Plan(s) <span class="text-slate-400 font-normal">(Select which student subscription tiers can access this test)</span> *</label>
-            <div class="grid grid-cols-2 sm:grid-cols-5 gap-2">
-              <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
-                <input type="checkbox" value="free" class="tst-allowed-plan rounded border-slate-300 text-blue-600 focus:ring-blue-500" ${!test || !test.allowedPlans || test.allowedPlans.includes('free') ? 'checked' : ''}>
-                <span class="text-xs font-bold text-slate-700">Free Tier</span>
-              </label>
-              <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
-                <input type="checkbox" value="trial" class="tst-allowed-plan rounded border-slate-300 text-amber-600 focus:ring-amber-500" ${!test || !test.allowedPlans || test.allowedPlans.includes('trial') ? 'checked' : ''}>
-                <span class="text-xs font-bold text-amber-800">₹9 Trial</span>
-              </label>
-              <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
-                <input type="checkbox" value="core" class="tst-allowed-plan rounded border-slate-300 text-blue-600 focus:ring-blue-500" ${!test || !test.allowedPlans || test.allowedPlans.includes('core') ? 'checked' : ''}>
-                <span class="text-xs font-bold text-blue-800">Core Pass</span>
-              </label>
-              <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
-                <input type="checkbox" value="plus" class="tst-allowed-plan rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" ${!test || !test.allowedPlans || test.allowedPlans.includes('plus') ? 'checked' : ''}>
-                <span class="text-xs font-bold text-indigo-800">Plus Pass</span>
-              </label>
-              <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
-                <input type="checkbox" value="elite" class="tst-allowed-plan rounded border-slate-300 text-purple-600 focus:ring-purple-500" ${!test || !test.allowedPlans || test.allowedPlans.includes('elite') ? 'checked' : ''}>
-                <span class="text-xs font-bold text-purple-800">Elite Pass</span>
-              </label>
+          <!-- Plan-based visibility & Tier Requirement -->
+          <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block font-bold text-slate-700 mb-1">Required Minimum Subscription Tier *</label>
+                <select id="tst-required-tier" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold bg-white text-slate-800 focus:ring-2 focus:ring-blue-500">
+                  <option value="free" ${!test || (test.requiredTier || test.tier) === 'free' ? 'selected' : ''}>Free (Open to All Students)</option>
+                  <option value="core" ${test && (test.requiredTier || test.tier) === 'core' ? 'selected' : ''}>Core Pass or Higher</option>
+                  <option value="plus" ${test && (test.requiredTier || test.tier) === 'plus' ? 'selected' : ''}>Plus Pass or Higher</option>
+                  <option value="elite" ${test && (test.requiredTier || test.tier) === 'elite' ? 'selected' : ''}>Elite Pass Only</option>
+                </select>
+              </div>
+              <div class="flex items-center pt-5">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    id="tst-hide-non-eligible" 
+                    ${test && test.hideFromNonEligible ? 'checked' : ''} 
+                    class="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                  />
+                  <span class="text-xs font-semibold text-slate-700">Hide from non-eligible students</span>
+                </label>
+              </div>
+            </div>
+
+            <div>
+              <label class="block font-bold text-slate-700 mb-1.5">Visible to Plan(s) <span class="text-slate-400 font-normal">(Select which student subscription tiers can access this test)</span> *</label>
+              <div class="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                  <input type="checkbox" value="free" class="tst-allowed-plan rounded border-slate-300 text-blue-600 focus:ring-blue-500" ${!test || !test.allowedPlans || test.allowedPlans.includes('free') ? 'checked' : ''}>
+                  <span class="text-xs font-bold text-slate-700">Free Tier</span>
+                </label>
+                <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                  <input type="checkbox" value="trial" class="tst-allowed-plan rounded border-slate-300 text-amber-600 focus:ring-amber-500" ${!test || !test.allowedPlans || test.allowedPlans.includes('trial') ? 'checked' : ''}>
+                  <span class="text-xs font-bold text-amber-800">₹9 Trial</span>
+                </label>
+                <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                  <input type="checkbox" value="core" class="tst-allowed-plan rounded border-slate-300 text-blue-600 focus:ring-blue-500" ${!test || !test.allowedPlans || test.allowedPlans.includes('core') ? 'checked' : ''}>
+                  <span class="text-xs font-bold text-blue-800">Core Pass</span>
+                </label>
+                <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                  <input type="checkbox" value="plus" class="tst-allowed-plan rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" ${!test || !test.allowedPlans || test.allowedPlans.includes('plus') ? 'checked' : ''}>
+                  <span class="text-xs font-bold text-indigo-800">Plus Pass</span>
+                </label>
+                <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                  <input type="checkbox" value="elite" class="tst-allowed-plan rounded border-slate-300 text-purple-600 focus:ring-purple-500" ${!test || !test.allowedPlans || test.allowedPlans.includes('elite') ? 'checked' : ''}>
+                  <span class="text-xs font-bold text-purple-800">Elite Pass</span>
+                </label>
+              </div>
             </div>
           </div>
 
@@ -2912,6 +3041,8 @@ This will remove the question paper, attached answer keys, and student submissio
     const maxAttempts = parseInt(document.getElementById('tst-maxattempts').value, 10);
     const status = document.getElementById('tst-status').value;
     const description = document.getElementById('tst-desc').value.trim();
+    const requiredTier = document.getElementById('tst-required-tier') ? document.getElementById('tst-required-tier').value : 'free';
+    const hideFromNonEligible = document.getElementById('tst-hide-non-eligible') ? document.getElementById('tst-hide-non-eligible').checked : false;
 
     const allSubjs = window.store.getSubjects ? window.store.getSubjects() : [];
     const matchedSub = allSubjs.find(s => s.id === subjectId || s.name === subjectId);
@@ -2940,6 +3071,9 @@ This will remove the question paper, attached answer keys, and student submissio
       status,
       isPublished: (status === 'Published' || status === 'Live'),
       allowedPlans,
+      requiredTier,
+      tier: requiredTier,
+      hideFromNonEligible,
       description,
       totalQuestions: existingId ? (window.store.getQuestionsByTestId(existingId).length) : 0,
       updatedAt: new Date().toISOString()

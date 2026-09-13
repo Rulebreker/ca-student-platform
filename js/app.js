@@ -764,10 +764,20 @@ class App {
     const totalPoints = user.referralPoints !== undefined ? user.referralPoints : (myReferrals.length * 100);
     if (refPointsEl) refPointsEl.textContent = totalPoints;
 
-    // Referred Students Table
+    // Referred Students Table (5 per page)
     const tbody = document.getElementById('profile-page-referred-tbody');
+    const refPagContainer = document.getElementById('profile-page-referred-pagination');
+
+    this.referredPage = this.referredPage || 1;
+    const refPageSize = 5;
+    const totalRefPages = Math.max(1, Math.ceil(myReferrals.length / refPageSize));
+    if (this.referredPage > totalRefPages) this.referredPage = totalRefPages;
+    const refStartIndex = (this.referredPage - 1) * refPageSize;
+    const pagedReferrals = myReferrals.slice(refStartIndex, refStartIndex + refPageSize);
+
     if (tbody) {
       if (myReferrals.length === 0) {
+        if (refPagContainer) refPagContainer.classList.add('hidden');
         tbody.innerHTML = `
           <tr>
             <td colspan="3" class="px-3 py-6 text-center text-slate-400">
@@ -778,7 +788,7 @@ class App {
           </tr>
         `;
       } else {
-        tbody.innerHTML = myReferrals.map(r => {
+        tbody.innerHTML = pagedReferrals.map(r => {
           const dateStr = r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Verified';
           const studentCleanUsername = (r.referredUsername || 'student').replace(/^@+/, '');
           return `
@@ -799,6 +809,37 @@ class App {
             </tr>
           `;
         }).join('');
+
+        if (refPagContainer) {
+          if (totalRefPages > 1) {
+            refPagContainer.classList.remove('hidden');
+            refPagContainer.innerHTML = `
+              <div class="flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                <span>Showing ${refStartIndex + 1} to ${Math.min(refStartIndex + refPageSize, myReferrals.length)} of ${myReferrals.length}</span>
+                <div class="flex items-center gap-1">
+                  <button 
+                    type="button" 
+                    onclick="window.app.setReferredPage(${this.referredPage - 1})" 
+                    ${this.referredPage <= 1 ? 'disabled' : ''} 
+                    class="px-2 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold"
+                  >
+                    Prev
+                  </button>
+                  <button 
+                    type="button" 
+                    onclick="window.app.setReferredPage(${this.referredPage + 1})" 
+                    ${this.referredPage >= totalRefPages ? 'disabled' : ''} 
+                    class="px-2 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            `;
+          } else {
+            refPagContainer.classList.add('hidden');
+          }
+        }
       }
     }
 
@@ -811,6 +852,11 @@ class App {
     if (pConf) pConf.value = '';
 
     if (window.lucide) window.lucide.createIcons();
+  }
+
+  setReferredPage(page) {
+    this.referredPage = page;
+    this.renderProfilePage();
   }
 
   handleProfileStateChange(selectedState, selectedDistrict = null) {
@@ -1261,7 +1307,7 @@ class App {
     if (!container) return;
 
     const toast = document.createElement('div');
-    toast.className = `toast-msg max-w-sm w-full p-4 rounded-xl shadow-lg border text-xs font-semibold flex items-center gap-3 ${
+    toast.className = `toast-msg max-w-sm w-full p-3.5 rounded-xl shadow-lg border text-xs font-semibold flex items-start gap-3 break-words ${
       type === 'success' ? 'bg-emerald-900 text-white border-emerald-700' :
       type === 'error' ? 'bg-rose-900 text-white border-rose-700' :
       type === 'warning' ? 'bg-amber-900 text-white border-amber-700' :
@@ -1274,19 +1320,28 @@ class App {
     if (type === 'warning') icon = 'alert-circle';
 
     toast.innerHTML = `
-      <i data-lucide="${icon}" class="w-4 h-4 flex-shrink-0"></i>
-      <div class="flex-1">${message}</div>
+      <i data-lucide="${icon}" class="w-4 h-4 flex-shrink-0 mt-0.5"></i>
+      <div class="flex-1 break-words leading-relaxed">${message}</div>
+      <button 
+        type="button" 
+        onclick="this.closest('.toast-msg').remove()" 
+        class="toast-close-btn text-white/60 hover:text-white p-0.5 rounded transition-colors cursor-pointer flex-shrink-0"
+        title="Dismiss alert"
+      >
+        <i data-lucide="x" class="w-3.5 h-3.5"></i>
+      </button>
     `;
 
     container.appendChild(toast);
     if (window.lucide) window.lucide.createIcons();
 
     setTimeout(() => {
+      if (!toast.isConnected) return;
       toast.style.opacity = '0';
       toast.style.transform = 'translateY(10px)';
       toast.style.transition = 'all 0.2s ease-out';
-      setTimeout(() => toast.remove(), 200);
-    }, 4000);
+      setTimeout(() => { if (toast.isConnected) toast.remove(); }, 200);
+    }, 4500);
   }
 
   // Real-Time Notification System Handlers
@@ -1374,7 +1429,14 @@ class App {
       return;
     }
 
-    listEl.innerHTML = notifs.map(n => {
+    this.notifPage = this.notifPage || 1;
+    const pageSize = 5;
+    const totalPages = Math.max(1, Math.ceil(notifs.length / pageSize));
+    if (this.notifPage > totalPages) this.notifPage = totalPages;
+    const startIndex = (this.notifPage - 1) * pageSize;
+    const pagedNotifs = notifs.slice(startIndex, startIndex + pageSize);
+
+    const itemsHtml = pagedNotifs.map(n => {
       let icon = 'bell';
       let iconBg = 'bg-blue-50 text-blue-600';
       if (n.type === 'referral') {
@@ -1425,7 +1487,38 @@ class App {
       `;
     }).join('');
 
+    const paginationHtml = totalPages > 1 ? `
+      <div class="p-2.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-[11px] font-semibold text-slate-500">
+        <span>Page ${this.notifPage} of ${totalPages}</span>
+        <div class="flex items-center gap-1">
+          <button 
+            type="button" 
+            onclick="window.app.setNotifPage(${this.notifPage - 1})" 
+            ${this.notifPage <= 1 ? 'disabled' : ''} 
+            class="px-2 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold cursor-pointer"
+          >
+            Prev
+          </button>
+          <button 
+            type="button" 
+            onclick="window.app.setNotifPage(${this.notifPage + 1})" 
+            ${this.notifPage >= totalPages ? 'disabled' : ''} 
+            class="px-2 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold cursor-pointer"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    ` : '';
+
+    listEl.innerHTML = itemsHtml + paginationHtml;
+
     if (window.lucide) window.lucide.createIcons();
+  }
+
+  setNotifPage(page) {
+    this.notifPage = page;
+    this.renderNotificationsList();
   }
 
   handleNotificationClick(notifId, link) {
@@ -1508,9 +1601,13 @@ class App {
 
   populateXpHistoryRows(txs) {
     const tbody = document.getElementById('profile-xp-history-tbody');
+    const pagContainer = document.getElementById('profile-xp-history-pagination');
     if (!tbody) return;
 
+    this._cachedProfileTxs = txs || [];
+
     if (!txs || txs.length === 0) {
+      if (pagContainer) pagContainer.classList.add('hidden');
       tbody.innerHTML = `
         <tr>
           <td colspan="5" class="py-8 text-center text-slate-400">
@@ -1524,7 +1621,14 @@ class App {
       return;
     }
 
-    tbody.innerHTML = txs.map(t => {
+    this.xpPage = this.xpPage || 1;
+    const pageSize = 5;
+    const totalPages = Math.max(1, Math.ceil(txs.length / pageSize));
+    if (this.xpPage > totalPages) this.xpPage = totalPages;
+    const startIndex = (this.xpPage - 1) * pageSize;
+    const pagedTxs = txs.slice(startIndex, startIndex + pageSize);
+
+    tbody.innerHTML = pagedTxs.map(t => {
       let icon = 'zap';
       let badgeClass = 'bg-indigo-50 text-indigo-700 border border-indigo-200';
       let typeLabel = 'Platform Points';
@@ -1569,7 +1673,44 @@ class App {
       `;
     }).join('');
 
+    if (pagContainer) {
+      if (totalPages > 1) {
+        pagContainer.classList.remove('hidden');
+        pagContainer.innerHTML = `
+          <div class="flex items-center justify-between text-[11px] font-semibold text-slate-500">
+            <span>Showing ${startIndex + 1} to ${Math.min(startIndex + pageSize, txs.length)} of ${txs.length} entries</span>
+            <div class="flex items-center gap-1.5">
+              <button 
+                type="button" 
+                onclick="window.app.setXpPage(${this.xpPage - 1})" 
+                ${this.xpPage <= 1 ? 'disabled' : ''} 
+                class="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 transition-colors cursor-pointer"
+              >
+                Prev
+              </button>
+              <span class="px-2 py-0.5 font-bold text-slate-700">${this.xpPage} / ${totalPages}</span>
+              <button 
+                type="button" 
+                onclick="window.app.setXpPage(${this.xpPage + 1})" 
+                ${this.xpPage >= totalPages ? 'disabled' : ''} 
+                class="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 transition-colors cursor-pointer"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        `;
+      } else {
+        pagContainer.classList.add('hidden');
+      }
+    }
+
     if (window.lucide) window.lucide.createIcons();
+  }
+
+  setXpPage(page) {
+    this.xpPage = page;
+    this.populateXpHistoryRows(this._cachedProfileTxs || []);
   }
 }
 

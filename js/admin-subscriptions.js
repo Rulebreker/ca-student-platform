@@ -220,6 +220,17 @@
       return true;
     });
 
+    this._subPage = this._subPage || 1;
+    const pageSize = 10;
+    const totalFiltered = filteredStudents.length;
+    const totalPages = Math.ceil(totalFiltered / pageSize) || 1;
+    if (this._subPage > totalPages) this._subPage = totalPages;
+    if (this._subPage < 1) this._subPage = 1;
+
+    const startIndex = (this._subPage - 1) * pageSize;
+    const endIndex = Math.min(startIndex + pageSize, totalFiltered);
+    const pagedStudents = filteredStudents.slice(startIndex, endIndex);
+
     container.innerHTML = `
       <div class="space-y-6 animate-in fade-in duration-150">
         <!-- Header & Action Row -->
@@ -372,7 +383,7 @@
                       <p class="text-xs font-bold">No students found matching current filters.</p>
                     </td>
                   </tr>
-                ` : filteredStudents.slice(0, 50).map(st => {
+                ` : pagedStudents.map(st => {
                   const sub = subs[st.id];
                   const isSubActive = sub && (sub.status === 'active' || sub.status === 'manually_granted') && (!sub.expiresAt || new Date(sub.expiresAt) > now);
                   
@@ -468,10 +479,28 @@
                 }).join('')}
               </tbody>
             </table>
-          </div>
-          ${filteredStudents.length > 50 ? `
-            <div class="p-3 bg-slate-50 border-t border-slate-200 text-center text-xs text-slate-500">
-              Showing first 50 of ${filteredStudents.length} students. Use search bar to refine.
+          ${totalPages > 1 ? `
+            <div class="px-4 py-3 bg-slate-50/70 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div class="text-slate-600">
+                Showing <span class="font-semibold text-slate-900">${totalFiltered === 0 ? 0 : startIndex + 1}</span> to <span class="font-semibold text-slate-900">${endIndex}</span> of <span class="font-bold text-slate-900">${totalFiltered}</span> students
+              </div>
+              <div class="flex items-center gap-1">
+                <button 
+                  onclick="window.adminDashboard.setSubPage(${this._subPage - 1})"
+                  ${this._subPage <= 1 ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 bg-white cursor-not-allowed text-xs"' : 'class="px-2.5 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-100 text-xs font-medium cursor-pointer"'}
+                >
+                  Previous
+                </button>
+                <span class="px-3 py-1 font-bold text-xs text-slate-700 bg-white border border-slate-200 rounded">
+                  Page ${this._subPage} of ${totalPages}
+                </span>
+                <button 
+                  onclick="window.adminDashboard.setSubPage(${this._subPage + 1})"
+                  ${this._subPage >= totalPages ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 bg-white cursor-not-allowed text-xs"' : 'class="px-2.5 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-100 text-xs font-medium cursor-pointer"'}
+                >
+                  Next
+                </button>
+              </div>
             </div>
           ` : ''}
         </div>
@@ -479,6 +508,11 @@
     `;
 
     if (window.lucide) window.lucide.createIcons();
+  };
+
+  AdminDashboard.prototype.setSubPage = function(page) {
+    this._subPage = page;
+    this.renderSubscriptions(true);
   };
 
   // --- SELECTION & BULK ACTIONS FOR SUBSCRIPTIONS ---
@@ -1160,6 +1194,18 @@
       return true;
     });
 
+    this._cachedPaymentSessions = filtered;
+    this._pvPage = this._pvPage || 1;
+    const pageSize = 10;
+    const totalFiltered = filtered.length;
+    const totalPages = Math.ceil(totalFiltered / pageSize) || 1;
+    if (this._pvPage > totalPages) this._pvPage = totalPages;
+    if (this._pvPage < 1) this._pvPage = 1;
+
+    const startIndex = (this._pvPage - 1) * pageSize;
+    const endIndex = Math.min(startIndex + pageSize, totalFiltered);
+    const pagedSessions = filtered.slice(startIndex, endIndex);
+
     container.innerHTML = `
       <div class="space-y-6 animate-in fade-in duration-150">
         <!-- Header -->
@@ -1270,7 +1316,7 @@
                       <p class="text-xs font-bold">No payment sessions in this category.</p>
                     </td>
                   </tr>
-                ` : filtered.map(p => {
+                ` : pagedSessions.map(p => {
                   const isPending = p.status === 'pending_verification' || p.status === 'late_payment';
                   const isLate = p.status === 'late_payment';
                   const dateStr = p.submittedAt ? new Date(p.submittedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '--';
@@ -1327,9 +1373,9 @@
                       <td class="py-3 px-4">
                         ${p.screenshot ? `
                           <button 
-                            onclick="window.adminDashboard.openScreenshotModal('${p.screenshot}', 'UTR: ${p.utr || p.sessionId}')"
+                            onclick="window.adminDashboard.viewPaymentProof('${p.sessionId}')"
                             class="group relative w-10 h-10 rounded-lg overflow-hidden border border-slate-300 hover:border-rose-500 transition-colors shadow-2xs block"
-                            title="Click to zoom & inspect screenshot"
+                            title="Click to inspect receipt proof"
                           >
                             <img src="${p.screenshot}" alt="Proof" class="w-full h-full object-cover group-hover:scale-110 transition-transform">
                             <div class="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors flex items-center justify-center">
@@ -1350,7 +1396,7 @@
                         ${isPending ? `
                           <div class="inline-flex items-center gap-1.5">
                             <button 
-                              onclick="window.adminDashboard.verifyPayment('${p.sessionId}', 'approve', ${p.amount}, '${(p.studentName || '').replace(/'/g, "\\'")}', '${p.planName || p.planId}')"
+                              onclick="window.adminDashboard.promptApprovePayment('${p.sessionId}')"
                               class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-xs transition-colors flex items-center gap-1 cursor-pointer"
                               title="Approve and activate subscription"
                             >
@@ -1380,6 +1426,30 @@
               </tbody>
             </table>
           </div>
+          ${totalPages > 1 ? `
+            <div class="px-4 py-3 bg-slate-50/70 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div class="text-slate-600">
+                Showing <span class="font-semibold text-slate-900">${totalFiltered === 0 ? 0 : startIndex + 1}</span> to <span class="font-semibold text-slate-900">${endIndex}</span> of <span class="font-bold text-slate-900">${totalFiltered}</span> payment sessions
+              </div>
+              <div class="flex items-center gap-1">
+                <button 
+                  onclick="window.adminDashboard.setPvPage(${this._pvPage - 1})"
+                  ${this._pvPage <= 1 ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 bg-white cursor-not-allowed text-xs"' : 'class="px-2.5 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-100 text-xs font-medium cursor-pointer"'}
+                >
+                  Previous
+                </button>
+                <span class="px-3 py-1 font-bold text-xs text-slate-700 bg-white border border-slate-200 rounded">
+                  Page ${this._pvPage} of ${totalPages}
+                </span>
+                <button 
+                  onclick="window.adminDashboard.setPvPage(${this._pvPage + 1})"
+                  ${this._pvPage >= totalPages ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 bg-white cursor-not-allowed text-xs"' : 'class="px-2.5 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-100 text-xs font-medium cursor-pointer"'}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          ` : ''}
         </div>
       </div>
     `;
@@ -1387,10 +1457,97 @@
     if (window.lucide) window.lucide.createIcons();
   };
 
-  AdminDashboard.prototype.verifyPayment = async function(sessionId, action, amount, studentName, planName) {
-    if (action === 'approve') {
-      const confirmMsg = `Approve payment of ₹${amount} for ${studentName}?\n\nThis will authoritatively activate their ${planName} pass and award instant bonus XP points.`;
-      if (!confirm(confirmMsg)) return;
+  AdminDashboard.prototype.setPvPage = function(page) {
+    this._pvPage = page;
+    this.renderPaymentVerifications(true);
+  };
+
+  AdminDashboard.prototype.viewPaymentProof = function(sessionId) {
+    const session = (this._cachedPaymentSessions || []).find(s => s.sessionId === sessionId);
+    if (!session) {
+      window.app.showToast('Session details not found.', 'error');
+      return;
+    }
+    const imgSrc = session.screenshot || session.proofUrl || '';
+    this.openScreenshotModal(imgSrc, `UTR: ${session.utr || session.sessionId}`, session);
+  };
+
+  AdminDashboard.prototype.promptApprovePayment = function(sessionId) {
+    const session = (this._cachedPaymentSessions || []).find(s => s.sessionId === sessionId);
+    const amount = session ? session.amount : '';
+    const studentName = session ? (session.studentName || 'Student') : 'Student';
+    const planName = session ? (session.planName || session.planId) : 'Pass';
+
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    modalContent.innerHTML = `
+      <div class="p-6 space-y-5">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div>
+            <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">Payment Verification</span>
+            <h3 class="text-lg font-black text-slate-900 mt-0.5">Approve Payment Proof</h3>
+          </div>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 space-y-1">
+          <p class="font-bold">Approve payment of ₹${amount} for ${studentName} (${planName})?</p>
+          <p class="text-[11px] text-emerald-700">This will authoritatively activate the subscription, update SLA tracking, and credit bonus XP points to the student ledger.</p>
+        </div>
+
+        <form onsubmit="window.adminDashboard.submitApprovePayment(event, '${sessionId}')" class="space-y-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Approval Remarks / Bank Verification Notes</label>
+            <select onchange="document.getElementById('admin-approve-remarks-text').value = this.value" class="w-full px-3.5 py-2 text-xs font-bold border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 bg-white mb-2">
+              <option value="Verified against HDFC Bank Statement">Verified against HDFC Bank Statement</option>
+              <option value="Verified via institutional UPI SMS / Portal">Verified via institutional UPI SMS / Portal</option>
+              <option value="Direct bank credit confirmed by accounts">Direct bank credit confirmed by accounts</option>
+              <option value="Approved with instant pass activation">Approved with instant pass activation</option>
+              <option value="Other">Other</option>
+            </select>
+            <textarea 
+              id="admin-approve-remarks-text" 
+              rows="2" 
+              class="w-full px-3.5 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 bg-white"
+              placeholder="Add optional internal remarks or bank transaction reference..."
+            >Verified against HDFC Bank Statement</textarea>
+          </div>
+
+          <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+            <button 
+              type="button" 
+              onclick="window.app.closeModal('admin-generic-modal')"
+              class="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit" 
+              id="confirm-approve-btn"
+              class="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <i data-lucide="check-circle" class="w-4 h-4"></i> Confirm & Activate Pass
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    window.app.openModal('admin-generic-modal');
+    if (window.lucide) window.lucide.createIcons();
+  };
+
+  AdminDashboard.prototype.submitApprovePayment = async function(event, sessionId) {
+    event.preventDefault();
+    const remarks = (document.getElementById('admin-approve-remarks-text')?.value || '').trim();
+    const btn = document.getElementById('confirm-approve-btn');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Activating...';
+      if (window.lucide) window.lucide.createIcons();
     }
 
     try {
@@ -1399,7 +1556,39 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sessionId: sessionId,
-          action: action
+          action: 'approve',
+          remarks: remarks
+        })
+      });
+
+      window.app.showToast(data.message || 'Payment successfully verified and pass activated!', 'success');
+      window.app.closeModal('admin-generic-modal');
+      this.renderPaymentVerifications();
+    } catch (err) {
+      console.error('[AdminSubscriptions] Verify payment error:', err);
+      window.app.showToast(err.message || 'Failed to verify payment.', 'error');
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="check-circle" class="w-4 h-4"></i> Confirm & Activate Pass';
+        if (window.lucide) window.lucide.createIcons();
+      }
+    }
+  };
+
+  AdminDashboard.prototype.verifyPayment = async function(sessionId, action, amount, studentName, planName, remarks = '') {
+    if (action === 'approve') {
+      this.promptApprovePayment(sessionId);
+      return;
+    }
+
+    try {
+      const data = await adminFetch('/api/admin/payments/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: sessionId,
+          action: action,
+          remarks: remarks
         })
       });
 
@@ -1482,7 +1671,8 @@
         body: JSON.stringify({
           sessionId: sessionId,
           action: 'reject',
-          rejectionReason: reason
+          rejectionReason: reason,
+          remarks: reason
         })
       });
 
@@ -1535,8 +1725,22 @@
         </div>
 
         <!-- Viewport -->
-        <div class="max-h-[65vh] overflow-auto rounded-xl border border-slate-300 bg-slate-950 flex items-center justify-center p-4 min-h-[300px]">
-          <img id="screenshot-modal-image" src="${imgSrc}" alt="Payment Proof" class="max-w-full max-h-[60vh] object-contain transition-transform duration-150 ease-out shadow-2xl origin-center" style="transform: scale(1) rotate(0deg);" />
+        <div class="relative max-h-[65vh] overflow-auto rounded-xl border border-slate-200 bg-slate-100/70 flex items-center justify-center p-4 min-h-[320px]">
+          <div id="proof-loading-indicator" class="flex flex-col items-center justify-center p-6 text-slate-500">
+            <i data-lucide="loader-2" class="w-8 h-8 animate-spin text-rose-600 mb-2"></i>
+            <p class="text-xs font-bold">Loading payment receipt...</p>
+          </div>
+          <div id="proof-error-indicator" class="hidden flex-col items-center justify-center p-6 text-rose-600 text-center">
+            <i data-lucide="alert-circle" class="w-8 h-8 mx-auto mb-2 text-rose-500"></i>
+            <p class="text-xs font-bold">Unable to load receipt image</p>
+            <p class="text-[11px] text-slate-500 mt-1">Image data may be missing, expired or corrupt.</p>
+          </div>
+          <img id="screenshot-modal-image" src="${imgSrc}" alt="Payment Proof" 
+            onload="document.getElementById('proof-loading-indicator')?.classList.add('hidden'); this.classList.remove('hidden');" 
+            onerror="document.getElementById('proof-loading-indicator')?.classList.add('hidden'); document.getElementById('proof-error-indicator')?.classList.remove('hidden');" 
+            class="hidden max-w-full max-h-[60vh] object-contain transition-transform duration-150 ease-out shadow-md origin-center rounded-lg" 
+            style="transform: scale(1) rotate(0deg);" 
+          />
         </div>
 
         <div class="flex items-center justify-between pt-2 border-t border-slate-100">
@@ -1856,6 +2060,31 @@
             </div>
           </div>
 
+          <!-- Channel QR Code Upload & Preview -->
+          <div class="border border-slate-200 rounded-xl p-3.5 bg-slate-50/70 space-y-2">
+            <label class="block text-xs font-bold text-slate-700">Institutional QR Code (Optional)</label>
+            <p class="text-[11px] text-slate-500">Upload a custom institutional QR image (PNG, JPG, WEBP, max 5MB). If left empty, an automatic dynamic UPI QR code is generated.</p>
+            <div class="flex items-center gap-3 pt-1">
+              <input 
+                type="file" 
+                id="admin-channel-qr-file" 
+                accept="image/png,image/jpeg,image/webp" 
+                onchange="window.adminDashboard.onChannelQrFileSelected(event)"
+                class="text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-rose-50 file:text-rose-700 hover:file:bg-rose-100 cursor-pointer"
+              />
+            </div>
+            <div id="admin-channel-qr-preview-container" class="${channel && channel.qrCodeUrl ? '' : 'hidden'} mt-2 p-2 border border-slate-200 rounded-xl bg-white flex items-center gap-3">
+              <img id="admin-channel-qr-preview-img" src="${channel && channel.qrCodeUrl ? channel.qrCodeUrl : ''}" class="w-14 h-14 object-contain rounded-lg border border-slate-200 bg-white" alt="QR Preview" />
+              <div class="flex-1 min-w-0">
+                <p id="admin-channel-qr-filename" class="text-xs font-bold text-slate-800 truncate">${channel && channel.qrCodeUrl ? 'Current QR Code' : 'Custom QR'}</p>
+                <p class="text-[10px] text-slate-400">Institutional payment QR</p>
+              </div>
+              <button type="button" onclick="window.adminDashboard.removeChannelQr()" class="px-2 py-1 text-[11px] font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer">
+                Remove
+              </button>
+            </div>
+          </div>
+
           <div class="flex items-center gap-6 pt-1">
             <label class="flex items-center gap-2 cursor-pointer">
               <input 
@@ -1898,8 +2127,48 @@
       </div>
     `;
 
+    this._pendingChannelQr = null;
+    this._removeChannelQr = false;
+
     window.app.openModal('admin-generic-modal');
     if (window.lucide) window.lucide.createIcons();
+  };
+
+  AdminDashboard.prototype.onChannelQrFileSelected = function(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      window.app.showToast('QR image must be smaller than 5 MB.', 'error');
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (loadEvt) => {
+      const b64 = loadEvt.target.result;
+      this._pendingChannelQr = {
+        fileName: file.name,
+        fileData: b64
+      };
+      this._removeChannelQr = false;
+      const container = document.getElementById('admin-channel-qr-preview-container');
+      const img = document.getElementById('admin-channel-qr-preview-img');
+      const fn = document.getElementById('admin-channel-qr-filename');
+      if (img) img.src = b64;
+      if (fn) fn.textContent = file.name;
+      if (container) container.classList.remove('hidden');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  AdminDashboard.prototype.removeChannelQr = function() {
+    this._pendingChannelQr = null;
+    this._removeChannelQr = true;
+    const fileInput = document.getElementById('admin-channel-qr-file');
+    if (fileInput) fileInput.value = '';
+    const container = document.getElementById('admin-channel-qr-preview-container');
+    if (container) container.classList.add('hidden');
+    const img = document.getElementById('admin-channel-qr-preview-img');
+    if (img) img.src = '';
   };
 
   AdminDashboard.prototype.submitSaveChannel = async function(event, channelId) {
@@ -1921,6 +2190,29 @@
       if (window.lucide) window.lucide.createIcons();
     }
 
+    let qrUrl = undefined;
+    if (this._pendingChannelQr) {
+      try {
+        const uploadRes = await adminFetch('/api/admin/payment-channels/upload-qr', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileName: this._pendingChannelQr.fileName,
+            fileData: this._pendingChannelQr.fileData,
+            channelId: channelId || undefined
+          })
+        });
+        if (uploadRes && uploadRes.qrCodeUrl) {
+          qrUrl = uploadRes.qrCodeUrl;
+        }
+      } catch (upErr) {
+        console.warn('[AdminSubscriptions] QR upload failed:', upErr);
+        window.app.showToast('Failed to upload QR image, continuing save...', 'warning');
+      }
+    } else if (this._removeChannelQr) {
+      qrUrl = '';
+    }
+
     const payload = {
       action: channelId ? 'edit' : 'add',
       channelId: channelId || undefined,
@@ -1933,7 +2225,8 @@
         bankAccountHolder: bankAccountHolder,
         amountLimit: amountLimit,
         isActive: isActive,
-        isPrimary: isPrimary
+        isPrimary: isPrimary,
+        ...(qrUrl !== undefined ? { qrCodeUrl: qrUrl } : {})
       }
     };
 
@@ -1944,6 +2237,8 @@
         body: JSON.stringify(payload)
       });
 
+      this._pendingChannelQr = null;
+      this._removeChannelQr = false;
       window.app.showToast('UPI channel saved successfully!', 'success');
       window.app.closeModal('admin-generic-modal');
       this.renderPaymentChannels();
@@ -2400,6 +2695,13 @@
       return true;
     });
 
+    this.auditPage = this.auditPage || 1;
+    const pageSize = 10;
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    if (this.auditPage > totalPages) this.auditPage = totalPages;
+    const startIndex = (this.auditPage - 1) * pageSize;
+    const pagedLogs = filtered.slice(startIndex, startIndex + pageSize);
+
     container.innerHTML = `
       <div class="space-y-6 animate-in fade-in duration-150">
         <!-- Header -->
@@ -2433,14 +2735,14 @@
               type="text" 
               placeholder="Search audit trail by student target, admin, reason, or action..."
               value="${this.auditSearch || ''}"
-              oninput="window.adminDashboard.auditSearch = this.value; window.adminDashboard.renderAdminAuditLogs();"
+              oninput="window.adminDashboard.auditSearch = this.value; window.adminDashboard.auditPage = 1; window.adminDashboard.renderAdminAuditLogs();"
               class="w-full pl-9 pr-3.5 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500 bg-slate-50 focus:bg-white transition-colors" 
             />
           </div>
 
           <div class="flex items-center gap-2">
             <select 
-              onchange="window.adminDashboard.auditActionFilter = this.value; window.adminDashboard.renderAdminAuditLogs();" 
+              onchange="window.adminDashboard.auditActionFilter = this.value; window.adminDashboard.auditPage = 1; window.adminDashboard.renderAdminAuditLogs();" 
               class="px-3 py-2 text-xs font-bold border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-rose-500"
             >
               <option value="all">All Action Types</option>
@@ -2480,7 +2782,7 @@
                       <p class="text-xs font-bold">No audit records match current criteria.</p>
                     </td>
                   </tr>
-                ` : filtered.slice(0, 100).map(l => {
+                ` : pagedLogs.map(l => {
                   const dateStr = l.timestamp ? new Date(l.timestamp).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--';
 
                   let actionColor = 'bg-slate-100 text-slate-700 border-slate-200';
@@ -2512,10 +2814,53 @@
             </table>
           </div>
         </div>
+
+        <!-- Pagination Controls (10/page) -->
+        <div class="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-semibold text-slate-500 pt-2 px-1">
+          <div>
+            Showing <span class="font-bold text-slate-800">${filtered.length === 0 ? 0 : startIndex + 1}</span> to <span class="font-bold text-slate-800">${Math.min(startIndex + pageSize, filtered.length)}</span> of <span class="font-bold text-slate-800">${filtered.length}</span> audit records
+          </div>
+          <div class="flex items-center gap-1.5">
+            <button 
+              onclick="window.adminDashboard.setAuditPage(${this.auditPage - 1})"
+              ${this.auditPage <= 1 ? 'disabled' : ''}
+              class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 transition-colors cursor-pointer flex items-center gap-1"
+            >
+              <i data-lucide="chevron-left" class="w-3.5 h-3.5"></i> Prev
+            </button>
+            ${Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter(p => p === 1 || p === totalPages || Math.abs(p - this.auditPage) <= 2)
+              .map((p, idx, arr) => {
+                const prev = arr[idx - 1];
+                const showEllipsis = prev && p - prev > 1;
+                return `
+                  ${showEllipsis ? '<span class="px-1.5 text-slate-400">...</span>' : ''}
+                  <button 
+                    onclick="window.adminDashboard.setAuditPage(${p})"
+                    class="px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${this.auditPage === p ? 'bg-rose-700 text-white' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'}"
+                  >
+                    ${p}
+                  </button>
+                `;
+              }).join('')}
+            <button 
+              onclick="window.adminDashboard.setAuditPage(${this.auditPage + 1})"
+              ${this.auditPage >= totalPages ? 'disabled' : ''}
+              class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 transition-colors cursor-pointer flex items-center gap-1"
+            >
+              Next <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        </div>
       </div>
     `;
 
     if (window.lucide) window.lucide.createIcons();
+  };
+
+  AdminDashboard.prototype.setAuditPage = function(page) {
+    this.auditPage = page;
+    this.renderAdminAuditLogs();
   };
 
   AdminDashboard.prototype.exportAuditLogs = function() {

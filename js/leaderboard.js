@@ -586,6 +586,22 @@ class LeaderboardManager {
       const xpData = this.calculateStudentXp(st, allAttempts, allSubmissions, xpSettings, context);
       const tierData = this.resolveTier(xpData.totalXp, rankTiers);
 
+      let subTier = 'free';
+      if (st.subscription && (st.subscription.status === 'active' || st.subscription.status === 'manually_granted')) {
+        const exp = st.subscription.expiresAt ? new Date(st.subscription.expiresAt) : null;
+        if (!exp || exp > new Date()) {
+          subTier = (st.subscription.planTier || st.subscription.tier || 'core').toLowerCase();
+        }
+      } else if (window.store && typeof window.store.getUserSubscription === 'function') {
+        const uSub = window.store.getUserSubscription(st.id);
+        if (uSub && (uSub.status === 'active' || uSub.status === 'manually_granted')) {
+          const exp = uSub.expiresAt ? new Date(uSub.expiresAt) : null;
+          if (!exp || exp > new Date()) {
+            subTier = (uSub.planTier || uSub.tier || 'core').toLowerCase();
+          }
+        }
+      }
+
       return {
         id: st.id,
         name: st.name,
@@ -606,7 +622,8 @@ class LeaderboardManager {
         progressPercent: tierData.progressPercent,
         isMaxRank: tierData.isMaxRank,
         previousRank: st.previousRank || null,
-        achievementBadges: st.achievementBadges || []
+        achievementBadges: st.achievementBadges || [],
+        subscriptionTier: subTier
       };
     });
 
@@ -958,6 +975,14 @@ class LeaderboardManager {
     `;
   }
 
+  getPassBadge(tierStr) {
+    const t = String(tierStr || 'free').toLowerCase();
+    if (t === 'elite') return '<span class="inline-block px-1.5 py-0.5 rounded text-[9px] font-black bg-purple-100 text-purple-800 border border-purple-200 uppercase">Elite</span>';
+    if (t === 'plus') return '<span class="inline-block px-1.5 py-0.5 rounded text-[9px] font-black bg-indigo-100 text-indigo-800 border border-indigo-200 uppercase">Plus</span>';
+    if (t === 'core') return '<span class="inline-block px-1.5 py-0.5 rounded text-[9px] font-black bg-blue-100 text-blue-800 border border-blue-200 uppercase">Core</span>';
+    return '<span class="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-600 border border-slate-200 uppercase">Free</span>';
+  }
+
   // ==========================================
   // 7. TOP 3 PODIUM (BASED ON CURRENT FILTER)
   // ==========================================
@@ -1001,9 +1026,10 @@ class LeaderboardManager {
               <span class="text-[11px] sm:text-sm font-black text-slate-800 truncate block ${isCurrentSecond ? 'text-blue-600' : ''}">
                 ${second.name} ${isCurrentSecond ? '(You)' : ''}
               </span>
-              <div class="flex items-center justify-center gap-1 mt-0.5">
+              <div class="flex items-center justify-center gap-1 mt-0.5 flex-wrap">
                 ${this.getTierBadgeSvg(second.tier, 16)}
                 <span class="text-[9px] sm:text-[10px] font-bold text-slate-500 uppercase truncate">${second.tier.name}</span>
+                ${this.getPassBadge(second.subscriptionTier)}
               </div>
               <span class="text-[11px] sm:text-xs font-black text-slate-700 font-mono mt-0.5 sm:mt-1 block">
                 ${second.totalXp.toLocaleString()} XP
@@ -1039,9 +1065,10 @@ class LeaderboardManager {
               <span class="text-[11px] sm:text-sm font-black text-slate-900 truncate block ${isCurrentFirst ? 'text-blue-600' : ''}">
                 ${first.name} ${isCurrentFirst ? '(You)' : ''}
               </span>
-              <div class="flex items-center justify-center gap-1 mt-0.5">
+              <div class="flex items-center justify-center gap-1 mt-0.5 flex-wrap">
                 ${this.getTierBadgeSvg(first.tier, 18)}
                 <span class="text-[10px] sm:text-[11px] font-extrabold text-amber-600 uppercase truncate">${first.tier.name}</span>
+                ${this.getPassBadge(first.subscriptionTier)}
               </div>
               <span class="text-xs sm:text-sm font-black text-amber-600 font-mono mt-0.5 sm:mt-1 block">
                 ${first.totalXp.toLocaleString()} XP
@@ -1074,9 +1101,10 @@ class LeaderboardManager {
               <span class="text-[11px] sm:text-sm font-black text-slate-800 truncate block ${isCurrentThird ? 'text-blue-600' : ''}">
                 ${third.name} ${isCurrentThird ? '(You)' : ''}
               </span>
-              <div class="flex items-center justify-center gap-1 mt-0.5">
+              <div class="flex items-center justify-center gap-1 mt-0.5 flex-wrap">
                 ${this.getTierBadgeSvg(third.tier, 16)}
                 <span class="text-[9px] sm:text-[10px] font-bold text-slate-500 uppercase truncate">${third.tier.name}</span>
+                ${this.getPassBadge(third.subscriptionTier)}
               </div>
               <span class="text-[11px] sm:text-xs font-black text-slate-700 font-mono mt-0.5 sm:mt-1 block">
                 ${third.totalXp.toLocaleString()} XP
@@ -1599,6 +1627,7 @@ class LeaderboardManager {
                         <div>
                           <div class="font-extrabold text-slate-900 text-sm flex items-center gap-2">
                             ${st.name}
+                            ${this.getPassBadge(st.subscriptionTier)}
                             ${isCurrentUser ? '<span class="text-[10px] font-black uppercase tracking-wider text-blue-700 bg-blue-100 border border-blue-200 px-1.5 py-0.5 rounded">You</span>' : ''}
                           </div>
                           
@@ -1672,8 +1701,9 @@ class LeaderboardManager {
                   >
 
                   <div>
-                    <div class="font-extrabold text-slate-900 text-xs flex items-center gap-1.5">
+                    <div class="font-extrabold text-slate-900 text-xs flex items-center gap-1.5 flex-wrap">
                       ${st.name}
+                      ${this.getPassBadge(st.subscriptionTier)}
                       ${isCurrentUser ? '<span class="text-[9px] font-black uppercase text-blue-700 bg-blue-100 px-1 rounded">You</span>' : ''}
                     </div>
                     <div class="text-[10px] text-slate-400 mt-0.5">

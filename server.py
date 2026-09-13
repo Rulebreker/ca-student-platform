@@ -1242,6 +1242,39 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             })
             return
 
+        # Secure Image Serving (QR Codes, Proofs, Uploads)
+        if raw_path.startswith('/api/images/'):
+            img_filename = os.path.basename(raw_path.replace('/api/images/', ''))
+            img_path = os.path.join(PRIVATE_IMAGES_DIR, img_filename)
+            if os.path.exists(img_path) and os.path.isfile(img_path):
+                ext = img_filename.lower().split('.')[-1] if '.' in img_filename else 'png'
+                content_types = {
+                    'png': 'image/png',
+                    'jpg': 'image/jpeg',
+                    'jpeg': 'image/jpeg',
+                    'webp': 'image/webp',
+                    'gif': 'image/gif',
+                    'svg': 'image/svg+xml'
+                }
+                ctype = content_types.get(ext, 'image/png')
+                try:
+                    with open(img_path, 'rb') as f:
+                        img_bytes = f.read()
+                    self.send_response(200)
+                    self.send_header('Content-Type', ctype)
+                    self.send_header('Content-Length', str(len(img_bytes)))
+                    self.send_header('Cache-Control', 'public, max-age=86400')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(img_bytes)
+                    return
+                except Exception as e:
+                    self.send_json(500, {'error': f'Image read error: {str(e)}'})
+                    return
+            else:
+                self.send_json(404, {'error': 'Image not found', 'code': 404})
+                return
+
         # Server time
         if path == '/api/time':
             now = datetime.now(timezone.utc)
@@ -1322,12 +1355,21 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
         # 1. Public Plan Catalog
         if path == '/api/subscriptions/plans':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
             data = load_backend_data()
             plans = subscription_manager.get_all_plans(data)
+            is_trial_eligible = True
+            if user:
+                is_trial_eligible = subscription_manager.is_eligible_for_trial(user['id'], data)
             if 'subscription_plans' not in data or not data['subscription_plans']:
                 data['subscription_plans'] = plans
                 save_backend_data(data)
-            self.send_json(200, {'success': True, 'plans': plans})
+            self.send_json(200, {
+                'success': True,
+                'plans': plans,
+                'isTrialEligible': is_trial_eligible
+            })
             return
 
         # 2. Active Payment Channels (for student checkout)
@@ -1354,6 +1396,23 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 'subscription': sub,
                 'entitlements': entitlements,
                 'paymentHistory': user_sessions
+            })
+            return
+
+        # 3b. Authenticated Student Payment & Membership History
+        if path == '/api/subscriptions/history':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user:
+                self.send_json(401, {'success': False, 'error': 'Authentication required.', 'code': 401})
+                return
+            data = load_backend_data()
+            user_sessions = [s for s in data.get('payment_sessions', []) if s.get('userId') == user['id'] or (user.get('email') and s.get('userEmail') == user.get('email'))]
+            self.send_json(200, {
+                'success': True,
+                'sessions': user_sessions,
+                'history': user_sessions,
+                'total': len(user_sessions)
             })
             return
 
@@ -1545,6 +1604,10 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 has_tier = is_admin_or_teacher or check_tier_access(user_tier, req_tier)
                 p_copy['isTierLocked'] = not has_tier
 
+                hide_non_eligible = bool(p.get('hideFromNonEligible', False))
+                if not has_tier and hide_non_eligible and not is_admin_or_teacher:
+                    continue  # Hidden from non-eligible students
+
                 if not has_tier:
                     p_copy['questionPdfId'] = None
                     p_copy['questionPdfName'] = None
@@ -1562,22 +1625,22 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         if not is_admin_or_teacher: p_copy['isAvailable'] = False
                     else:
                         p_copy['effectiveStatus'] = 'Published'
-                        p_copy['isAvailable'] = True
-                elif p.get('isLive') or base_status == 'Live' or (live_start and live_end):
-                    if live_start and now_iso < live_start:
-                        p_copy['effectiveStatus'] = 'Live-Upcoming'
-                        if not is_admin_or_teacher: p_copy['isAvailable'] = False
-                    elif live_end and now_iso > live_end:
-                        p_copy['effectiveStatus'] = 'Live-Ended'
-                        p_copy['isAvailable'] = False
+                elif base_status == 'Live' or p.get('isLive'):
+                    if live_start and live_end:
+                        if now_iso < live_start:
+                            p_copy['effectiveStatus'] = 'Upcoming Live'
+                            if not is_admin_or_teacher: p_copy['isAvailable'] = False
+                        elif live_start <= now_iso <= live_end:
+                            p_copy['effectiveStatus'] = 'Live Active'
+                        else:
+                            p_copy['effectiveStatus'] = 'Concluded'
                     else:
-                        p_copy['effectiveStatus'] = 'Live Now'
-                        p_copy['isAvailable'] = True
+                        p_copy['effectiveStatus'] = 'Live Active'
                 else:
-                    p_copy['effectiveStatus'] = 'Published'
-                    p_copy['isAvailable'] = True
+                    p_copy['effectiveStatus'] = base_status
+
                 result.append(p_copy)
-            self.send_json(200, {'success': True, 'papers': result, 'userTier': user_tier})
+            self.send_json(200, {'papers': result, 'userTier': user_tier})
             return
 
         # Descriptive Papers Submissions
@@ -1614,6 +1677,16 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 # Check permissions
                 if not is_admin and not target_test.get('isPublished', True):
                     self.send_json(403, {'error': 'Test is currently in Draft mode.', 'code': 403})
+                    return
+
+                test_req_tier = str(target_test.get('requiredTier') or target_test.get('tier') or 'free').lower()
+                if not is_admin and not check_tier_access(user_tier, test_req_tier):
+                    self.send_json(403, {
+                        'error': f'Access Denied: This test requires an active {test_req_tier.capitalize()} Pass or higher.',
+                        'code': 403,
+                        'requiredTier': test_req_tier,
+                        'isLocked': True
+                    })
                     return
 
                 all_qs = [q for q in data.get('questions', []) if q.get('testId') == test_id]
@@ -1657,7 +1730,19 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json(200, {'tests': tests, 'userTier': 'admin'})
                 else:
                     pub_tests = [t for t in tests if t.get('isPublished', True)]
-                    self.send_json(200, {'tests': pub_tests, 'userTier': user_tier})
+                    enriched_tests = []
+                    for t in pub_tests:
+                        req_tier = str(t.get('requiredTier') or t.get('tier') or 'free').lower()
+                        has_tier = check_tier_access(user_tier, req_tier)
+                        hide_non_eligible = bool(t.get('hideFromNonEligible', False))
+                        if not has_tier and hide_non_eligible:
+                            continue  # Hidden completely from non-eligible students
+                        t_copy = dict(t)
+                        t_copy['requiredTier'] = req_tier
+                        t_copy['tier'] = req_tier
+                        t_copy['isLocked'] = not has_tier
+                        enriched_tests.append(t_copy)
+                    self.send_json(200, {'tests': enriched_tests, 'userTier': user_tier})
                 return
 
         # Attempt History
@@ -2041,8 +2126,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 session_id = req_data.get('paymentSessionId') or req_data.get('sessionId')
                 action = req_data.get('action') # 'approve' or 'reject'
                 reason = req_data.get('rejectionReason', '')
+                remarks = req_data.get('remarks') or req_data.get('adminRemarks') or reason
                 data = load_backend_data()
-                success, res = subscription_manager.verify_payment(admin_u, session_id, action, reason, data, sync_to_firebase)
+                success, res = subscription_manager.verify_payment(admin_u, session_id, action, reason, data, sync_to_firebase, remarks=remarks)
                 if not success:
                     self.send_json(400, {'success': False, 'error': res})
                     return
@@ -2122,6 +2208,63 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             except Exception as e:
                 self.send_json(500, {'success': False, 'error': f'Channel management error: {str(e)}'})
+                return
+
+        # 6b. Admin Upload Payment Channel QR Image
+        if path == '/api/admin/payment-channels/upload-qr':
+            token = self.get_auth_token()
+            admin_u = authenticate_token(token)
+            if not admin_u or admin_u.get('role') != 'admin':
+                self.send_json(403, {'success': False, 'error': 'Administrator authorization required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length > 6 * 1024 * 1024:
+                    self.send_json(413, {'success': False, 'error': 'QR image exceeds 5 MB limit.', 'code': 413})
+                    return
+                body = self.rfile.read(content_length)
+                post_data = json.loads(body.decode('utf-8'))
+                file_name = post_data.get('fileName', 'channel_qr.png')
+                file_data_b64 = post_data.get('fileData', '')
+                channel_id = post_data.get('channelId')
+
+                if ',' in file_data_b64:
+                    file_data_b64 = file_data_b64.split(',', 1)[1]
+                binary_data = base64.b64decode(file_data_b64)
+
+                is_valid = (
+                    binary_data.startswith(b'\x89PNG\r\n\x1a\n') or
+                    binary_data.startswith(b'\xff\xd8\xff') or
+                    (binary_data.startswith(b'RIFF') and b'WEBP' in binary_data[:16])
+                )
+                if not is_valid:
+                    self.send_json(400, {'success': False, 'error': 'Invalid image format. Supported: PNG, JPG, WEBP.'})
+                    return
+
+                sanitized_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', os.path.basename(file_name))
+                unique_img_id = f'qr_{uuid.uuid4().hex[:12]}_{sanitized_name}'
+                dest_path = os.path.join(PRIVATE_IMAGES_DIR, unique_img_id)
+                with open(dest_path, 'wb') as f:
+                    f.write(binary_data)
+
+                qr_url = f'/api/images/{unique_img_id}'
+                data = load_backend_data()
+                if channel_id:
+                    channels = data.setdefault('payment_channels', [])
+                    target = next((c for c in channels if c.get('id') == channel_id), None)
+                    if target:
+                        target['qrCodeUrl'] = qr_url
+                        save_backend_data(data)
+                        sync_to_firebase(f"payment_channels/{channel_id}", target)
+
+                self.send_json(200, {
+                    'success': True,
+                    'qrCodeUrl': qr_url,
+                    'imageId': unique_img_id
+                })
+                return
+            except Exception as e:
+                self.send_json(500, {'success': False, 'error': f'QR upload error: {str(e)}'})
                 return
 
         # 7. Admin Plan Configuration (Pricing, Features, Limits, Trial)
@@ -2316,12 +2459,14 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     )
 
                     if not already_rewarded:
-                            # 1. Credit Referrer Points & Count
+                            # 1. Credit Referrer Points, Count & Total XP
                             referrer['referralPoints'] = int(referrer.get('referralPoints', 0)) + referrer_reward
                             referrer['referralCount'] = int(referrer.get('referralCount', 0)) + 1
+                            referrer['totalXp'] = int(referrer.get('totalXp', 0)) + referrer_reward
                             
-                            # 2. Credit New Student Reward Points
+                            # 2. Credit New Student Reward Points & Total XP
                             new_user['referralPoints'] = int(new_user.get('referralPoints', 0)) + new_student_reward
+                            new_user['totalXp'] = int(new_user.get('totalXp', 0)) + new_student_reward
                             new_user['referredBy'] = referrer.get('username') or referrer.get('name')
 
                             # 3. Create persistent audit record in referrals
@@ -2343,6 +2488,36 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                                 'status': 'completed'
                             }
                             data['referrals'].insert(0, ref_record)
+
+                            # 3b. Add XP Ledger Transactions for Referrer and New User
+                            now_iso_ref = datetime.now(timezone.utc).isoformat()
+                            xp_txs = data.setdefault('xp_transactions', [])
+                            ref_tx_referrer = {
+                                'id': f"tx_ref_{ref_id}_r",
+                                'userId': referrer.get('id'),
+                                'userName': referrer.get('name', 'Referrer'),
+                                'activityName': f"Referral Bonus: Invited @{new_user.get('username')}",
+                                'points': referrer_reward,
+                                'sourceType': 'referral',
+                                'timestamp': now_iso_ref,
+                                'createdAt': now_iso_ref,
+                                'metadata': {'referredUserId': user_id, 'referralId': ref_id}
+                            }
+                            ref_tx_student = {
+                                'id': f"tx_ref_{ref_id}_s",
+                                'userId': user_id,
+                                'userName': new_user.get('name', 'New Student'),
+                                'activityName': f"Welcome Referral Bonus: Used code @{referrer.get('username')}",
+                                'points': new_student_reward,
+                                'sourceType': 'referral',
+                                'timestamp': now_iso_ref,
+                                'createdAt': now_iso_ref,
+                                'metadata': {'referrerUserId': referrer.get('id'), 'referralId': ref_id}
+                            }
+                            xp_txs.insert(0, ref_tx_referrer)
+                            xp_txs.insert(0, ref_tx_student)
+                            sync_to_firebase(f"xp_transactions/{ref_tx_referrer['id']}", ref_tx_referrer)
+                            sync_to_firebase(f"xp_transactions/{ref_tx_student['id']}", ref_tx_student)
 
                             # 4. Real-time Notifications
                             notifs = data.get('notifications', [])
@@ -3828,6 +4003,16 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 tests = data.get('tests', [])
                 target = next((t for t in tests if t.get('id') == test_id), None)
                 if target:
+                    user_tier = get_user_tier(user.get('id'), data)
+                    req_tier = str(target.get('requiredTier') or target.get('tier') or 'free').lower()
+                    if not check_tier_access(user_tier, req_tier):
+                        self.send_json(403, {
+                            'error': f'Access Denied: This test requires an active {req_tier.capitalize()} Pass or higher.',
+                            'code': 403,
+                            'isLocked': True,
+                            'requiredTier': req_tier
+                        })
+                        return
                     entitlements = subscription_manager.get_user_entitlements(user['id'], data, sync_to_firebase)
                     if target.get('isPremium') and not entitlements['permissions'].get('premium_mcq_access'):
                         self.send_json(403, {
@@ -4065,8 +4250,19 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json(404, {'error': 'Endpoint not found', 'code': 404})
 
 def run_server(port=PORT):
-    socketserver.TCPServer.allow_reuse_address = False
-    with socketserver.ThreadingTCPServer(('127.0.0.1', port), ExcellenceCAHandler) as httpd:
+    socketserver.TCPServer.allow_reuse_address = True
+    retries = 10
+    httpd = None
+    for attempt in range(retries):
+        try:
+            httpd = socketserver.ThreadingTCPServer(('127.0.0.1', port), ExcellenceCAHandler)
+            break
+        except OSError as e:
+            if attempt < retries - 1:
+                time.sleep(1)
+            else:
+                raise e
+    with httpd:
         print(f'==================================================')
         print(f' ExcellenceCA Secure Server running at:')
         print(f' http://localhost:{port}')

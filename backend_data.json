@@ -26,7 +26,7 @@
       "caLevel": "CA FOUNDATION",
       "referralPoints": 600,
       "referralCount": 6,
-      "totalXp": 0
+      "totalXp": 1000
     },
     "priya.patel@castudent.in": {
       "id": "usr-student-2",
@@ -4140,6 +4140,34 @@
   ],
   "xp_transactions": [
     {
+      "id": "tx_sub_psess_1789329430713_813c0084",
+      "userId": "usr-student-1",
+      "userName": "Rohan Sharma",
+      "activityName": "Bonus XP: Core Pass (Monthly) Activation",
+      "points": 500,
+      "timestamp": "2026-09-13T19:57:10.912598+00:00",
+      "createdAt": "2026-09-13T19:57:10.912598+00:00",
+      "metadata": {
+        "paymentSessionId": "psess_1789329430713_813c0084",
+        "planId": "core_monthly",
+        "amount": 500
+      }
+    },
+    {
+      "id": "tx_sub_psess_1789329331602_7514d33f",
+      "userId": "usr-student-1",
+      "userName": "Rohan Sharma",
+      "activityName": "Bonus XP: Core Pass (Monthly) Activation",
+      "points": 500,
+      "timestamp": "2026-09-13T19:55:31.817879+00:00",
+      "createdAt": "2026-09-13T19:55:31.817879+00:00",
+      "metadata": {
+        "paymentSessionId": "psess_1789329331602_7514d33f",
+        "planId": "core_monthly",
+        "amount": 500
+      }
+    },
+    {
       "id": "tx_sub_psess_1789322998925_05dcb63a",
       "userId": "usr-student-2",
       "userName": "Priya Patel",
@@ -6264,6 +6292,24 @@
   ],
   "notifications": [
     {
+      "id": "notif_sub_1789329430913",
+      "userId": "usr-student-1",
+      "title": "Core Pass Activated!",
+      "message": "Your payment of \u20b949 (UTR: UTR1789329430727) has been verified. Welcome to Core Pass (Monthly)! You received +500 bonus XP. Note: Verified with Institutional HDFC Bank Statement",
+      "type": "subscription",
+      "createdAt": "2026-09-13T19:57:10.912598+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_1789329331818",
+      "userId": "usr-student-1",
+      "title": "Core Pass Activated!",
+      "message": "Your payment of \u20b949 (UTR: UTR1789329331690) has been verified. Welcome to Core Pass (Monthly)! You received +500 bonus XP. Note: Verified with Institutional HDFC Bank Statement",
+      "type": "subscription",
+      "createdAt": "2026-09-13T19:55:31.817879+00:00",
+      "isRead": false
+    },
+    {
       "id": "notif_sub_canc_1789323009194_ccef",
       "userId": "usr-student-4",
       "title": "Subscription Cancelled",
@@ -6648,6 +6694,103 @@
   ],
   "payment_sessions": [
     {
+      "paymentSessionId": "psess_1789329430713_813c0084",
+      "sessionId": "psess_1789329430713_813c0084",
+      "userId": "usr-student-1",
+      "userEmail": "rohan.sharma@castudent.in",
+      "userName": "Rohan Sharma",
+      "userPhone": "",
+      "caLevel": "CA FOUNDATION",
+      "planId": "core_monthly",
+      "planName": "Core Pass (Monthly)",
+      "planTier": "core",
+      "amount": 49,
+      "currency": "INR",
+      "durationDays": 30,
+      "channelSnapshot": {
+        "id": "chan-primary-1",
+        "name": "Primary UPI (HDFC Bank)",
+        "upiId": "excellenceca@okhdfcbank",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR"
+      },
+      "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
+      "status": "approved",
+      "createdAt": "2026-09-13T19:57:10.713124+00:00",
+      "expiresAt": "2026-09-13T20:07:10.713124+00:00",
+      "utr": "UTR1789329430727",
+      "screenshot": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFWM0AAAADUlEQVR4nGP4//8/AAX+Av4N7wqlAAAAAElFTkSuQmCC",
+      "submittedAt": "2026-09-13T19:57:10.808610+00:00",
+      "verifiedAt": "2026-09-13T19:57:10.912598+00:00",
+      "verifiedBy": "usr-admin-1",
+      "rejectionReason": null,
+      "remarks": "Verified with Institutional HDFC Bank Statement",
+      "adminRemarks": "Verified with Institutional HDFC Bank Statement"
+    },
+    {
+      "paymentSessionId": "psess_1789329331602_7514d33f",
+      "sessionId": "psess_1789329331602_7514d33f",
+      "userId": "usr-student-1",
+      "userEmail": "rohan.sharma@castudent.in",
+      "userName": "Rohan Sharma",
+      "userPhone": "",
+      "caLevel": "CA FOUNDATION",
+      "planId": "core_monthly",
+      "planName": "Core Pass (Monthly)",
+      "planTier": "core",
+      "amount": 49,
+      "currency": "INR",
+      "durationDays": 30,
+      "channelSnapshot": {
+        "id": "chan-primary-1",
+        "name": "Primary UPI (HDFC Bank)",
+        "upiId": "excellenceca@okhdfcbank",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR"
+      },
+      "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
+      "status": "approved",
+      "createdAt": "2026-09-13T19:55:31.602426+00:00",
+      "expiresAt": "2026-09-13T20:05:31.602426+00:00",
+      "utr": "UTR1789329331690",
+      "screenshot": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFWM0AAAADUlEQVR4nGP4//8/AAX+Av4N7wqlAAAAAElFTkSuQmCC",
+      "submittedAt": "2026-09-13T19:55:31.702262+00:00",
+      "verifiedAt": "2026-09-13T19:55:31.817879+00:00",
+      "verifiedBy": "usr-admin-1",
+      "rejectionReason": null,
+      "remarks": "Verified with Institutional HDFC Bank Statement",
+      "adminRemarks": "Verified with Institutional HDFC Bank Statement"
+    },
+    {
+      "paymentSessionId": "psess_1789329317258_1c9c71e9",
+      "sessionId": "psess_1789329317258_1c9c71e9",
+      "userId": "usr-student-1",
+      "userEmail": "rohan.sharma@castudent.in",
+      "userName": "Rohan Sharma",
+      "userPhone": "",
+      "caLevel": "CA FOUNDATION",
+      "planId": "core_monthly",
+      "planName": "Core Pass (Monthly)",
+      "planTier": "core",
+      "amount": 49,
+      "currency": "INR",
+      "durationDays": 30,
+      "channelSnapshot": {
+        "id": "chan-primary-1",
+        "name": "Primary UPI (HDFC Bank)",
+        "upiId": "excellenceca@okhdfcbank",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR"
+      },
+      "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
+      "status": "pending",
+      "createdAt": "2026-09-13T19:55:17.258901+00:00",
+      "expiresAt": "2026-09-13T20:05:17.258901+00:00",
+      "utr": null,
+      "screenshot": null,
+      "submittedAt": null,
+      "verifiedAt": null,
+      "verifiedBy": null,
+      "rejectionReason": null
+    },
+    {
       "paymentSessionId": "psess_1789322999583_816459fa",
       "sessionId": "psess_1789322999583_816459fa",
       "userId": "usr-student-2",
@@ -6730,7 +6873,7 @@
         "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR"
       },
       "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
-      "status": "pending",
+      "status": "expired",
       "createdAt": "2026-09-13T18:09:48.575322+00:00",
       "expiresAt": "2026-09-13T18:14:48.575322+00:00",
       "utr": null,
@@ -6738,7 +6881,7 @@
       "submittedAt": null,
       "verifiedAt": null,
       "verifiedBy": null,
-      "rejectionReason": null
+      "rejectionReason": "Payment session timed out (5 minutes)."
     },
     {
       "paymentSessionId": "psess_1789318708731_5c3b7b9f",
@@ -6867,16 +7010,18 @@
   ],
   "subscriptions": {
     "usr-student-1": {
-      "id": "sub_usr-student-1_1789322983",
+      "id": "sub_usr-student-1_1789329430",
       "userId": "usr-student-1",
-      "planId": "plus_monthly",
-      "planName": "Plus Pass (Monthly)",
-      "planTier": "plus",
+      "planId": "core_monthly",
+      "planName": "Core Pass (Monthly)",
+      "planTier": "core",
       "isTrial": false,
       "status": "active",
-      "startedAt": "2026-09-13T18:09:43.741015+00:00",
-      "expiresAt": "2026-10-28T18:09:43.741015+00:00",
-      "purchasedAmount": 0,
+      "startedAt": "2026-09-13T19:57:10.912598+00:00",
+      "expiresAt": "2026-12-27T18:09:43.741015+00:00",
+      "purchasedAmount": 49,
+      "paymentSessionId": "psess_1789329430713_813c0084",
+      "utr": "UTR1789329430727",
       "history": [
         {
           "action": "payment_approved",
@@ -6930,6 +7075,22 @@
           "adminId": "usr-admin-1",
           "timestamp": "2026-09-13T18:09:43.973177+00:00",
           "details": "Extended by 15 days to 2026-10-28T18:09:43.741015+00:00"
+        },
+        {
+          "action": "payment_approved",
+          "paymentSessionId": "psess_1789329331602_7514d33f",
+          "adminId": "usr-admin-1",
+          "adminName": "Administrator",
+          "timestamp": "2026-09-13T19:55:31.817879+00:00",
+          "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement"
+        },
+        {
+          "action": "payment_approved",
+          "paymentSessionId": "psess_1789329430713_813c0084",
+          "adminId": "usr-admin-1",
+          "adminName": "Administrator",
+          "timestamp": "2026-09-13T19:57:10.912598+00:00",
+          "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement"
         }
       ]
     },
@@ -7048,6 +7209,32 @@
     }
   },
   "admin_audit_logs": [
+    {
+      "id": "audit_1789329431117_bf056a",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "APPROVE_PAYMENT",
+      "targetId": "usr-student-1",
+      "target": "usr-student-1",
+      "details": "Approved payment of \u20b949 for Core Pass (Monthly) (UTR: UTR1789329430727) - Remarks: Verified with Institutional HDFC Bank Statement",
+      "oldValue": "pending_verification",
+      "newValue": "approved",
+      "timestamp": "2026-09-13T19:57:11.117090+00:00"
+    },
+    {
+      "id": "audit_1789329332000_133300",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "APPROVE_PAYMENT",
+      "targetId": "usr-student-1",
+      "target": "usr-student-1",
+      "details": "Approved payment of \u20b949 for Core Pass (Monthly) (UTR: UTR1789329331690) - Remarks: Verified with Institutional HDFC Bank Statement",
+      "oldValue": "pending_verification",
+      "newValue": "approved",
+      "timestamp": "2026-09-13T19:55:32.000612+00:00"
+    },
     {
       "id": "audit_1789323009195_837902",
       "adminId": "usr-admin-1",

@@ -36,11 +36,14 @@ class SubscriptionManager {
   async fetchPlans(force = false) {
     try {
       const url = force ? `/api/subscriptions/plans?_t=${Date.now()}` : '/api/subscriptions/plans';
-      const resp = await fetch(url, { cache: 'no-store' });
+      const user = window.auth ? window.auth.getCurrentUser() : null;
+      const headers = user ? { 'Authorization': `Bearer ${user.token || user.id}` } : {};
+      const resp = await fetch(url, { headers, cache: 'no-store' });
       if (resp.ok) {
         const data = await resp.json();
         if (data.success && data.plans) {
           this.plans = data.plans;
+          this.isTrialEligible = typeof data.isTrialEligible === 'boolean' ? data.isTrialEligible : true;
           if (window.store) {
             window.store.saveSubscriptionPlans(data.plans);
           }
@@ -222,7 +225,8 @@ class SubscriptionManager {
         </div>
       </div>
 
-      <!-- Highlighted ₹9 Elite Trial Banner -->
+      <!-- Highlighted ₹9 Elite Trial Banner (First-time buyers only) -->
+      ${this.isTrialEligible !== false ? `
       <div class="mb-8 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 p-0.5 shadow-md">
         <div class="bg-white rounded-[15px] p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div class="flex items-center gap-3.5">
@@ -246,13 +250,14 @@ class SubscriptionManager {
             </div>
             <button 
               onclick="window.subscriptionManager.startCheckout('elite_trial')"
-              class="px-5 py-2.5 bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-700 hover:to-rose-700 text-white text-xs sm:text-sm font-bold rounded-xl shadow-sm transition-transform active:scale-95"
+              class="px-5 py-2.5 bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-700 hover:to-rose-700 text-white text-xs sm:text-sm font-bold rounded-xl shadow-sm transition-transform active:scale-95 cursor-pointer"
             >
               ${activePlanId === 'elite_trial' ? 'Renew ₹9 Trial' : 'Start ₹9 Trial'}
             </button>
           </div>
         </div>
       </div>
+      ` : ''}
 
       <!-- 3 Main Pass Cards Grid -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -595,14 +600,14 @@ class SubscriptionManager {
         </button>
       </div>
 
-      <!-- 5-Minute Expiry Banner -->
+      <!-- 10-Minute Expiry Banner -->
       <div id="payment-countdown-banner" class="mb-4 p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs flex items-center justify-between">
         <div class="flex items-center gap-2">
           <i data-lucide="clock" class="w-4 h-4 text-blue-600 flex-shrink-0 animate-spin"></i>
           <span>Payment window expires in:</span>
         </div>
         <span id="payment-countdown-display" class="font-mono text-sm font-black text-blue-700 bg-white px-2.5 py-0.5 rounded-lg border border-blue-200">
-          05:00
+          10:00
         </span>
       </div>
 
@@ -749,6 +754,11 @@ class SubscriptionManager {
   async handleUserCloseCheckout() {
     if (!this.activeSession) {
       window.app.closeModal('payment-checkout-modal');
+      return;
+    }
+
+    const confirmed = confirm("Are you sure you want to cancel this payment order?\n\nThe current order session and UTR reservation will be cancelled.");
+    if (!confirmed) {
       return;
     }
 
@@ -1061,7 +1071,7 @@ class SubscriptionManager {
     let trialBannerHtml = '';
     const trialPlan = plans['elite_trial'] || Object.values(plans).find(p => p.tier === 'trial');
     const isFullElite = userTier === 'elite' && !isTrialOnly;
-    if (trialPlan && trialPlan.isActive !== false && !isFullElite) {
+    if (trialPlan && trialPlan.isActive !== false && !isFullElite && this.isTrialEligible !== false) {
       const trialFirstFeature = (trialPlan.features && trialPlan.features[0]) 
         ? trialPlan.features[0] 
         : `Experience all Elite Pass features for ${trialPlan.durationDays} full days: 12-hour copy checks, all premium MCQs, and full syllabus mock test papers for just ₹${trialPlan.price}!`;
@@ -1129,11 +1139,29 @@ class SubscriptionManager {
       const planTier = (plan.tier || '').toLowerCase();
       const planNameCap = planTier.charAt(0).toUpperCase() + planTier.slice(1);
 
-      // Current Plan Active
-      if (userTier === planTier && !isTrialOnly) {
+      // Check exact plan match
+      const isCurrentExactPlan = isSubscribed && ((subscription && subscription.planId === plan.id) || (activePlanId === plan.id));
+      if (isCurrentExactPlan && !isTrialOnly) {
         return {
           badge: '<span class="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1"><i data-lucide="check" class="w-3 h-3 text-emerald-600"></i> Your Current Pass</span>',
           btn: `<button disabled class="w-full py-2.5 bg-slate-100 text-slate-400 font-bold text-xs rounded-xl border border-slate-200 cursor-not-allowed">Current Plan Active</button>`
+        };
+      }
+
+      // Same tier but different duration variant (e.g. user on monthly wants to switch/extend to 4 months)
+      if (userTier === planTier && !isCurrentExactPlan && !isTrialOnly) {
+        const cycleName = plan.billingCycle === '4_months' ? '4 Months' : 'Monthly';
+        const btnColors = planTier === 'elite' 
+          ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+          : (planTier === 'plus' ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white');
+        return {
+          badge: `<span class="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1"><i data-lucide="refresh-cw" class="w-3 h-3 text-blue-600"></i> Switch Duration / Extend</span>`,
+          btn: `
+            <button onclick="window.subscriptionManager.startCheckout('${plan.id}')" class="w-full py-2.5 ${btnColors} font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
+              <span>Switch / Extend to ${cycleName}</span>
+              <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+            </button>
+          `
         };
       }
 
@@ -1347,11 +1375,15 @@ class SubscriptionManager {
           <p class="font-bold text-slate-700">Protected Direct UPI Payments with Manual Admin Verification</p>
           <p>Payments are authenticated through official bank transaction UTR numbers with zero hidden charges. Questions and evaluation SLAs reflect immediately upon verification.</p>
         </div>
+
+        <!-- 5. PAYMENT & MEMBERSHIP TRANSACTION HISTORY -->
+        <div id="passes-payment-history-container" class="pt-4"></div>
       </div>
     `;
 
       this._passesLoadedOnce = true;
       if (window.lucide) window.lucide.createIcons();
+      this.renderPassesPaymentHistory();
     } catch (err) {
       console.error('[SubscriptionManager] Error rendering passes page:', err);
       this._passesLoadedOnce = false;
@@ -1374,6 +1406,258 @@ class SubscriptionManager {
       `;
       if (window.lucide) window.lucide.createIcons();
     }
+  }
+
+  async renderPassesPaymentHistory(isSilent = false) {
+    const mount = document.getElementById('passes-payment-history-container');
+    if (!mount) return;
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    if (!user || user.role === 'admin') {
+      mount.innerHTML = '';
+      return;
+    }
+
+    if (!isSilent && !this._historySessions) {
+      mount.innerHTML = `
+        <div class="p-8 text-center bg-white rounded-2xl border border-slate-200 shadow-xs">
+          <i data-lucide="loader-2" class="w-6 h-6 animate-spin mx-auto text-amber-600 mb-2"></i>
+          <p class="text-xs text-slate-500 font-medium">Loading your payment transactions...</p>
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    let sessions = [];
+    try {
+      const token = user.token || user.id;
+      const resp = await fetch(`/api/subscriptions/history?_t=${Date.now()}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.success && Array.isArray(data.sessions)) {
+          sessions = data.sessions;
+          this._historySessions = sessions;
+          if (window.store) {
+            window.store.savePaymentSessions(sessions);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[SubscriptionManager] History fetch failed, fallback to local store:', e);
+    }
+
+    if (!sessions || sessions.length === 0) {
+      sessions = this._historySessions || (window.store ? (window.store.getPaymentSessions(user.id) || []) : []);
+    }
+
+    this._historyStatusFilter = this._historyStatusFilter || 'all';
+    this._historySearch = (this._historySearch || '').toLowerCase();
+    this._historyPage = this._historyPage || 1;
+    const pageSize = 10;
+
+    const filtered = sessions.filter(s => {
+      if (this._historyStatusFilter !== 'all') {
+        if (this._historyStatusFilter === 'approved' && s.status !== 'approved') return false;
+        if (this._historyStatusFilter === 'pending' && s.status !== 'pending_verification' && s.status !== 'late_payment') return false;
+        if (this._historyStatusFilter === 'rejected' && s.status !== 'rejected') return false;
+        if (this._historyStatusFilter === 'expired' && s.status !== 'expired' && s.status !== 'cancelled') return false;
+      }
+      if (this._historySearch) {
+        const utr = (s.utr || '').toLowerCase();
+        const plan = (s.planName || s.planId || '').toLowerCase();
+        const sessId = (s.sessionId || s.paymentSessionId || '').toLowerCase();
+        if (!utr.includes(this._historySearch) && !plan.includes(this._historySearch) && !sessId.includes(this._historySearch)) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    const totalFiltered = filtered.length;
+    const totalPages = Math.ceil(totalFiltered / pageSize) || 1;
+    if (this._historyPage > totalPages) this._historyPage = totalPages;
+    if (this._historyPage < 1) this._historyPage = 1;
+
+    const startIndex = (this._historyPage - 1) * pageSize;
+    const endIndex = Math.min(startIndex + pageSize, totalFiltered);
+    const paged = filtered.slice(startIndex, endIndex);
+
+    mount.innerHTML = `
+      <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="text-base font-black text-slate-900">Payment & Membership History</h3>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
+                ${sessions.length} Transactions
+              </span>
+            </div>
+            <p class="text-xs text-slate-500 mt-0.5">Authoritative record of your UPI payment sessions, transaction UTR numbers, and manual verification status.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button 
+              onclick="window.subscriptionManager.renderPassesPaymentHistory(false); window.app.showToast('Payment history updated.', 'info');" 
+              class="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors cursor-pointer"
+              title="Refresh"
+            >
+              <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter & Search Bar -->
+        <div class="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div class="relative w-full sm:w-72">
+            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2"></i>
+            <input 
+              type="text" 
+              id="history-search-input"
+              value="${this._historySearch || ''}"
+              oninput="window.subscriptionManager.setHistorySearch(this.value)"
+              placeholder="Search by UTR or Pass name..." 
+              class="w-full pl-9 pr-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500"
+            />
+          </div>
+          <div class="flex items-center gap-2 w-full sm:w-auto">
+            <label class="text-xs font-bold text-slate-500 whitespace-nowrap">Filter Status:</label>
+            <select 
+              id="history-status-select"
+              onchange="window.subscriptionManager.setHistoryStatus(this.value)"
+              class="px-3 py-2 text-xs font-bold border border-slate-200 rounded-xl bg-white focus:ring-2 focus:ring-amber-500 cursor-pointer"
+            >
+              <option value="all" ${this._historyStatusFilter === 'all' ? 'selected' : ''}>All Statuses</option>
+              <option value="approved" ${this._historyStatusFilter === 'approved' ? 'selected' : ''}>Approved / Active</option>
+              <option value="pending" ${this._historyStatusFilter === 'pending' ? 'selected' : ''}>Pending Review</option>
+              <option value="rejected" ${this._historyStatusFilter === 'rejected' ? 'selected' : ''}>Rejected</option>
+              <option value="expired" ${this._historyStatusFilter === 'expired' ? 'selected' : ''}>Expired / Incomplete</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Table -->
+        <div class="overflow-x-auto rounded-xl border border-slate-200">
+          <table class="w-full text-left text-xs min-w-[700px]">
+            <thead>
+              <tr class="border-b border-slate-200 bg-slate-50/80 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                <th class="py-3 px-4">Plan / Pass</th>
+                <th class="py-3 px-4">Amount</th>
+                <th class="py-3 px-4">UTR / Session Ref</th>
+                <th class="py-3 px-4">UPI Channel</th>
+                <th class="py-3 px-4">Submitted At</th>
+                <th class="py-3 px-4">Status</th>
+                <th class="py-3 px-4 text-right">Remarks / Notes</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              ${totalFiltered === 0 ? `
+                <tr>
+                  <td colspan="7" class="py-12 text-center text-slate-400 text-xs">
+                    <i data-lucide="receipt" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
+                    No transaction records matching the filter.
+                  </td>
+                </tr>
+              ` : paged.map(s => {
+                const dateStr = s.submittedAt 
+                  ? new Date(s.submittedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                  : (s.createdAt ? new Date(s.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '--');
+
+                let statusBadge = '';
+                if (s.status === 'approved') {
+                  statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200"><i data-lucide="check-circle" class="w-3 h-3"></i> Approved</span>';
+                } else if (s.status === 'pending_verification') {
+                  statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-200"><i data-lucide="clock" class="w-3 h-3 animate-spin"></i> Pending Review</span>';
+                } else if (s.status === 'late_payment') {
+                  statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-orange-100 text-orange-800 border border-orange-200"><i data-lucide="alert-triangle" class="w-3 h-3"></i> Late Payment</span>';
+                } else if (s.status === 'rejected') {
+                  statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-200"><i data-lucide="x-circle" class="w-3 h-3"></i> Rejected</span>';
+                } else {
+                  statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200">Expired / Incomplete</span>';
+                }
+
+                const remarks = s.adminRemarks || s.remarks || s.rejectionReason || '';
+
+                return `
+                  <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="py-3 px-4">
+                      <span class="font-bold text-slate-900 block">${s.planName || s.planId}</span>
+                      <span class="text-[10px] text-slate-400 font-mono">${s.billingCycle === '4_months' ? '4-Month Term' : (s.billingCycle === 'trial' ? '10-Day Trial' : 'Monthly Term')}</span>
+                    </td>
+                    <td class="py-3 px-4 font-black text-slate-900">₹${s.amount}</td>
+                    <td class="py-3 px-4 font-mono text-xs font-bold text-slate-800">
+                      <div class="flex items-center gap-1.5">
+                        <span>${s.utr || '<span class="text-slate-400 font-sans">N/A</span>'}</span>
+                        ${s.utr ? `
+                          <button 
+                            onclick="navigator.clipboard.writeText('${s.utr}'); window.app.showToast('UTR copied!', 'info');"
+                            class="text-slate-400 hover:text-slate-700 p-0.5"
+                            title="Copy UTR"
+                          >
+                            <i data-lucide="copy" class="w-3 h-3"></i>
+                          </button>
+                        ` : ''}
+                      </div>
+                      <span class="text-[10px] text-slate-400 font-mono block mt-0.5">Ref: ${(s.sessionId || s.paymentSessionId || '').slice(-8)}</span>
+                    </td>
+                    <td class="py-3 px-4 text-xs font-mono text-slate-600">${s.channelUpiId || (s.channelSnapshot ? s.channelSnapshot.upiId : 'HDFC UPI')}</td>
+                    <td class="py-3 px-4 text-xs text-slate-500">${dateStr}</td>
+                    <td class="py-3 px-4">${statusBadge}</td>
+                    <td class="py-3 px-4 text-right">
+                      ${remarks ? `<span class="text-xs ${s.status === 'rejected' ? 'text-rose-600' : 'text-slate-600'} font-medium" title="${remarks}">${remarks}</span>` : (s.status === 'approved' ? '<span class="text-emerald-700 font-bold">Pass Active</span>' : '<span class="text-slate-400">--</span>')}
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination Controls -->
+        ${totalPages > 1 ? `
+          <div class="px-2 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div class="text-slate-600">
+              Showing <span class="font-semibold text-slate-900">${startIndex + 1}</span> to <span class="font-semibold text-slate-900">${endIndex}</span> of <span class="font-bold text-slate-900">${totalFiltered}</span> records
+            </div>
+            <div class="flex items-center gap-1">
+              <button 
+                onclick="window.subscriptionManager.setHistoryPage(${this._historyPage - 1})"
+                ${this._historyPage <= 1 ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 bg-white cursor-not-allowed text-xs"' : 'class="px-2.5 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-100 text-xs font-medium cursor-pointer"'}
+              >
+                Previous
+              </button>
+              <span class="px-3 py-1 font-bold text-xs text-slate-700 bg-white border border-slate-200 rounded">
+                Page ${this._historyPage} of ${totalPages}
+              </span>
+              <button 
+                onclick="window.subscriptionManager.setHistoryPage(${this._historyPage + 1})"
+                ${this._historyPage >= totalPages ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 bg-white cursor-not-allowed text-xs"' : 'class="px-2.5 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-100 text-xs font-medium cursor-pointer"'}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  setHistoryPage(p) {
+    this._historyPage = p;
+    this.renderPassesPaymentHistory(true);
+  }
+
+  setHistoryStatus(st) {
+    this._historyStatusFilter = st;
+    this._historyPage = 1;
+    this.renderPassesPaymentHistory(true);
+  }
+
+  setHistorySearch(q) {
+    this._historySearch = q;
+    this._historyPage = 1;
+    this.renderPassesPaymentHistory(true);
   }
 
   // --- REALTIME SYNC HANDLERS ---

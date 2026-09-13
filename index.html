@@ -615,21 +615,7 @@
         </div>
       </div>
 
-      <!-- SECTION: PAYMENT & MEMBERSHIP TRANSACTIONS -->
-      <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-xs">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-          <div>
-            <h3 class="text-base font-bold text-slate-900">Payment & Membership History</h3>
-            <p class="text-xs text-slate-500">Your UPI transactions, verification status, and active plan terms</p>
-          </div>
-          <button onclick="window.subscriptionManager && window.subscriptionManager.openPricingModal()" class="px-3.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs rounded-xl border border-amber-200 transition-colors flex items-center gap-1.5 self-start sm:self-auto cursor-pointer">
-            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-500"></i> Upgrade / Extend Pass
-          </button>
-        </div>
-        <div id="dashboard-payment-history">
-          <!-- Populated by student-dashboard.js -->
-        </div>
-      </div>
+
     </section>
 
     <!-- VIEW 2: LECTURE CATALOG & PLAYER -->
@@ -1115,9 +1101,6 @@
             </div>
             <div class="flex items-center justify-center sm:justify-start gap-2 mt-1">
               <span id="profile-page-username" class="text-xs text-blue-300 font-mono font-bold">@username</span>
-              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/10 text-white/90 border border-white/20" title="Student usernames are permanent and cannot be modified">
-                <i data-lucide="lock" class="w-3 h-3 text-amber-300"></i> Permanent ICAI Identifier
-              </span>
             </div>
             <p class="text-xs text-slate-300 mt-2 max-w-xl">
               Account actively enrolled in ICAI curriculum mock series. All evaluated submissions and private rankings are strictly confidential.
@@ -1201,6 +1184,7 @@
                 </tbody>
               </table>
             </div>
+            <div id="profile-xp-history-pagination" class="hidden p-2.5 bg-slate-50 border-t border-slate-200"></div>
           </div>
 
           <!-- 2. EDIT PROFILE FORM -->
@@ -1378,6 +1362,7 @@
                 </tbody>
               </table>
             </div>
+            <div id="profile-page-referred-pagination" class="hidden p-2.5 bg-slate-50 border-t border-slate-100"></div>
           </div>
 
         </div>

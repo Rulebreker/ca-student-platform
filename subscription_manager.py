@@ -473,11 +473,36 @@ def is_utr_duplicate(clean_utr, current_session_id, data):
                 return True, f"This UTR has already been submitted on {s.get('submittedAt') or s.get('createdAt')} for session #{s.get('paymentSessionId')[-6:]}."
     return False, None
 
+def is_eligible_for_trial(user_id, data):
+    """
+    Trial subscription option must ONLY be shown/accessible to users who have
+    never purchased or owned any valid pass/subscription according to business rules.
+    """
+    if not user_id:
+        return False
+    # 1. Check existing subscription record
+    subs = data.get('subscriptions', {})
+    user_sub = subs.get(user_id)
+    if user_sub:
+        if user_sub.get('status') in ('active', 'manually_granted') or user_sub.get('purchasedAmount', 0) > 0 or user_sub.get('isTrial') or len(user_sub.get('history', [])) > 0:
+            return False
+
+    # 2. Check payment sessions history (approved, submitted, pending_verification, or pending)
+    sessions = data.get('payment_sessions', [])
+    for s in sessions:
+        if s.get('userId') == user_id:
+            status = s.get('status')
+            if status in ('approved', 'submitted', 'pending_verification', 'pending'):
+                return False
+            if s.get('planId') == 'elite_trial':
+                return False
+    return True
+
 def create_payment_session(user, plan_id, data, sync_fn=None):
     """
-    Create a 5-minute payment session.
+    Create a 10-minute payment session.
     Takes a snapshot of the primary/selected payment channel.
-    Server timestamps enforce 5-minute countdown.
+    Server timestamps enforce 10-minute countdown.
     """
     plan = get_plan_by_id(plan_id, data)
     if not plan:
@@ -485,6 +510,11 @@ def create_payment_session(user, plan_id, data, sync_fn=None):
 
     if not plan.get('isActive', True):
         return False, "This plan is currently not available for purchase."
+
+    # Enforce trial eligibility server-side
+    if plan_id == 'elite_trial' or plan.get('tier') == 'trial':
+        if not is_eligible_for_trial(user.get('id'), data):
+            return False, "Trial subscription is exclusively available to first-time students who have never owned a pass."
 
     channels = get_payment_channels(data)
     active_channels = [c for c in channels if c.get('isActive', True)]
@@ -507,7 +537,7 @@ def create_payment_session(user, plan_id, data, sync_fn=None):
     }
 
     now = datetime.now(timezone.utc)
-    expires_at = now + timedelta(minutes=5)
+    expires_at = now + timedelta(minutes=10)
     payment_session_id = f"psess_{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}"
 
     session = {
@@ -594,7 +624,7 @@ def submit_payment(user_id, session_id, utr, screenshot, data, sync_fn=None):
 
     if now > expires_at:
         session['status'] = 'late_payment'
-        session['notes'] = 'Payment proof submitted after 5-minute session countdown. Flagged for manual admin verification.'
+        session['notes'] = 'Payment proof submitted after 10-minute session countdown. Flagged for manual admin verification.'
     else:
         session['status'] = 'pending_verification'
 
@@ -607,17 +637,18 @@ def submit_payment(user_id, session_id, utr, screenshot, data, sync_fn=None):
 
     return True, session
 
-def verify_payment(admin_user, session_id, action, rejection_reason, data, sync_fn=None):
+def verify_payment(admin_user, session_id, action, rejection_reason, data, sync_fn=None, remarks=None):
     """
     Admin verifies payment.
     Approve:
       - Validates idempotency (never double-award)
-      - Activates subscription
+      - Enforces strict lifecycle state transition
+      - Activates subscription & stacks duration if existing active
       - Awards instant points derived from authoritative plan
-      - Creates student notification
+      - Stores admin remarks & notification
       - Logs admin audit
     Reject:
-      - Updates status to rejected with reason
+      - Updates status to rejected with reason/remarks
       - Creates student notification
       - Logs admin audit
     """
@@ -626,18 +657,24 @@ def verify_payment(admin_user, session_id, action, rejection_reason, data, sync_
     if not session:
         return False, "Payment session not found."
 
-    if session.get('status') == 'approved':
-        return True, session
-
-    now = datetime.now(timezone.utc)
-    now_iso = now.isoformat()
-    user_id = session['userId']
-    plan = get_plan_by_id(session['planId'], data) or DEFAULT_PLANS.get(session['planId'], {})
-
+    current_status = session.get('status')
     if action == 'approve':
+        if current_status == 'approved':
+            return True, session
+        if current_status not in ('pending', 'pending_verification', 'late_payment'):
+            return False, f"Invalid state transition: Cannot approve payment session in '{current_status}' status."
+
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        user_id = session['userId']
+        plan = get_plan_by_id(session['planId'], data) or DEFAULT_PLANS.get(session['planId'], {})
+
+        admin_comment = remarks or rejection_reason or "Payment verified and pass activated."
         session['status'] = 'approved'
         session['verifiedAt'] = now_iso
         session['verifiedBy'] = admin_user.get('id', 'admin')
+        session['remarks'] = admin_comment
+        session['adminRemarks'] = admin_comment
 
         subscriptions = data.setdefault('subscriptions', {})
         existing_sub = subscriptions.get(user_id)
@@ -678,7 +715,7 @@ def verify_payment(admin_user, session_id, action, rejection_reason, data, sync_
                 'adminId': admin_user.get('id', 'admin'),
                 'adminName': admin_user.get('name', 'Administrator'),
                 'timestamp': now_iso,
-                'details': f"Approved payment of ₹{session['amount']} for {session['planName']}"
+                'details': f"Approved payment of ₹{session['amount']} for {session['planName']} with note: {admin_comment}"
             }]
         }
         subscriptions[user_id] = new_sub
@@ -721,7 +758,7 @@ def verify_payment(admin_user, session_id, action, rejection_reason, data, sync_
             'id': f"notif_sub_{int(time.time()*1000)}",
             'userId': user_id,
             'title': f"{plan.get('badge', 'Pass')} Activated!",
-            'message': f"Your payment of ₹{session['amount']} (UTR: {session.get('utr')}) has been verified. Welcome to {session['planName']}! You received +{instant_points} bonus XP.",
+            'message': f"Your payment of ₹{session['amount']} (UTR: {session.get('utr')}) has been verified. Welcome to {session['planName']}! You received +{instant_points} bonus XP. Note: {admin_comment}",
             'type': 'subscription',
             'createdAt': now_iso,
             'isRead': False
@@ -735,9 +772,9 @@ def verify_payment(admin_user, session_id, action, rejection_reason, data, sync_
             admin_user=admin_user,
             action='APPROVE_PAYMENT',
             target_id=user_id,
-            old_val=session.get('status'),
+            old_val=current_status,
             new_val='approved',
-            details=f"Approved payment of ₹{session['amount']} for {session['planName']} (UTR: {session.get('utr')})",
+            details=f"Approved payment of ₹{session['amount']} for {session['planName']} (UTR: {session.get('utr')}) - Remarks: {admin_comment}",
             data=data,
             sync_fn=sync_fn
         )
@@ -748,8 +785,21 @@ def verify_payment(admin_user, session_id, action, rejection_reason, data, sync_
         return True, session
 
     elif action == 'reject':
+        if current_status == 'rejected':
+            return True, session
+        if current_status not in ('pending', 'pending_verification', 'late_payment'):
+            return False, f"Invalid state transition: Cannot reject payment session in '{current_status}' status."
+
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        user_id = session['userId']
+        plan = get_plan_by_id(session['planId'], data) or DEFAULT_PLANS.get(session['planId'], {})
+
+        admin_comment = rejection_reason or remarks or "Payment could not be verified with bank records."
         session['status'] = 'rejected'
-        session['rejectionReason'] = rejection_reason or "Payment could not be verified with bank records."
+        session['rejectionReason'] = admin_comment
+        session['remarks'] = admin_comment
+        session['adminRemarks'] = admin_comment
         session['verifiedAt'] = now_iso
         session['verifiedBy'] = admin_user.get('id', 'admin')
 
@@ -757,7 +807,7 @@ def verify_payment(admin_user, session_id, action, rejection_reason, data, sync_
             'id': f"notif_sub_rej_{int(time.time()*1000)}",
             'userId': user_id,
             'title': "Payment Verification Failed",
-            'message': f"Your payment of ₹{session['amount']} for {session['planName']} could not be verified: {session['rejectionReason']}. Please contact faculty support.",
+            'message': f"Your payment of ₹{session['amount']} for {session['planName']} could not be verified: {admin_comment}. Please contact faculty support.",
             'type': 'subscription',
             'createdAt': now_iso,
             'isRead': False
@@ -771,16 +821,16 @@ def verify_payment(admin_user, session_id, action, rejection_reason, data, sync_
             admin_user=admin_user,
             action='REJECT_PAYMENT',
             target_id=user_id,
-            old_val=session.get('status'),
+            old_val=current_status,
             new_val='rejected',
-            details=f"Rejected payment of ₹{session['amount']} for {session['planName']}. Reason: {session['rejectionReason']}",
+            details=f"Rejected payment of ₹{session['amount']} for {session['planName']} (UTR: {session.get('utr')}) - Reason: {admin_comment}",
             data=data,
             sync_fn=sync_fn
         )
 
         return True, session
 
-    return False, "Invalid verification action."
+    return False, f"Unknown payment verification action: {action}"
 
 def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None):
     """
