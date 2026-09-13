@@ -20,6 +20,10 @@ class AssignmentPortal {
     this.currentAssignmentId = null;
     this.selectedPdfFile = null;
     this.selectedSubject = 'all';
+    this.selectedLevel = 'all';
+    this.filterBookmarkedOnly = false;
+    this.currentPage = 1;
+    this.pageSize = 6;
     this.searchQuery = '';
     this.selectedStatus = 'all';
     this.sortBy = 'new';
@@ -159,10 +163,18 @@ class AssignmentPortal {
       return;
     }
 
+    // 3.5 Pagination calculation
+    const totalPages = Math.max(1, Math.ceil(assignments.length / this.pageSize));
+    if (this.currentPage > totalPages) this.currentPage = totalPages;
+    const startIndex = (this.currentPage - 1) * this.pageSize;
+    const pagedAssignments = assignments.slice(startIndex, startIndex + this.pageSize);
+
     // 4. Render uniform equal-height cards with 7-part aligned structure
-    listContainer.innerHTML = assignments.map(asg => {
+    const cardsHtml = pagedAssignments.map(asg => {
       const subject = window.store.getSubjectById(asg.subjectId) || { name: asg.subject || 'Accounting' };
       const submission = userSubmissions.find(s => s.assignmentId === asg.id);
+      const isBm = user && window.store && window.store.isBookmarked ? window.store.isBookmarked(user.id, asg.id) : false;
+      const examLevel = asg.examLevel || 'CA Foundation';
       
       const evalStatus = window.secureBackend 
         ? window.secureBackend.computePaperStatus(asg, serverTime) 
@@ -197,7 +209,8 @@ class AssignmentPortal {
       let userSubBadge = '';
       if (submission) {
         if (submission.status === 'Evaluated') {
-          userSubBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex-shrink-0">Checked (${submission.marksObtained}/${asg.maximumMarks} M)</span>`;
+          const pts = (submission.pointsAwarded !== undefined && submission.pointsAwarded !== null) ? ` • +${submission.pointsAwarded} XP` : '';
+          userSubBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex-shrink-0">Checked (${submission.marksObtained}/${asg.maximumMarks} M${pts})</span>`;
         } else {
           userSubBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200 flex-shrink-0">Submitted</span>`;
         }
@@ -207,10 +220,23 @@ class AssignmentPortal {
         <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-xs hover:shadow-md transition-all flex flex-col h-full group box-border">
           <!-- 1. Top Badges/Status (Exact h-8 flex-shrink-0) -->
           <div class="flex items-center justify-between gap-2 mb-3 h-8 flex-shrink-0">
-            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-100 truncate max-w-[50%]" title="${subject.name}">
-              ${subject.name}
-            </span>
+            <div class="flex items-center gap-1.5 flex-wrap overflow-hidden max-w-[60%]">
+              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-100 truncate" title="${subject.name}">
+                ${subject.name}
+              </span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                ${examLevel}
+              </span>
+            </div>
             <div class="flex items-center gap-1.5 justify-end flex-shrink-0">
+              <button 
+                type="button"
+                onclick="event.stopPropagation(); window.assignmentPortal.toggleBookmark('${asg.id}')"
+                class="p-1.5 rounded-lg transition-colors cursor-pointer ${isBm ? 'text-amber-500 bg-amber-50 hover:bg-amber-100' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}"
+                title="${isBm ? 'Bookmarked (Click to remove)' : 'Bookmark this test paper'}"
+              >
+                <i data-lucide="bookmark" class="w-4 h-4 ${isBm ? 'fill-current' : ''}"></i>
+              </button>
               ${userSubBadge}
               <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${evalStatus.badgeClass} flex-shrink-0" title="${evalStatus.badgeText}">
                 ${badgeLabel}
@@ -301,6 +327,56 @@ class AssignmentPortal {
       `;
     }).join('');
 
+    // Pagination controls
+    let paginationHtml = '';
+    if (totalPages > 1) {
+      let pageBtns = [];
+      for (let p = 1; p <= totalPages; p++) {
+        pageBtns.push(`
+          <button 
+            type="button"
+            onclick="window.assignmentPortal.goToPage(${p})"
+            class="w-8 h-8 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              this.currentPage === p 
+                ? 'bg-blue-600 text-white shadow-xs' 
+                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+            }"
+          >
+            ${p}
+          </button>
+        `);
+      }
+
+      paginationHtml = `
+        <div class="col-span-full mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-200">
+          <div class="text-xs text-slate-500 font-medium">
+            Showing <strong>${startIndex + 1}</strong> - <strong>${Math.min(startIndex + this.pageSize, assignments.length)}</strong> of <strong>${assignments.length}</strong> Test Papers
+          </div>
+          <div class="flex items-center gap-1.5">
+            <button 
+              type="button"
+              onclick="window.assignmentPortal.goToPage(${this.currentPage - 1})"
+              ${this.currentPage === 1 ? 'disabled' : ''}
+              class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            >
+              Previous
+            </button>
+            ${pageBtns.join('')}
+            <button 
+              type="button"
+              onclick="window.assignmentPortal.goToPage(${this.currentPage + 1})"
+              ${this.currentPage === totalPages ? 'disabled' : ''}
+              class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    listContainer.innerHTML = cardsHtml + paginationHtml;
+
     this.renderSubmissionsTable(userSubmissions);
     if (window.lucide) window.lucide.createIcons();
   }
@@ -311,46 +387,129 @@ class AssignmentPortal {
 
     const allAssignments = window.store.getAssignments();
     const subjects = window.store.getSubjects();
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    const bmCount = user && window.store && window.store.getBookmarks ? window.store.getBookmarks(user.id).filter(b => b.itemType === 'paper' || allAssignments.some(a => a.id === b.itemId)).length : 0;
+
+    const examLevels = ['all', 'CA Foundation', 'CA Intermediate', 'CA Final'];
 
     filterContainer.innerHTML = `
+      <!-- Exam Level Tabs -->
+      <div class="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl w-fit flex-wrap">
+        ${examLevels.map(lvl => {
+          const isActive = this.selectedLevel === lvl;
+          const label = lvl === 'all' ? 'All Levels' : lvl;
+          return `
+            <button 
+              type="button"
+              onclick="window.assignmentPortal.filterLevel('${lvl}')"
+              class="px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                isActive ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }"
+            >
+              ${label}
+            </button>
+          `;
+        }).join('')}
+      </div>
+
+      <!-- Bookmarked Filter Button -->
       <button 
         type="button"
-        onclick="window.assignmentPortal.filterSubject('all')"
-        class="px-4 py-2 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
-          this.selectedSubject === 'all' 
-            ? 'bg-blue-600 text-white shadow-sm font-bold' 
+        onclick="window.assignmentPortal.toggleBookmarkedFilter()"
+        class="px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+          this.filterBookmarkedOnly 
+            ? 'bg-amber-500 text-white shadow-sm font-bold' 
             : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
         }"
       >
-        All Test Papers (${allAssignments.length})
+        <i data-lucide="bookmark" class="w-3.5 h-3.5 ${this.filterBookmarkedOnly ? 'fill-current' : ''}"></i>
+        Bookmarked (${bmCount})
       </button>
-      ${subjects.map(s => {
-        const count = allAssignments.filter(a => a.subjectId === s.id || a.subject === s.name).length;
-        const isActive = this.selectedSubject === s.id;
-        return `
-          <button 
-            type="button"
-            onclick="window.assignmentPortal.filterSubject('${s.id}')"
-            class="px-4 py-2 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
-              isActive 
-                ? 'bg-blue-600 text-white shadow-sm font-bold' 
-                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
-            }"
-          >
-            ${s.name} (${count})
-          </button>
-        `;
-      }).join('')}
+
+      <!-- Dynamic Subject Pills -->
+      <div class="flex items-center gap-2 flex-wrap">
+        <button 
+          type="button"
+          onclick="window.assignmentPortal.filterSubject('all')"
+          class="px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+            this.selectedSubject === 'all' && !this.filterBookmarkedOnly
+              ? 'bg-blue-600 text-white shadow-sm font-bold' 
+              : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+          }"
+        >
+          All Test Papers (${allAssignments.length})
+        </button>
+        ${subjects.map(s => {
+          const count = allAssignments.filter(a => a.subjectId === s.id || a.subject === s.name).length;
+          const isActive = this.selectedSubject === s.id && !this.filterBookmarkedOnly;
+          return `
+            <button 
+              type="button"
+              onclick="window.assignmentPortal.filterSubject('${s.id}')"
+              class="px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                isActive 
+                  ? 'bg-blue-600 text-white shadow-sm font-bold' 
+                  : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+              }"
+            >
+              ${s.name} (${count})
+            </button>
+          `;
+        }).join('')}
+      </div>
     `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  filterLevel(lvl) {
+    this.selectedLevel = lvl;
+    this.currentPage = 1;
+    this.renderSubjectFilters();
+    this.render();
+  }
+
+  toggleBookmarkedFilter() {
+    this.filterBookmarkedOnly = !this.filterBookmarkedOnly;
+    this.currentPage = 1;
+    this.renderSubjectFilters();
+    this.render();
+  }
+
+  toggleBookmark(paperId) {
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    if (!user) {
+      window.app.showAuthModal('login');
+      window.app.showToast('Please sign in to bookmark test papers.', 'info');
+      return;
+    }
+    const isNow = window.store.toggleBookmark(user.id, paperId, 'paper');
+    window.app.showToast(isNow ? 'Test paper bookmarked!' : 'Bookmark removed.', 'info');
+    this.renderSubjectFilters();
+    this.render();
+  }
+
+  goToPage(page) {
+    const filtered = this.getFilteredAndSortedAssignments();
+    const totalPages = Math.max(1, Math.ceil(filtered.length / this.pageSize));
+    if (page < 1 || page > totalPages) return;
+    this.currentPage = page;
+    this.render();
+    const listContainer = document.getElementById('assignment-list');
+    if (listContainer) listContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   filterSubject(subjectId) {
     this.selectedSubject = subjectId;
+    this.filterBookmarkedOnly = false;
+    this.currentPage = 1;
+    this.renderSubjectFilters();
     this.render();
   }
 
   handleSearch(query) {
     this.searchQuery = query || '';
+    this.currentPage = 1;
     const clearBtn = document.getElementById('assignment-search-clear-btn');
     if (clearBtn) {
       if (this.searchQuery.trim()) {
@@ -364,6 +523,7 @@ class AssignmentPortal {
 
   clearSearch() {
     this.searchQuery = '';
+    this.currentPage = 1;
     const searchInput = document.getElementById('assignment-search-input');
     if (searchInput) searchInput.value = '';
     const clearBtn = document.getElementById('assignment-search-clear-btn');
@@ -373,16 +533,21 @@ class AssignmentPortal {
 
   handleStatusFilter(status) {
     this.selectedStatus = status || 'all';
+    this.currentPage = 1;
     this.render();
   }
 
   handleSort(sortBy) {
     this.sortBy = sortBy || 'new';
+    this.currentPage = 1;
     this.render();
   }
 
   resetFilters() {
     this.selectedSubject = 'all';
+    this.selectedLevel = 'all';
+    this.filterBookmarkedOnly = false;
+    this.currentPage = 1;
     this.searchQuery = '';
     this.selectedStatus = 'all';
     this.sortBy = 'new';
@@ -396,6 +561,7 @@ class AssignmentPortal {
     const sortSelect = document.getElementById('assignment-sort-select');
     if (sortSelect) sortSelect.value = 'new';
 
+    this.renderSubjectFilters();
     this.render();
   }
 
@@ -405,6 +571,27 @@ class AssignmentPortal {
     const userSubmissions = user ? window.store.getSubmissionsByUser(user.id) : [];
 
     let list = [...allAssignments];
+
+    // 0. Exam Level filter
+    if (this.selectedLevel && this.selectedLevel !== 'all') {
+      const targetLvl = this.selectedLevel.toUpperCase();
+      list = list.filter(a => {
+        const aLvl = (a.examLevel || 'CA Foundation').toUpperCase();
+        if (targetLvl.includes('FOUNDATION')) return aLvl.includes('FOUNDATION');
+        if (targetLvl.includes('INTER')) return aLvl.includes('INTER');
+        if (targetLvl.includes('FINAL')) return aLvl.includes('FINAL');
+        return aLvl === targetLvl;
+      });
+    }
+
+    // 0.5 Bookmarked only filter
+    if (this.filterBookmarkedOnly) {
+      if (!user) {
+        list = [];
+      } else {
+        list = list.filter(a => window.store && window.store.isBookmarked && window.store.isBookmarked(user.id, a.id));
+      }
+    }
 
     // 1. Subject filter
     if (this.selectedSubject && this.selectedSubject !== 'all') {
@@ -502,9 +689,16 @@ class AssignmentPortal {
                   </td>
                   <td class="py-3 px-4 text-slate-600">${dateStr}</td>
                   <td class="py-3 px-4">
-                    <span class="px-2 py-0.5 text-xs font-bold rounded-full ${isEvaluated ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
-                      ${sub.status} ${isEvaluated ? `(${sub.marksObtained}/${sub.maxMarks || (asg ? asg.maximumMarks : 100)})` : ''}
-                    </span>
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                      <span class="px-2 py-0.5 text-xs font-bold rounded-full ${isEvaluated ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
+                        ${sub.status} ${isEvaluated ? `(${sub.marksObtained}/${sub.maxMarks || (asg ? asg.maximumMarks : 100)} M)` : ''}
+                      </span>
+                      ${isEvaluated && (sub.pointsAwarded !== undefined && sub.pointsAwarded !== null) ? `
+                        <span class="px-2 py-0.5 text-xs font-bold rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                          +${sub.pointsAwarded} XP
+                        </span>
+                      ` : ''}
+                    </div>
                   </td>
                   <td class="py-3 px-4 text-slate-600 max-w-xs truncate">
                     ${sub.adminFeedback || '<span class="text-slate-400 italic">Evaluation in progress</span>'}
@@ -638,9 +832,16 @@ class AssignmentPortal {
                   <span class="text-[11px] text-emerald-800">Checked by: <strong>${existingSubmission.evaluatedBy || 'Faculty Evaluator'}</strong></span>
                 </div>
               </div>
-              <span class="text-xs font-black px-3 py-1 rounded-full bg-emerald-600 text-white shadow-xs">
-                Score: ${existingSubmission.marksObtained} / ${asg.maximumMarks} Marks
-              </span>
+              <div class="flex items-center gap-2 flex-wrap justify-end">
+                <span class="text-xs font-black px-3 py-1 rounded-full bg-emerald-600 text-white shadow-xs">
+                  Score: ${existingSubmission.marksObtained} / ${asg.maximumMarks} Marks
+                </span>
+                ${existingSubmission.pointsAwarded !== undefined && existingSubmission.pointsAwarded !== null ? `
+                  <span class="text-xs font-black px-3 py-1 rounded-full bg-amber-500 text-white shadow-xs">
+                    +${existingSubmission.pointsAwarded} Platform XP
+                  </span>
+                ` : ''}
+              </div>
             </div>
 
             ${existingSubmission.adminFeedback ? `

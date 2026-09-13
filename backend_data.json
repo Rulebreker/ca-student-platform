@@ -3432,5 +3432,132 @@
         "q-1789205970537": "D"
       }
     }
-  ]
+  ],
+  "subjects": [
+    {
+      "id": "sub-1",
+      "code": "PAPER-1",
+      "name": "Accounting",
+      "level": "CA Foundation",
+      "icon": "calculator"
+    },
+    {
+      "id": "sub-2",
+      "code": "PAPER-2",
+      "name": "Business Law",
+      "level": "CA Foundation",
+      "icon": "scale"
+    },
+    {
+      "id": "sub-3",
+      "code": "PAPER-3",
+      "name": "Business Economics",
+      "level": "CA Foundation",
+      "icon": "trending-up"
+    },
+    {
+      "id": "sub-4",
+      "code": "PAPER-4",
+      "name": "Quantitative Aptitude",
+      "level": "CA Foundation",
+      "icon": "bar-chart-2"
+    }
+  ],
+  "notifications": [
+    {
+      "id": "notif-1789279409868",
+      "userId": "usr-student-2",
+      "type": "points_received",
+      "title": "Platform Points Earned!",
+      "message": "You earned +2.0 platform points on 'Test 1: Law of Contract Speed Test'!",
+      "link": "tests",
+      "read": false,
+      "metadata": {
+        "points": 2.0,
+        "testId": "tst-1789221563664"
+      },
+      "createdAt": "2026-09-13T06:03:29.868152+00:00"
+    },
+    {
+      "id": "notif_verify_test_1",
+      "userId": "usr-student-1",
+      "type": "reward",
+      "title": "Welcome Bonus XP!",
+      "message": "You received 100 Platform Points for registration.",
+      "link": "",
+      "read": true,
+      "metadata": {},
+      "createdAt": "2026-09-13T10:00:00Z"
+    },
+    {
+      "id": "notif-1789279361709",
+      "userId": "usr-student-2",
+      "type": "points_received",
+      "title": "Platform Points Earned!",
+      "message": "You earned +2.0 platform points on 'Test 1: Law of Contract Speed Test'!",
+      "link": "tests",
+      "read": false,
+      "metadata": {
+        "points": 2.0,
+        "testId": "tst-1789221563664"
+      },
+      "createdAt": "2026-09-13T06:02:41.709767+00:00"
+    },
+    {
+      "id": "notif_verify_test_1",
+      "userId": "usr-student-1",
+      "type": "reward",
+      "title": "Welcome Bonus XP!",
+      "message": "You received 100 Platform Points for registration.",
+      "link": "",
+      "read": true,
+      "metadata": {},
+      "createdAt": "2026-09-13T10:00:00Z"
+    },
+    {
+      "id": "notif_verify_test_1",
+      "userId": "usr-student-1",
+      "type": "reward",
+      "title": "Welcome Bonus XP!",
+      "message": "You received 100 Platform Points for registration.",
+      "link": "",
+      "read": true,
+      "metadata": {},
+      "createdAt": "2026-09-13T10:00:00Z"
+    },
+    {
+      "id": "notif_verify_test_1",
+      "userId": "student_test_101",
+      "type": "reward",
+      "title": "Welcome Bonus XP!",
+      "message": "You received 100 Platform Points for registration.",
+      "link": "",
+      "read": true,
+      "metadata": {},
+      "createdAt": "2026-09-13T10:00:00Z"
+    },
+    {
+      "id": "notif_verify_test_1",
+      "userId": "student_test_101",
+      "type": "reward",
+      "title": "Welcome Bonus XP!",
+      "message": "You received 100 Platform Points for registration.",
+      "link": "",
+      "read": true,
+      "metadata": {},
+      "createdAt": "2026-09-13T10:00:00Z"
+    },
+    {
+      "id": "notif_verify_test_1",
+      "userId": "student_test_101",
+      "type": "reward",
+      "title": "Welcome Bonus XP!",
+      "message": "You received 100 Platform Points for registration.",
+      "link": "",
+      "read": true,
+      "metadata": {},
+      "createdAt": "2026-09-13T10:00:00Z"
+    }
+  ],
+  "bookmarks": []
 }

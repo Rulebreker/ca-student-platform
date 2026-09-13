@@ -19,6 +19,9 @@ class FirebaseSyncManager {
     this._isMergingSubmissions = false;
     this._isMergingTests = false;
     this._isMergingQuestions = false;
+    this._isMergingSubjects = false;
+    this._isMergingNotifications = false;
+    this._isMergingBookmarks = false;
     this._knownUserIds = new Set();
   }
 
@@ -147,6 +150,21 @@ class FirebaseSyncManager {
           }
         }
       });
+
+      // Check if subjects collection exists
+      this.db.ref('subjects').once('value').then(sSnap => {
+        if (!sSnap.val()) {
+          console.info('[FirebaseSync] Seeding initial subjects into cloud database...');
+          const localSubjs = window.store ? window.store.getSubjects() : [];
+          if (localSubjs && localSubjs.length) {
+            const map = {};
+            localSubjs.forEach(s => {
+              if (s && s.id) map[s.id] = s;
+            });
+            this.db.ref('subjects').set(map);
+          }
+        }
+      });
     }).catch(err => {
       console.warn('[FirebaseSync] Check seed warning:', err);
     });
@@ -203,6 +221,36 @@ class FirebaseSyncManager {
       this.mergeRemoteQuestions(remoteQs);
     }, err => {
       console.warn('[FirebaseSync] Questions listener error:', err);
+    });
+
+    // --- SUBJECTS REALTIME LISTENER ---
+    this.db.ref('subjects').on('value', snap => {
+      if (this._isMergingSubjects) return;
+      const val = snap.val();
+      const remoteSubjects = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
+      this.mergeRemoteSubjects(remoteSubjects);
+    }, err => {
+      console.warn('[FirebaseSync] Subjects listener error:', err);
+    });
+
+    // --- NOTIFICATIONS REALTIME LISTENER ---
+    this.db.ref('notifications').on('value', snap => {
+      if (this._isMergingNotifications) return;
+      const val = snap.val();
+      const remoteNotifs = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
+      this.mergeRemoteNotifications(remoteNotifs);
+    }, err => {
+      console.warn('[FirebaseSync] Notifications listener error:', err);
+    });
+
+    // --- BOOKMARKS REALTIME LISTENER ---
+    this.db.ref('bookmarks').on('value', snap => {
+      if (this._isMergingBookmarks) return;
+      const val = snap.val();
+      const remoteBms = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
+      this.mergeRemoteBookmarks(remoteBms);
+    }, err => {
+      console.warn('[FirebaseSync] Bookmarks listener error:', err);
     });
   }
 
@@ -506,6 +554,166 @@ class FirebaseSyncManager {
     }
   }
 
+  mergeRemoteSubjects(remoteSubjects) {
+    if (!window.store) return;
+    this._isMergingSubjects = true;
+
+    try {
+      const localSubjs = window.store.getSubjects();
+      const remoteIds = new Set(remoteSubjects.map(rs => rs && rs.id).filter(Boolean));
+      let changed = false;
+
+      // 1. Remove deleted subjects if remote list is provided
+      let filteredSubjs = localSubjs.filter(ls => {
+        if (remoteSubjects.length === 0) return true;
+        return remoteIds.has(ls.id);
+      });
+      if (filteredSubjs.length !== localSubjs.length) {
+        changed = true;
+      }
+
+      // 2. Add or update subjects from remote
+      remoteSubjects.forEach(rs => {
+        if (!rs || !rs.id) return;
+        const idx = filteredSubjs.findIndex(ls => ls.id === rs.id);
+        if (idx === -1) {
+          filteredSubjs.push(rs);
+          changed = true;
+        } else {
+          const existing = filteredSubjs[idx];
+          let sModified = false;
+          Object.keys(rs).forEach(k => {
+            if (JSON.stringify(existing[k]) !== JSON.stringify(rs[k])) {
+              existing[k] = rs[k];
+              sModified = true;
+            }
+          });
+          if (sModified) changed = true;
+        }
+      });
+
+      if (changed) {
+        window.store.saveSubjects(filteredSubjs);
+
+        // Update Admin Dashboard Subjects tab if open
+        if (window.adminDashboard && window.auth && window.auth.isAdmin() && window.adminDashboard.currentTab === 'subjects') {
+          window.adminDashboard.renderSubjects();
+        }
+        // Update Student Test filters if tests tab is open
+        if (window.testEngine && typeof window.testEngine.renderTestList === 'function') {
+          const curView = window.app ? window.app.currentView : '';
+          if (curView === 'tests') {
+            window.testEngine.renderTestList();
+          }
+        }
+        // Update Student Papers filters if assignments tab is open
+        if (window.assignmentPortal && typeof window.assignmentPortal.render === 'function') {
+          const curView = window.app ? window.app.currentView : '';
+          if (curView === 'assignments') {
+            window.assignmentPortal.render();
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[FirebaseSync] Error merging subjects:', e);
+    } finally {
+      this._isMergingSubjects = false;
+    }
+  }
+
+  mergeRemoteNotifications(remoteNotifs) {
+    if (!window.store) return;
+    this._isMergingNotifications = true;
+
+    try {
+      const localNotifs = window.store.getNotifications();
+      let changed = false;
+
+      remoteNotifs.forEach(rn => {
+        if (!rn || !rn.id) return;
+        const idx = localNotifs.findIndex(ln => ln.id === rn.id);
+        if (idx === -1) {
+          localNotifs.unshift(rn);
+          changed = true;
+        } else {
+          const existing = localNotifs[idx];
+          let nModified = false;
+          Object.keys(rn).forEach(k => {
+            if (JSON.stringify(existing[k]) !== JSON.stringify(rn[k])) {
+              existing[k] = rn[k];
+              nModified = true;
+            }
+          });
+          if (nModified) changed = true;
+        }
+      });
+
+      if (changed) {
+        localNotifs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        window.store.saveNotifications(localNotifs);
+
+        if (window.app && typeof window.app.updateNotificationBadge === 'function') {
+          window.app.updateNotificationBadge();
+        }
+        if (window.app && typeof window.app.renderNotificationsList === 'function') {
+          window.app.renderNotificationsList();
+        }
+      }
+    } catch (e) {
+      console.warn('[FirebaseSync] Error merging notifications:', e);
+    } finally {
+      this._isMergingNotifications = false;
+    }
+  }
+
+  mergeRemoteBookmarks(remoteBookmarks) {
+    if (!window.store) return;
+    this._isMergingBookmarks = true;
+
+    try {
+      const localBms = window.store.getBookmarks();
+      const remoteIds = new Set(remoteBookmarks.map(rb => rb && (rb.id || `${rb.userId}_${rb.itemId}`)).filter(Boolean));
+      let changed = false;
+
+      // 1. Remove deleted bookmarks if remote list is provided
+      let filteredBms = localBms.filter(lb => {
+        if (remoteBookmarks.length === 0) return true;
+        const key = lb.id || `${lb.userId}_${lb.itemId}`;
+        return remoteIds.has(key);
+      });
+      if (filteredBms.length !== localBms.length) {
+        changed = true;
+      }
+
+      // 2. Add or update bookmarks
+      remoteBookmarks.forEach(rb => {
+        if (!rb || (!rb.id && (!rb.userId || !rb.itemId))) return;
+        const rbKey = rb.id || `${rb.userId}_${rb.itemId}`;
+        const idx = filteredBms.findIndex(lb => (lb.id && lb.id === rb.id) || (lb.userId === rb.userId && lb.itemId === rb.itemId));
+        if (idx === -1) {
+          filteredBms.unshift(rb);
+          changed = true;
+        }
+      });
+
+      if (changed) {
+        window.store.saveBookmarks(filteredBms);
+
+        // Re-render student views if active
+        if (window.app && window.app.currentView === 'tests' && window.testEngine && typeof window.testEngine.renderTestList === 'function') {
+          window.testEngine.renderTestList();
+        }
+        if (window.app && window.app.currentView === 'assignments' && window.assignmentPortal && typeof window.assignmentPortal.render === 'function') {
+          window.assignmentPortal.render();
+        }
+      }
+    } catch (e) {
+      console.warn('[FirebaseSync] Error merging bookmarks:', e);
+    } finally {
+      this._isMergingBookmarks = false;
+    }
+  }
+
   // --- WRITE OPERATIONS TO CLOUD ---
 
   saveUser(user) {
@@ -583,6 +791,67 @@ class FirebaseSyncManager {
     if (!this.db || !questionId) return Promise.resolve();
     return this.db.ref('questions/' + questionId).remove().catch(err => {
       console.warn('[FirebaseSync] deleteQuestion error:', err);
+    });
+  }
+
+  saveSubject(subject) {
+    if (!this.db || !subject || !subject.id) return Promise.resolve();
+    return this.db.ref('subjects/' + subject.id).set(subject).catch(err => {
+      console.warn('[FirebaseSync] saveSubject error:', err);
+    });
+  }
+
+  deleteSubject(subjectId) {
+    if (!this.db || !subjectId) return Promise.resolve();
+    return this.db.ref('subjects/' + subjectId).remove().catch(err => {
+      console.warn('[FirebaseSync] deleteSubject error:', err);
+    });
+  }
+
+  saveNotification(notification) {
+    if (!this.db || !notification || !notification.id) return Promise.resolve();
+    return this.db.ref('notifications/' + notification.id).set(notification).catch(err => {
+      console.warn('[FirebaseSync] saveNotification error:', err);
+    });
+  }
+
+  markNotificationRead(notificationId) {
+    if (!this.db || !notificationId) return Promise.resolve();
+    return this.db.ref('notifications/' + notificationId + '/read').set(true).catch(err => {
+      console.warn('[FirebaseSync] markNotificationRead error:', err);
+    });
+  }
+
+  markAllNotificationsRead(userId) {
+    if (!this.db) return Promise.resolve();
+    return this.db.ref('notifications').once('value').then(snap => {
+      const val = snap.val();
+      if (!val) return;
+      const updates = {};
+      Object.keys(val).forEach(k => {
+        if (val[k] && (!userId || val[k].userId === userId)) {
+          updates[`${k}/read`] = true;
+        }
+      });
+      if (Object.keys(updates).length > 0) {
+        return this.db.ref('notifications').update(updates);
+      }
+    }).catch(err => {
+      console.warn('[FirebaseSync] markAllNotificationsRead error:', err);
+    });
+  }
+
+  saveBookmark(bookmark) {
+    if (!this.db || !bookmark || !bookmark.id) return Promise.resolve();
+    return this.db.ref('bookmarks/' + bookmark.id).set(bookmark).catch(err => {
+      console.warn('[FirebaseSync] saveBookmark error:', err);
+    });
+  }
+
+  deleteBookmark(bookmarkId) {
+    if (!this.db || !bookmarkId) return Promise.resolve();
+    return this.db.ref('bookmarks/' + bookmarkId).remove().catch(err => {
+      console.warn('[FirebaseSync] deleteBookmark error:', err);
     });
   }
 }

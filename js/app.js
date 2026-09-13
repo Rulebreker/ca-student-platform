@@ -53,6 +53,8 @@ class App {
       window.bannerManager.init();
     }
 
+    this.updateNotificationBadge();
+
     if (window.lucide) {
       window.lucide.createIcons();
     }
@@ -1131,6 +1133,156 @@ class App {
       toast.style.transition = 'all 0.2s ease-out';
       setTimeout(() => toast.remove(), 200);
     }, 4000);
+  }
+
+  // Real-Time Notification System Handlers
+  toggleNotificationPanel(forceState = null) {
+    const panel = document.getElementById('nav-notification-panel');
+    if (!panel) return;
+    const isCurrentlyHidden = panel.classList.contains('hidden');
+    const shouldShow = forceState !== null ? forceState : isCurrentlyHidden;
+
+    if (shouldShow) {
+      this.renderNotificationsList();
+      panel.classList.remove('hidden');
+      const dismissHandler = (e) => {
+        const container = document.getElementById('nav-notification-container');
+        if (container && !container.contains(e.target)) {
+          panel.classList.add('hidden');
+          document.removeEventListener('click', dismissHandler);
+        }
+      };
+      setTimeout(() => document.addEventListener('click', dismissHandler), 10);
+    } else {
+      panel.classList.add('hidden');
+    }
+  }
+
+  updateNotificationBadge() {
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    const badge = document.getElementById('nav-notification-badge');
+    const panelBadge = document.getElementById('notification-panel-count-badge');
+    const mobileCount = document.getElementById('mobile-notification-count');
+
+    if (!user) {
+      if (badge) badge.classList.add('hidden');
+      if (mobileCount) mobileCount.classList.add('hidden');
+      return;
+    }
+
+    const count = window.store ? window.store.getUnreadNotificationCount(user.id) : 0;
+
+    if (badge) {
+      if (count > 0) {
+        badge.textContent = count > 99 ? '99+' : count;
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    }
+    if (panelBadge) {
+      panelBadge.textContent = `${count} New`;
+    }
+    if (mobileCount) {
+      if (count > 0) {
+        mobileCount.textContent = count;
+        mobileCount.classList.remove('hidden');
+      } else {
+        mobileCount.classList.add('hidden');
+      }
+    }
+  }
+
+  renderNotificationsList() {
+    const listEl = document.getElementById('nav-notification-list');
+    if (!listEl) return;
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    if (!user) {
+      listEl.innerHTML = `
+        <div class="p-6 text-center text-slate-400">
+          <i data-lucide="lock" class="w-6 h-6 mx-auto mb-2 text-slate-300"></i>
+          Please sign in to view your real-time alerts.
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
+
+    const notifs = window.store.getNotifications ? window.store.getNotifications(user.id) : [];
+    if (!notifs || notifs.length === 0) {
+      listEl.innerHTML = `
+        <div class="p-6 text-center text-slate-400">
+          <i data-lucide="bell-off" class="w-6 h-6 mx-auto mb-2 text-slate-300"></i>
+          No notifications yet. You're all caught up!
+        </div>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
+
+    listEl.innerHTML = notifs.map(n => {
+      let icon = 'bell';
+      let iconBg = 'bg-blue-50 text-blue-600';
+      if (n.type === 'referral') {
+        icon = 'gift';
+        iconBg = 'bg-emerald-50 text-emerald-600';
+      } else if (n.type === 'new_test') {
+        icon = 'check-square';
+        iconBg = 'bg-indigo-50 text-indigo-600';
+      } else if (n.type === 'new_paper') {
+        icon = 'file-text';
+        iconBg = 'bg-purple-50 text-purple-600';
+      } else if (n.type === 'points_received' || n.type === 'rank_up') {
+        icon = 'award';
+        iconBg = 'bg-amber-50 text-amber-600';
+      }
+
+      const timeAgo = n.createdAt 
+        ? new Date(n.createdAt).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) 
+        : 'Recent';
+
+      return `
+        <div 
+          onclick="window.app.handleNotificationClick('${n.id}', '${n.link || ''}')"
+          class="p-3.5 hover:bg-slate-50 transition-colors cursor-pointer flex items-start gap-3 ${n.read ? 'opacity-70' : 'bg-blue-50/20'}"
+        >
+          <div class="w-8 h-8 rounded-full ${iconBg} flex items-center justify-center shrink-0 mt-0.5">
+            <i data-lucide="${icon}" class="w-4 h-4"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center justify-between gap-1 mb-0.5">
+              <strong class="text-xs text-slate-900 truncate block">${n.title || 'Notification'}</strong>
+              <span class="text-[10px] text-slate-400 shrink-0 font-mono">${timeAgo}</span>
+            </div>
+            <p class="text-[11px] text-slate-600 leading-snug line-clamp-2">${n.message || ''}</p>
+            ${!n.read ? '<span class="inline-block w-1.5 h-1.5 rounded-full bg-blue-600 mt-1"></span>' : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  handleNotificationClick(notifId, link) {
+    if (window.store && typeof window.store.markNotificationRead === 'function') {
+      window.store.markNotificationRead(notifId);
+    }
+    this.updateNotificationBadge();
+    const panel = document.getElementById('nav-notification-panel');
+    if (panel) panel.classList.add('hidden');
+    if (link) {
+      this.navigate(link);
+    }
+  }
+
+  markAllNotificationsRead() {
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    if (user && window.store && typeof window.store.markAllNotificationsRead === 'function') {
+      window.store.markAllNotificationsRead(user.id);
+    }
+    this.renderNotificationsList();
+    this.updateNotificationBadge();
   }
 }
 

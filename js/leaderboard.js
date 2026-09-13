@@ -245,6 +245,8 @@ class LeaderboardManager {
     this.districtDropdownOpen = false;
 
     this.cachedStandings = [];
+    this.currentPage = 1;
+    this.pageSize = 10;
 
     // Global listener for click-outside to close comboboxes
     if (typeof window !== 'undefined') {
@@ -417,7 +419,7 @@ class LeaderboardManager {
 
       const subObj = subjectsMap[test.subjectId];
       const testSubjectName = (subObj ? subObj.name : (test.subject || '')).toLowerCase();
-      const testLevel = (subObj && subObj.level ? subObj.level : (test.level || 'CA Foundation')).toLowerCase();
+      const testLevel = (test.examLevel || (subObj && subObj.level ? subObj.level : (test.level || 'CA Foundation'))).toLowerCase();
 
       // Check subject match
       if (isSubjectFiltered && testSubjectName !== subjectFilter && test.subjectId !== subjectFilter) {
@@ -429,17 +431,19 @@ class LeaderboardManager {
         return;
       }
 
-      const earnedMarks = Number(att.grossMarks || att.finalScore || 0);
+      const earnedPoints = (att.earnedPoints !== undefined && att.earnedPoints !== null)
+        ? Number(att.earnedPoints)
+        : Number(att.grossMarks || att.finalScore || 0);
       const correct = Number(att.correctCount || 0);
 
-      if (!testBestMap[att.testId] || earnedMarks > testBestMap[att.testId].marks) {
-        testBestMap[att.testId] = { marks: earnedMarks, correct: correct };
+      if (!testBestMap[att.testId] || earnedPoints > testBestMap[att.testId].points) {
+        testBestMap[att.testId] = { points: earnedPoints, correct: correct };
       }
     });
 
     let mcqXp = 0;
     Object.values(testBestMap).forEach(item => {
-      mcqXp += Math.round(item.marks);
+      mcqXp += Math.round(item.points);
       totalCorrectCount += item.correct;
     });
 
@@ -451,7 +455,7 @@ class LeaderboardManager {
 
       const subObj = subjectsMap[asg.subjectId] || subjectsMap[(asg.subject || '').toLowerCase()];
       const asgSubjectName = (subObj ? subObj.name : (asg.subject || '')).toLowerCase();
-      const asgLevel = (subObj && subObj.level ? subObj.level : (asg.level || 'CA Foundation')).toLowerCase();
+      const asgLevel = (asg.examLevel || (subObj && subObj.level ? subObj.level : (asg.level || 'CA Foundation'))).toLowerCase();
 
       if (isSubjectFiltered && asgSubjectName !== subjectFilter && asg.subjectId !== subjectFilter) {
         return;
@@ -461,7 +465,10 @@ class LeaderboardManager {
         return;
       }
 
-      descriptiveXp += Math.round(Number(sub.marksObtained || 0));
+      const earnedPoints = (sub.pointsAwarded !== undefined && sub.pointsAwarded !== null)
+        ? Number(sub.pointsAwarded)
+        : Number(sub.marksObtained || 0);
+      descriptiveXp += Math.round(earnedPoints);
     });
 
     // C) Referral XP: strictly for overall view; never applied to subject-only leaderboard
@@ -1305,6 +1312,7 @@ class LeaderboardManager {
     this.selectedDistrictFilter = 'all';
     this.districtSearchText = '';
     this.selectedCityFilter = 'all';
+    this.currentPage = 1;
     this.render();
   }
 
@@ -1331,6 +1339,7 @@ class LeaderboardManager {
     this.districtSearchText = districtName === 'all' ? '' : districtName;
     this.districtDropdownOpen = false;
     this.selectedCityFilter = 'all';
+    this.currentPage = 1;
     this.render();
   }
 
@@ -1409,9 +1418,9 @@ class LeaderboardManager {
   // 9. LEADERBOARD TABLE & RESPONSIVE CARDS
   // ==========================================
   renderTable(studentsList, sliceOffset = 0, currentUser = null) {
-    const list = sliceOffset > 0 ? studentsList.slice(sliceOffset) : studentsList;
+    const fullList = sliceOffset > 0 ? studentsList.slice(sliceOffset) : studentsList;
 
-    if (list.length === 0) {
+    if (fullList.length === 0) {
       return `
         <div class="bg-white border border-slate-200 rounded-2xl p-12 text-center shadow-sm">
           <i data-lucide="filter" class="w-10 h-10 text-slate-300 mx-auto mb-3"></i>
@@ -1427,8 +1436,61 @@ class LeaderboardManager {
       `;
     }
 
+    const totalPages = Math.max(1, Math.ceil(fullList.length / this.pageSize));
+    if (this.currentPage > totalPages) this.currentPage = totalPages;
+    const startIndex = (this.currentPage - 1) * this.pageSize;
+    const pagedList = fullList.slice(startIndex, startIndex + this.pageSize);
+
+    // Pagination controls HTML
+    let paginationHtml = '';
+    if (totalPages > 1) {
+      let pageBtns = [];
+      for (let p = 1; p <= totalPages; p++) {
+        pageBtns.push(`
+          <button 
+            type="button"
+            onclick="window.leaderboardManager.goToPage(${p})"
+            class="w-8 h-8 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              this.currentPage === p 
+                ? 'bg-blue-600 text-white shadow-xs' 
+                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+            }"
+          >
+            ${p}
+          </button>
+        `);
+      }
+
+      paginationHtml = `
+        <div class="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div class="text-xs text-slate-500 font-medium">
+            Showing <strong>${startIndex + 1}</strong> - <strong>${Math.min(startIndex + this.pageSize, fullList.length)}</strong> of <strong>${fullList.length}</strong> Students
+          </div>
+          <div class="flex items-center gap-1.5">
+            <button 
+              type="button"
+              onclick="window.leaderboardManager.goToPage(${this.currentPage - 1})"
+              ${this.currentPage === 1 ? 'disabled' : ''}
+              class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            >
+              Previous
+            </button>
+            ${pageBtns.join('')}
+            <button 
+              type="button"
+              onclick="window.leaderboardManager.goToPage(${this.currentPage + 1})"
+              ${this.currentPage === totalPages ? 'disabled' : ''}
+              class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
     return `
-      <div class="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+      <div id="lb-table-container" class="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         
         <!-- Table view for desktop / tablet -->
         <div class="hidden sm:block overflow-x-auto">
@@ -1442,7 +1504,7 @@ class LeaderboardManager {
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
-              ${list.map(st => {
+              ${pagedList.map(st => {
                 const isCurrentUser = currentUser && currentUser.id === st.id;
                 const movement = this.renderRankMovement(st);
                 const tierBadge = this.getTierBadgeSvg(st.tier, 24);
@@ -1521,7 +1583,7 @@ class LeaderboardManager {
 
         <!-- Mobile card list (sm:hidden) -->
         <div class="sm:hidden divide-y divide-slate-100">
-          ${list.map(st => {
+          ${pagedList.map(st => {
             const isCurrentUser = currentUser && currentUser.id === st.id;
             const movement = this.renderRankMovement(st);
             const tierBadge = this.getTierBadgeSvg(st.tier, 24);
@@ -1567,6 +1629,9 @@ class LeaderboardManager {
             `;
           }).join('')}
         </div>
+
+        <!-- Pagination Bar -->
+        ${paginationHtml}
 
       </div>
     `;
@@ -1738,31 +1803,43 @@ class LeaderboardManager {
     if (modal) modal.classList.add('hidden');
   }
 
+  goToPage(page) {
+    this.currentPage = page;
+    this.render();
+    const tbl = document.getElementById('lb-table-container');
+    if (tbl) tbl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
   // ==========================================
   // 13. FILTER EVENT HANDLERS
   // ==========================================
   handleRankFilterChange(value) {
     this.selectedRankFilter = value;
+    this.currentPage = 1;
     this.render();
   }
 
   handleExamLevelFilterChange(value) {
     this.selectedExamLevelFilter = value;
+    this.currentPage = 1;
     this.render();
   }
 
   handleSubjectFilterChange(value) {
     this.selectedSubjectFilter = value;
+    this.currentPage = 1;
     this.render();
   }
 
   handleCityFilterChange(value) {
     this.selectedCityFilter = value;
+    this.currentPage = 1;
     this.render();
   }
 
   handleSearch(query) {
     this.searchQuery = (query || '').trim();
+    this.currentPage = 1;
     this.render();
   }
 
@@ -1778,6 +1855,7 @@ class LeaderboardManager {
     this.districtSearchText = '';
     this.stateDropdownOpen = false;
     this.districtDropdownOpen = false;
+    this.currentPage = 1;
     this.render();
   }
 }

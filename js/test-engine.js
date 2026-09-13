@@ -21,6 +21,10 @@ class TestEngine {
     this.totalDurationSeconds = 0;
     this.currentAttemptId = null;
     this.selectedSubject = 'all';
+    this.selectedLevel = 'all';
+    this.filterBookmarkedOnly = false;
+    this.currentPage = 1;
+    this.pageSize = 6;
     this.searchQuery = '';
     this.sortBy = 'new'; // 'new' | 'old' | 'popular'
     this.isPreview = false;
@@ -54,48 +58,133 @@ class TestEngine {
     if (!filterContainer) return;
 
     const allPublishedTests = window.store.getTests().filter(t => t.isPublished || t.status === 'Published' || t.status === 'Live');
-    const subjects = window.store.getSubjects();
+    const subjects = window.store.getSubjects ? window.store.getSubjects() : [];
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    const bookmarkedCount = user && window.store ? window.store.getBookmarks(user.id).filter(b => b.itemType === 'test' || !b.itemType).length : 0;
+    const levels = ['all', 'CA Foundation', 'CA Intermediate', 'CA Final'];
 
     filterContainer.innerHTML = `
-      <button 
-        type="button"
-        onclick="window.testEngine.filterSubject('all')"
-        class="px-4 py-2 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
-          this.selectedSubject === 'all' 
-            ? 'bg-blue-600 text-white shadow-sm font-bold' 
-            : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
-        }"
-      >
-        All Tests (${allPublishedTests.length})
-      </button>
-      ${subjects.map(s => {
-        const count = allPublishedTests.filter(t => t.subjectId === s.id).length;
-        const isActive = this.selectedSubject === s.id;
-        return `
-          <button 
-            type="button"
-            onclick="window.testEngine.filterSubject('${s.id}')"
-            class="px-4 py-2 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
-              isActive 
-                ? 'bg-blue-600 text-white shadow-sm font-bold' 
-                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
-            }"
-          >
-            ${s.name} (${count})
-          </button>
-        `;
-      }).join('')}
+      <!-- Exam Level Pills -->
+      <div class="flex items-center gap-1.5 overflow-x-auto pb-2 w-full border-b border-slate-200 mb-2">
+        <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0 mr-1">Level:</span>
+        ${levels.map(lvl => {
+          const isLvlActive = this.selectedLevel === lvl;
+          const label = lvl === 'all' ? 'All Levels' : lvl;
+          return `
+            <button 
+              type="button"
+              onclick="window.testEngine.filterLevel('${lvl}')"
+              class="px-3 py-1 text-xs font-bold rounded-full transition-all whitespace-nowrap cursor-pointer ${
+                isLvlActive
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }"
+            >
+              ${label}
+            </button>
+          `;
+        }).join('')}
+      </div>
+
+      <!-- Subject & Bookmark Pills -->
+      <div class="flex items-center gap-1.5 overflow-x-auto w-full">
+        <button 
+          type="button"
+          onclick="window.testEngine.filterSubject('all')"
+          class="px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+            this.selectedSubject === 'all' && !this.filterBookmarkedOnly
+              ? 'bg-blue-600 text-white shadow-sm font-bold' 
+              : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+          }"
+        >
+          All Subjects (${allPublishedTests.length})
+        </button>
+
+        <!-- Bookmarked Filter Pill -->
+        <button 
+          type="button"
+          onclick="window.testEngine.toggleBookmarkedFilter()"
+          class="px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+            this.filterBookmarkedOnly
+              ? 'bg-amber-600 text-white shadow-sm font-bold' 
+              : 'bg-white text-amber-700 border border-amber-200 hover:bg-amber-50'
+          }"
+        >
+          <i data-lucide="bookmark" class="w-3.5 h-3.5 ${this.filterBookmarkedOnly ? 'fill-current' : ''}"></i>
+          Bookmarked (${bookmarkedCount})
+        </button>
+
+        ${subjects.map(s => {
+          const count = allPublishedTests.filter(t => t.subjectId === s.id || t.subject === s.name).length;
+          const isActive = this.selectedSubject === s.id && !this.filterBookmarkedOnly;
+          return `
+            <button 
+              type="button"
+              onclick="window.testEngine.filterSubject('${s.id}')"
+              class="px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                isActive 
+                  ? 'bg-blue-600 text-white shadow-sm font-bold' 
+                  : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+              }"
+            >
+              ${s.name} (${count})
+            </button>
+          `;
+        }).join('')}
+      </div>
     `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  filterLevel(lvl) {
+    this.selectedLevel = lvl;
+    this.currentPage = 1;
+    this.renderSubjectFilters();
+    this.renderCards();
+  }
+
+  toggleBookmarkedFilter() {
+    this.filterBookmarkedOnly = !this.filterBookmarkedOnly;
+    this.currentPage = 1;
+    this.renderSubjectFilters();
+    this.renderCards();
+  }
+
+  toggleBookmark(testId) {
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    if (!user) {
+      window.app.showAuthModal('login');
+      window.app.showToast('Please sign in to bookmark tests.', 'info');
+      return;
+    }
+    const isNow = window.store.toggleBookmark(user.id, testId, 'test');
+    window.app.showToast(isNow ? 'Test bookmarked!' : 'Bookmark removed.', 'info');
+    this.renderSubjectFilters();
+    this.renderCards();
+  }
+
+  goToPage(page) {
+    const filtered = this.getFilteredAndSortedTests();
+    const totalPages = Math.max(1, Math.ceil(filtered.length / this.pageSize));
+    if (page < 1 || page > totalPages) return;
+    this.currentPage = page;
+    this.renderCards();
+    const grid = document.getElementById('tests-grid');
+    if (grid) grid.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   filterSubject(subjectId) {
     this.selectedSubject = subjectId;
+    this.filterBookmarkedOnly = false;
+    this.currentPage = 1;
     this.renderSubjectFilters();
     this.renderCards();
   }
 
   handleSearch(query) {
     this.searchQuery = query || '';
+    this.currentPage = 1;
     const clearBtn = document.getElementById('test-search-clear-btn');
     if (clearBtn) {
       if (this.searchQuery.trim()) clearBtn.classList.remove('hidden');
@@ -106,6 +195,7 @@ class TestEngine {
 
   clearSearch() {
     this.searchQuery = '';
+    this.currentPage = 1;
     const searchInput = document.getElementById('test-search-input');
     if (searchInput) searchInput.value = '';
     const clearBtn = document.getElementById('test-search-clear-btn');
@@ -115,11 +205,15 @@ class TestEngine {
 
   handleSort(sortBy) {
     this.sortBy = sortBy || 'new';
+    this.currentPage = 1;
     this.renderCards();
   }
 
   resetFilters() {
     this.selectedSubject = 'all';
+    this.selectedLevel = 'all';
+    this.filterBookmarkedOnly = false;
+    this.currentPage = 1;
     this.searchQuery = '';
     this.sortBy = 'new';
     const searchInput = document.getElementById('test-search-input');
@@ -134,18 +228,40 @@ class TestEngine {
 
   getFilteredAndSortedTests() {
     let list = window.store.getTests().filter(t => t.isPublished || t.status === 'Published' || t.status === 'Live');
+    const user = window.auth ? window.auth.getCurrentUser() : null;
 
-    // 1. Subject filter
-    if (this.selectedSubject !== 'all') {
-      list = list.filter(t => t.subjectId === this.selectedSubject);
+    // 0. Exam Level filter
+    if (this.selectedLevel && this.selectedLevel !== 'all') {
+      const targetLvl = this.selectedLevel.toUpperCase();
+      list = list.filter(t => {
+        const tLvl = (t.examLevel || 'CA Foundation').toUpperCase();
+        if (targetLvl.includes('FOUNDATION')) return tLvl.includes('FOUNDATION');
+        if (targetLvl.includes('INTER')) return tLvl.includes('INTER');
+        if (targetLvl.includes('FINAL')) return tLvl.includes('FINAL');
+        return tLvl === targetLvl;
+      });
     }
 
-    // 2. Search filter (Test title, subject, description, topic/chapter, tags)
+    // 1. Bookmarked only filter
+    if (this.filterBookmarkedOnly) {
+      if (!user) {
+        list = [];
+      } else {
+        list = list.filter(t => window.store.isBookmarked(user.id, t.id));
+      }
+    }
+
+    // 2. Subject filter
+    if (this.selectedSubject !== 'all' && !this.filterBookmarkedOnly) {
+      list = list.filter(t => t.subjectId === this.selectedSubject || t.subject === this.selectedSubject);
+    }
+
+    // 3. Search filter
     const q = this.searchQuery.trim().toLowerCase();
     if (q) {
       list = list.filter(test => {
         const subject = window.store.getSubjectById(test.subjectId);
-        const subjectName = (subject ? subject.name : '').toLowerCase();
+        const subjectName = (subject ? subject.name : (test.subject || '')).toLowerCase();
         const title = (test.title || '').toLowerCase();
         const desc = (test.description || '').toLowerCase();
         const topic = (test.chapter || test.topic || '').toLowerCase();
@@ -159,19 +275,11 @@ class TestEngine {
       });
     }
 
-    // 3. Sort (New, Old, Popular)
+    // 4. Sort
     if (this.sortBy === 'new') {
-      list.sort((a, b) => {
-        const dateA = new Date(a.createdAt || a.startDate || 0).getTime();
-        const dateB = new Date(b.createdAt || b.startDate || 0).getTime();
-        return dateB - dateA;
-      });
+      list.sort((a, b) => new Date(b.createdAt || b.startDate || 0).getTime() - new Date(a.createdAt || a.startDate || 0).getTime());
     } else if (this.sortBy === 'old') {
-      list.sort((a, b) => {
-        const dateA = new Date(a.createdAt || a.startDate || 0).getTime();
-        const dateB = new Date(b.createdAt || b.startDate || 0).getTime();
-        return dateA - dateB;
-      });
+      list.sort((a, b) => new Date(a.createdAt || a.startDate || 0).getTime() - new Date(b.createdAt || b.startDate || 0).getTime());
     } else if (this.sortBy === 'popular') {
       const getPopularity = (t) => {
         const recordedAttempts = window.store.getAttempts().filter(a => a.testId === t.id).length;
@@ -189,16 +297,16 @@ class TestEngine {
     if (!grid) return;
 
     const filtered = this.getFilteredAndSortedTests();
-    const user = window.auth.getCurrentUser();
+    const user = window.auth ? window.auth.getCurrentUser() : null;
     const userAttempts = user ? window.store.getAttemptsByUser(user.id) : [];
 
     if (filtered.length === 0) {
       grid.innerHTML = `
         <div class="col-span-full text-center py-16 bg-white rounded-xl border border-dashed border-slate-200 p-8">
           <i data-lucide="search-x" class="w-10 h-10 text-slate-400 mx-auto mb-3"></i>
-          <h4 class="text-base font-bold text-slate-800">No MCQ papers found.</h4>
+          <h4 class="text-base font-bold text-slate-800">No MCQ tests found.</h4>
           <p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-            No mock tests match your current search query or subject filter.
+            ${this.filterBookmarkedOnly ? "You haven't bookmarked any tests yet. Click the bookmark icon on any test to save it here!" : "No mock tests match your current search query or filters."}
           </p>
           <button 
             type="button"
@@ -213,25 +321,50 @@ class TestEngine {
       return;
     }
 
-    grid.innerHTML = filtered.map(test => {
-      const subject = window.store.getSubjectById(test.subjectId);
+    // Pagination slice
+    const totalItems = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / this.pageSize));
+    if (this.currentPage > totalPages) this.currentPage = totalPages;
+    const startIndex = (this.currentPage - 1) * this.pageSize;
+    const pagedTests = filtered.slice(startIndex, startIndex + this.pageSize);
+
+    const cardsHtml = pagedTests.map(test => {
+      const subject = window.store.getSubjectById(test.subjectId) || { name: test.subject || 'CA Practice' };
       const testAttempts = user ? userAttempts.filter(a => a.testId === test.id) : [];
       const attemptsUsed = testAttempts.length;
       const maxAttempts = test.maxAttempts || 1;
       const attemptsRemaining = Math.max(0, maxAttempts - attemptsUsed);
       const canTake = attemptsRemaining > 0;
       const bestAttempt = testAttempts.length > 0 ? Math.max(...testAttempts.map(a => a.percentage)) : null;
+      const isBm = user && window.store.isBookmarked ? window.store.isBookmarked(user.id, test.id) : false;
+      const points = test.pointsPerCorrect || 10;
 
       return `
-        <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+        <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between relative group">
           <div>
             <div class="flex items-center justify-between gap-2 mb-3">
-              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
-                ${subject ? subject.name : 'CA Practice'}
-              </span>
-              <span class="text-xs font-semibold text-slate-500 flex items-center gap-1">
-                <i data-lucide="clock" class="w-3.5 h-3.5"></i> ${test.durationMinutes} mins
-              </span>
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
+                  ${subject.name}
+                </span>
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                  ${test.examLevel || 'CA Foundation'}
+                </span>
+              </div>
+              
+              <div class="flex items-center gap-1.5">
+                <button 
+                  type="button"
+                  onclick="event.stopPropagation(); window.testEngine.toggleBookmark('${test.id}')"
+                  class="p-1.5 rounded-lg transition-colors cursor-pointer ${isBm ? 'text-amber-500 bg-amber-50 hover:bg-amber-100' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}"
+                  title="${isBm ? 'Bookmarked (Click to remove)' : 'Bookmark this test'}"
+                >
+                  <i data-lucide="bookmark" class="w-4 h-4 ${isBm ? 'fill-current' : ''}"></i>
+                </button>
+                <span class="text-xs font-semibold text-slate-500 flex items-center gap-1">
+                  <i data-lucide="clock" class="w-3.5 h-3.5"></i> ${test.durationMinutes}m
+                </span>
+              </div>
             </div>
 
             <h3 class="text-base font-bold text-slate-900 mb-2 leading-snug">${test.title}</h3>
@@ -239,14 +372,16 @@ class TestEngine {
 
             <div class="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-lg text-xs mb-4">
               <div>
-                <span class="text-slate-400 block text-[11px]">Marking Scheme</span>
+                <span class="text-slate-400 block text-[11px]">Marking / Points</span>
                 <span class="font-bold text-emerald-700">+${test.marksPerCorrect}</span>
                 <span class="text-slate-400">/</span>
                 <span class="font-bold text-rose-600">-${test.negativeMarksPerWrong}</span>
+                <span class="text-[10px] text-amber-700 font-bold block mt-0.5">+${points} XP/correct</span>
               </div>
               <div>
                 <span class="text-slate-400 block text-[11px]">Total Questions</span>
                 <span class="font-bold text-slate-800">${test.totalQuestions} MCQs</span>
+                <span class="text-[10px] text-slate-500 block mt-0.5">${test.maximumMarks || 10} Max Marks</span>
               </div>
             </div>
           </div>
@@ -268,7 +403,7 @@ class TestEngine {
                   canTake 
                     ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm' 
                     : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                } transition-colors"
+                } transition-colors cursor-pointer"
                 ${!canTake ? 'disabled' : ''}
               >
                 ${attemptsUsed === 0 ? 'Start Mock Test' : (canTake ? 'Re-attempt Test' : 'Attempts Limit Reached')}
@@ -279,6 +414,55 @@ class TestEngine {
       `;
     }).join('');
 
+    // Pagination controls
+    let paginationHtml = '';
+    if (totalPages > 1) {
+      let pageBtns = [];
+      for (let p = 1; p <= totalPages; p++) {
+        pageBtns.push(`
+          <button 
+            type="button"
+            onclick="window.testEngine.goToPage(${p})"
+            class="w-8 h-8 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              this.currentPage === p 
+                ? 'bg-blue-600 text-white shadow-xs' 
+                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+            }"
+          >
+            ${p}
+          </button>
+        `);
+      }
+
+      paginationHtml = `
+        <div class="col-span-full mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-200">
+          <div class="text-xs text-slate-500 font-medium">
+            Showing <strong>${startIndex + 1}</strong> - <strong>${Math.min(startIndex + this.pageSize, totalItems)}</strong> of <strong>${totalItems}</strong> Tests
+          </div>
+          <div class="flex items-center gap-1.5">
+            <button 
+              type="button"
+              onclick="window.testEngine.goToPage(${this.currentPage - 1})"
+              ${this.currentPage === 1 ? 'disabled' : ''}
+              class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            >
+              Previous
+            </button>
+            ${pageBtns.join('')}
+            <button 
+              type="button"
+              onclick="window.testEngine.goToPage(${this.currentPage + 1})"
+              ${this.currentPage === totalPages ? 'disabled' : ''}
+              class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    grid.innerHTML = cardsHtml + paginationHtml;
     if (window.lucide) window.lucide.createIcons();
   }
 
@@ -798,6 +982,8 @@ class TestEngine {
     }
     const percentage = totalPossibleMarks > 0 ? (finalScore / totalPossibleMarks) * 100 : 0;
 
+    const earnedPoints = correctCount * (test.pointsPerCorrect || 10);
+
     if (this.isPreview) {
       // PREVIEW MODE: ZERO ATTEMPTS CONSUMED
       const previewRecord = {
@@ -816,6 +1002,7 @@ class TestEngine {
         grossMarks: grossMarks,
         negativePenalty: negativePenalty,
         finalScore: finalScore,
+        earnedPoints: earnedPoints,
         percentage: percentage,
         userAnswers: { ...this.userAnswers }
       };
@@ -853,11 +1040,29 @@ class TestEngine {
       grossMarks: grossMarks,
       negativePenalty: negativePenalty,
       finalScore: finalScore,
+      earnedPoints: earnedPoints,
       percentage: percentage,
       userAnswers: { ...this.userAnswers }
     };
 
+    if (attemptRecord.earnedPoints === undefined) {
+      attemptRecord.earnedPoints = earnedPoints;
+    }
+
     window.store.recordAttempt(attemptRecord);
+
+    // Notify student about score and earned platform points
+    if (user && window.store && typeof window.store.addNotification === 'function') {
+      window.store.addNotification({
+        userId: user.id,
+        type: 'points_received',
+        title: 'MCQ Assessment Completed!',
+        message: `You scored ${finalScore.toFixed(1)}/${totalPossibleMarks} on "${test.title}" and earned +${earnedPoints} Platform Points for the Leaderboard!`,
+        link: 'leaderboard',
+        metadata: { testId: test.id, points: earnedPoints }
+      });
+    }
+
     if (window.leaderboardManager) {
       window.leaderboardManager.calculateAllStandings();
     }
@@ -882,6 +1087,7 @@ class TestEngine {
     const pos = test ? (test.marksPerCorrect || 2.0) : 2.0;
     const neg = test ? (test.negativeMarksPerWrong || 0.5) : 0.5;
     const totalMarks = questions.reduce((sum, q) => sum + (typeof q.marks === 'number' && q.marks > 0 ? q.marks : pos), 0) || (test ? test.maximumMarks : (questions.length * 2));
+    const pointsEarned = attempt.earnedPoints !== undefined ? attempt.earnedPoints : (attempt.correctCount * (test ? (test.pointsPerCorrect || 10) : 10));
 
     const modalContent = document.getElementById('result-modal-content');
     if (!modalContent) return;
@@ -905,12 +1111,17 @@ class TestEngine {
           </p>
         </div>
 
-        <!-- 4 Score Cards -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4 my-4 sm:my-6">
+        <!-- 5 Score Cards (Academic Marks & Platform Points Separated) -->
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-2.5 sm:gap-3 my-4 sm:my-6">
           <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 sm:p-4 text-center">
-            <span class="text-[10px] sm:text-[11px] font-bold text-blue-700 uppercase tracking-wider block">Score Obtained</span>
+            <span class="text-[10px] sm:text-[11px] font-bold text-blue-700 uppercase tracking-wider block">Academic Score</span>
             <span class="text-xl sm:text-2xl font-black text-blue-900">${attempt.finalScore.toFixed(1)}</span>
             <span class="text-[11px] sm:text-xs text-blue-600 block">/ ${totalMarks} Marks</span>
+          </div>
+          <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 sm:p-4 text-center">
+            <span class="text-[10px] sm:text-[11px] font-bold text-amber-700 uppercase tracking-wider block">Platform Points</span>
+            <span class="text-xl sm:text-2xl font-black text-amber-900">+${pointsEarned}</span>
+            <span class="text-[11px] sm:text-xs text-amber-600 block">Leaderboard XP</span>
           </div>
           <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 sm:p-4 text-center">
             <span class="text-[10px] sm:text-[11px] font-bold text-emerald-700 uppercase tracking-wider block">Percentage</span>

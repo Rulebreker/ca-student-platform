@@ -568,6 +568,42 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json(200, {'attempts': res})
             return
 
+        # Subjects
+        if path == '/api/subjects':
+            data = load_backend_data()
+            subjects = data.get('subjects', [])
+            self.send_json(200, {'success': True, 'subjects': subjects})
+            return
+
+        # Notifications
+        if path == '/api/notifications':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            userId = query.get('userId', [None])[0] or (user.get('id') if user else None)
+            if not userId:
+                self.send_json(401, {'error': 'Authentication required', 'code': 401})
+                return
+            data = load_backend_data()
+            notifs = data.get('notifications', [])
+            user_notifs = [n for n in notifs if n.get('userId') == userId]
+            user_notifs.sort(key=lambda x: x.get('createdAt', ''), reverse=True)
+            self.send_json(200, {'success': True, 'notifications': user_notifs})
+            return
+
+        # Bookmarks
+        if path == '/api/bookmarks':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            userId = query.get('userId', [None])[0] or (user.get('id') if user else None)
+            if not userId:
+                self.send_json(401, {'error': 'Authentication required', 'code': 401})
+                return
+            data = load_backend_data()
+            bookmarks = data.get('bookmarks', [])
+            user_bookmarks = [b for b in bookmarks if b.get('userId') == userId]
+            self.send_json(200, {'success': True, 'bookmarks': user_bookmarks})
+            return
+
         # File Download (PDF)
         if path == '/api/files/download':
             token = self.get_auth_token()
@@ -941,6 +977,157 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(500, {'error': f'Image upload error: {str(e)}', 'code': 500})
                 return
 
+        # 2b. Subject Management (Create / Update / Delete)
+        if path == '/api/subjects':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator privileges required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                req_data = json.loads(body.decode('utf-8'))
+                data = load_backend_data()
+                subjects = data.get('subjects', [])
+                sub_id = req_data.get('id') or f"sub-{int(datetime.now().timestamp() * 1000)}"
+                new_sub = {
+                    'id': sub_id,
+                    'name': str(req_data.get('name') or '').strip(),
+                    'code': str(req_data.get('code') or '').strip().upper(),
+                    'level': str(req_data.get('level') or 'CA Foundation').strip(),
+                    'icon': str(req_data.get('icon') or 'book-open').strip()
+                }
+                if not new_sub['name']:
+                    self.send_json(400, {'error': 'Subject name is required', 'code': 400})
+                    return
+                idx = next((i for i, s in enumerate(subjects) if s.get('id') == sub_id), None)
+                if idx is not None:
+                    subjects[idx] = new_sub
+                else:
+                    subjects.append(new_sub)
+                data['subjects'] = subjects
+                save_backend_data(data)
+                self.send_json(200, {'success': True, 'subject': new_sub})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Subject save error: {str(e)}', 'code': 500})
+                return
+
+        if path == '/api/subjects/delete':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator privileges required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                req_data = json.loads(body.decode('utf-8'))
+                sub_id = req_data.get('id')
+                data = load_backend_data()
+                data['subjects'] = [s for s in data.get('subjects', []) if s.get('id') != sub_id]
+                save_backend_data(data)
+                self.send_json(200, {'success': True})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Subject delete error: {str(e)}', 'code': 500})
+                return
+
+        # 2c. Student Notifications Management
+        if path == '/api/notifications':
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                req_data = json.loads(body.decode('utf-8'))
+                data = load_backend_data()
+                notifs = data.get('notifications', [])
+                notif_id = req_data.get('id') or f"notif-{int(datetime.now().timestamp() * 1000)}"
+                notif = {
+                    'id': notif_id,
+                    'userId': req_data.get('userId'),
+                    'type': req_data.get('type', 'general'),
+                    'title': req_data.get('title', ''),
+                    'message': req_data.get('message', ''),
+                    'link': req_data.get('link', ''),
+                    'read': bool(req_data.get('read', False)),
+                    'metadata': req_data.get('metadata', {}),
+                    'createdAt': req_data.get('createdAt') or datetime.now(timezone.utc).isoformat()
+                }
+                notifs.insert(0, notif)
+                data['notifications'] = notifs
+                save_backend_data(data)
+                self.send_json(200, {'success': True, 'notification': notif})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Notification error: {str(e)}', 'code': 500})
+                return
+
+        if path == '/api/notifications/read':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+                notif_id = req_data.get('id')
+                all_for_user = req_data.get('all', False)
+                data = load_backend_data()
+                notifs = data.get('notifications', [])
+                if all_for_user and user:
+                    for n in notifs:
+                        if n.get('userId') == user.get('id'):
+                            n['read'] = True
+                elif notif_id:
+                    for n in notifs:
+                        if n.get('id') == notif_id:
+                            n['read'] = True
+                data['notifications'] = notifs
+                save_backend_data(data)
+                self.send_json(200, {'success': True})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Notification read error: {str(e)}', 'code': 500})
+                return
+
+        # 2d. Bookmarks Management (Toggle)
+        if path == '/api/bookmarks/toggle':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user:
+                self.send_json(401, {'error': 'Authentication required', 'code': 401})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                req_data = json.loads(body.decode('utf-8'))
+                item_id = req_data.get('itemId')
+                item_type = req_data.get('itemType', 'test')
+                user_id = user.get('id')
+                data = load_backend_data()
+                bookmarks = data.get('bookmarks', [])
+                existing = next((b for b in bookmarks if b.get('userId') == user_id and b.get('itemId') == item_id), None)
+                if existing:
+                    bookmarks = [b for b in bookmarks if not (b.get('userId') == user_id and b.get('itemId') == item_id)]
+                    is_bookmarked = False
+                else:
+                    new_bm = {
+                        'id': f"bm-{int(datetime.now().timestamp() * 1000)}",
+                        'userId': user_id,
+                        'itemId': item_id,
+                        'itemType': item_type,
+                        'createdAt': datetime.now(timezone.utc).isoformat()
+                    }
+                    bookmarks.append(new_bm)
+                    is_bookmarked = True
+                data['bookmarks'] = bookmarks
+                save_backend_data(data)
+                self.send_json(200, {'success': True, 'bookmarked': is_bookmarked})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Bookmark toggle error: {str(e)}', 'code': 500})
+                return
+
         # 3. Descriptive Papers Management
         if path == '/api/papers':
             token = self.get_auth_token()
@@ -973,7 +1160,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(500, {'error': f'Failed to save paper: {str(e)}', 'code': 500})
                 return
 
-        # 3b. Descriptive Paper Submissions (Student Submit - Strictly One-Time, No Re-upload)
+        # 3b. Descriptive Paper Submissions & Evaluation Updates
         if path == '/api/papers/submissions':
             token = self.get_auth_token()
             user = authenticate_token(token)
@@ -988,6 +1175,17 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 data = load_backend_data()
                 submissions = data.get('submissions', [])
+                sub_id = sub_data.get('id')
+
+                # If existing submission (e.g. grading update by Admin/Teacher)
+                if sub_id:
+                    existing_idx = next((i for i, s in enumerate(submissions) if s.get('id') == sub_id), None)
+                    if existing_idx is not None:
+                        submissions[existing_idx].update(sub_data)
+                        data['submissions'] = submissions
+                        save_backend_data(data)
+                        self.send_json(200, {'success': True, 'submission': submissions[existing_idx]})
+                        return
 
                 if user.get('role') == 'student':
                     # STRICT ONE-TIME SUBMISSION CHECK (NO RE-UPLOAD)
@@ -1023,32 +1221,40 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         self.send_json(400, {'error': f'Missing required field: {r}', 'code': 400})
                         return
 
-                valid_subjects = ['Accounting', 'Business Law', 'Business Economics', 'Quantitative Aptitude']
-                if test_data.get('subject') not in valid_subjects:
-                    self.send_json(400, {'error': f'Subject must be one of: {", ".join(valid_subjects)}', 'code': 400})
-                    return
-
                 data = load_backend_data()
                 tests = data.get('tests', [])
                 test_id = test_data.get('id')
+
+                # Dynamic subject validation: support custom admin-created subjects
+                custom_subjects = [s.get('name') for s in data.get('subjects', []) if s.get('name')]
+                valid_subjects = list(set(['Accounting', 'Business Law', 'Business Economics', 'Quantitative Aptitude'] + custom_subjects))
+                if test_data.get('subject') and test_data.get('subject') not in valid_subjects:
+                    valid_subjects.append(test_data.get('subject'))
 
                 # Ensure numerical defaults
                 test_data['durationMinutes'] = int(test_data.get('durationMinutes', 15))
                 test_data['marksPerCorrect'] = float(test_data.get('marksPerCorrect', 2.0))
                 test_data['negativeMarksPerWrong'] = float(test_data.get('negativeMarksPerWrong', 0.5))
+                test_data['pointsPerCorrect'] = float(test_data.get('pointsPerCorrect', test_data.get('marksPerCorrect', 2.0)))
+                test_data['examLevel'] = test_data.get('examLevel', 'CA Foundation')
                 test_data['unattemptedMarks'] = float(test_data.get('unattemptedMarks', 0.0))
                 test_data['maxAttempts'] = int(test_data.get('maxAttempts', 3))
                 test_data['maximumMarks'] = float(test_data.get('maximumMarks', 10.0))
                 test_data['status'] = test_data.get('status', 'Draft')
                 test_data['isPublished'] = (test_data.get('status') == 'Published')
 
-                sub_id_map = {
-                    'Accounting': 'sub-1',
-                    'Business Law': 'sub-2',
-                    'Business Economics': 'sub-3',
-                    'Quantitative Aptitude': 'sub-4'
-                }
-                test_data['subjectId'] = sub_id_map.get(test_data.get('subject'), 'sub-1')
+                if not test_data.get('subjectId'):
+                    sub_match = next((s for s in data.get('subjects', []) if s.get('name') == test_data.get('subject')), None)
+                    if sub_match:
+                        test_data['subjectId'] = sub_match.get('id')
+                    else:
+                        sub_id_map = {
+                            'Accounting': 'sub-1',
+                            'Business Law': 'sub-2',
+                            'Business Economics': 'sub-3',
+                            'Quantitative Aptitude': 'sub-4'
+                        }
+                        test_data['subjectId'] = sub_id_map.get(test_data.get('subject'), 'sub-1')
 
                 if test_id:
                     idx = next((i for i, t in enumerate(tests) if t.get('id') == test_id), None)
@@ -1462,12 +1668,14 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     else:
                         wrong_count += 1
 
-                # Dynamic marking scheme
+                # Dynamic marking and platform points scheme
                 pos = float(test.get('marksPerCorrect', 2.0))
                 neg = float(test.get('negativeMarksPerWrong', 0.5))
+                points_per_correct = float(test.get('pointsPerCorrect', pos))
                 gross = correct_count * pos
                 penalty = wrong_count * neg
                 score = max(0.0, gross - penalty)
+                earned_points = correct_count * points_per_correct
                 max_marks = len(questions) * pos
                 pct = (score / max_marks * 100) if max_marks > 0 else 0
 
@@ -1487,10 +1695,26 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     'grossMarks': gross,
                     'negativePenalty': penalty,
                     'finalScore': score,
+                    'earnedPoints': earned_points,
                     'maximumMarks': max_marks,
                     'percentage': pct,
                     'userAnswers': answers
                 }
+
+                if earned_points > 0:
+                    notifs = data.get('notifications', [])
+                    notifs.insert(0, {
+                        'id': f"notif-{int(datetime.now().timestamp() * 1000)}",
+                        'userId': user.get('id'),
+                        'type': 'points_received',
+                        'title': 'Platform Points Earned!',
+                        'message': f"You earned +{earned_points} platform points on '{test.get('title')}'!",
+                        'link': 'tests',
+                        'read': False,
+                        'metadata': {'points': earned_points, 'testId': test_id},
+                        'createdAt': datetime.now(timezone.utc).isoformat()
+                    })
+                    data['notifications'] = notifs
 
                 attempts.insert(0, attempt_record)
                 data['test_attempts'] = attempts

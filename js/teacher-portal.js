@@ -238,9 +238,9 @@ class TeacherPortal {
         </div>
 
         <form onsubmit="window.teacherPortal.saveEvaluation(event)" class="space-y-4 text-xs">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label class="block font-bold text-slate-700 mb-1">Marks Awarded (Max: ${asg ? asg.maximumMarks : 50})</label>
+              <label class="block font-bold text-slate-700 mb-1">Academic Marks (Max: ${asg ? asg.maximumMarks : 50})</label>
               <input 
                 type="number" 
                 id="eval-marks" 
@@ -251,6 +251,19 @@ class TeacherPortal {
                 value="${submission.marksObtained !== null ? submission.marksObtained : ''}"
                 placeholder="e.g. 42" 
                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-emerald-800"
+              >
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Platform Points (XP)</label>
+              <input 
+                type="number" 
+                id="eval-points" 
+                step="1" 
+                min="0" 
+                required 
+                value="${submission.pointsAwarded !== undefined && submission.pointsAwarded !== null ? submission.pointsAwarded : (submission.marksObtained !== null ? Math.round(submission.marksObtained) : 50)}" 
+                class="w-full px-3 py-2 border border-amber-300 bg-amber-50/30 rounded-lg text-xs font-bold text-amber-800"
+                title="XP Points awarded to student for the Leaderboard"
               >
             </div>
             <div>
@@ -358,15 +371,35 @@ class TeacherPortal {
     if (!submission) return;
 
     const marks = parseFloat(document.getElementById('eval-marks').value);
+    const pointsAwarded = parseFloat(document.getElementById('eval-points').value) || 0;
     const status = document.getElementById('eval-status').value;
     const feedback = document.getElementById('eval-feedback').value.trim();
     const currentUser = window.auth.getCurrentUser();
 
     submission.marksObtained = marks;
+    submission.pointsAwarded = pointsAwarded;
     submission.status = status;
     submission.adminFeedback = feedback;
     submission.evaluatedBy = currentUser ? currentUser.name : 'Faculty Evaluator';
     submission.evaluatedAt = new Date().toISOString();
+
+    const notifyStudent = () => {
+      const asg = window.store.getAssignmentById(submission.assignmentId);
+      window.store.addNotification({
+        userId: submission.studentId,
+        type: 'points_received',
+        title: 'Paper Evaluated & Points Awarded',
+        message: `Your paper "${asg ? asg.title : 'Test Paper'}" was checked by faculty! Marks: ${marks}/${asg ? asg.maximumMarks : 100}, Points: +${pointsAwarded} XP.`,
+        link: 'assignments',
+        metadata: { submissionId: submission.id }
+      });
+      // Backend sync
+      fetch('/api/papers/submissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentUser ? currentUser.token : ''}` },
+        body: JSON.stringify(submission)
+      }).catch(() => {});
+    };
 
     // If new checked copy PDF file was selected, read and save base64
     if (this.selectedCheckedPdfFile) {
@@ -375,15 +408,17 @@ class TeacherPortal {
         submission.checkedCopyFileName = this.selectedCheckedPdfFile.name;
         submission.checkedCopyPdfData = reader.result;
         window.store.updateSubmission(submission);
+        notifyStudent();
         window.app.closeModal('admin-generic-modal');
-        window.app.showToast(`Checked copy and marks (${marks}) returned to student!`, 'success');
+        window.app.showToast(`Checked copy, marks (${marks}) and points (+${pointsAwarded} XP) returned to student!`, 'success');
         this.render();
       };
       reader.readAsDataURL(this.selectedCheckedPdfFile);
     } else {
       window.store.updateSubmission(submission);
+      notifyStudent();
       window.app.closeModal('admin-generic-modal');
-      window.app.showToast(`Evaluation saved. Marks: ${marks}`, 'success');
+      window.app.showToast(`Evaluation saved. Marks: ${marks}, Points: +${pointsAwarded} XP`, 'success');
       this.render();
     }
   }

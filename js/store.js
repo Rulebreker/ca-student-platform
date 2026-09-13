@@ -21,7 +21,9 @@ const STORAGE_KEYS = {
   BANNERS: 'excellenceca_banners',
   RANK_TIERS: 'excellenceca_rank_tiers',
   XP_SETTINGS: 'excellenceca_xp_settings',
-  REFERRALS: 'excellenceca_referrals'
+  REFERRALS: 'excellenceca_referrals',
+  BOOKMARKS: 'excellenceca_bookmarks',
+  NOTIFICATIONS: 'excellenceca_notifications'
 };
 
 const DEFAULT_RANK_TIERS = [
@@ -1846,24 +1848,19 @@ class AppStore {
       localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
     }
 
-    // Ensure 4 CA Foundation subjects are present
+    // Ensure subjects are seeded once with default subjects, preserving custom subjects
     const existingSubjects = localStorage.getItem(STORAGE_KEYS.SUBJECTS);
-    if (!existingSubjects) {
+    const subjectsSeeded = localStorage.getItem('excellenceca_subjects_seeded_v2');
+    if (!existingSubjects || !subjectsSeeded) {
       localStorage.setItem(STORAGE_KEYS.SUBJECTS, JSON.stringify(DEFAULT_SUBJECTS));
-    } else {
-      try {
-        const subs = JSON.parse(existingSubjects);
-        const hasAll4Foundation = subs.length === 4 && 
-          subs.some(s => s.name === 'Accounting') &&
-          subs.some(s => s.name === 'Business Law') &&
-          subs.some(s => s.name === 'Business Economics') &&
-          subs.some(s => s.name === 'Quantitative Aptitude');
-        if (!hasAll4Foundation) {
-          localStorage.setItem(STORAGE_KEYS.SUBJECTS, JSON.stringify(DEFAULT_SUBJECTS));
-        }
-      } catch (e) {
-        localStorage.setItem(STORAGE_KEYS.SUBJECTS, JSON.stringify(DEFAULT_SUBJECTS));
-      }
+      localStorage.setItem('excellenceca_subjects_seeded_v2', 'true');
+    }
+
+    if (!localStorage.getItem(STORAGE_KEYS.BOOKMARKS)) {
+      localStorage.setItem(STORAGE_KEYS.BOOKMARKS, JSON.stringify([]));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS)) {
+      localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify([]));
     }
 
     if (!localStorage.getItem(STORAGE_KEYS.LECTURES)) {
@@ -2042,10 +2039,210 @@ class AppStore {
 
   // Subjects
   getSubjects() {
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS.SUBJECTS) || '[]');
+    const raw = localStorage.getItem(STORAGE_KEYS.SUBJECTS);
+    if (!raw) return DEFAULT_SUBJECTS;
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_SUBJECTS;
+    } catch (e) {
+      return DEFAULT_SUBJECTS;
+    }
+  }
+  saveSubjects(subjects) {
+    localStorage.setItem(STORAGE_KEYS.SUBJECTS, JSON.stringify(subjects));
   }
   getSubjectById(id) {
-    return this.getSubjects().find(s => s.id === id);
+    if (!id) return null;
+    return this.getSubjects().find(s => s.id === id || (s.name && s.name.toLowerCase() === String(id).toLowerCase()));
+  }
+  addSubject(subject) {
+    if (!subject) return;
+    const subjects = this.getSubjects();
+    const existingIdx = subjects.findIndex(s => s.id === subject.id || (s.name && s.name.toLowerCase() === subject.name.toLowerCase()));
+    if (existingIdx >= 0) {
+      subjects[existingIdx] = subject;
+    } else {
+      subjects.push(subject);
+    }
+    this.saveSubjects(subjects);
+    if (window.firebaseSync && typeof window.firebaseSync.saveSubject === 'function') {
+      window.firebaseSync.saveSubject(subject);
+    }
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    const token = user ? (user.token || user.email) : '';
+    fetch('/api/subjects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(subject)
+    }).catch(() => {});
+    return subject;
+  }
+  deleteSubject(id) {
+    const subjects = this.getSubjects().filter(s => s.id !== id);
+    this.saveSubjects(subjects);
+    if (window.firebaseSync && typeof window.firebaseSync.deleteSubject === 'function') {
+      window.firebaseSync.deleteSubject(id);
+    }
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    const token = user ? (user.token || user.email) : '';
+    fetch('/api/subjects/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ id })
+    }).catch(() => {});
+  }
+
+  // Bookmarks (MCQ Tests & Test Papers)
+  getBookmarks(userId = null) {
+    const raw = localStorage.getItem(STORAGE_KEYS.BOOKMARKS);
+    let list = [];
+    try { list = raw ? JSON.parse(raw) : []; } catch (e) { list = []; }
+    if (userId) {
+      return list.filter(b => b.userId === userId);
+    }
+    return list;
+  }
+  saveBookmarks(bookmarks) {
+    localStorage.setItem(STORAGE_KEYS.BOOKMARKS, JSON.stringify(bookmarks));
+  }
+  isBookmarked(userId, itemId) {
+    if (!userId || !itemId) return false;
+    return this.getBookmarks(userId).some(b => b.itemId === itemId);
+  }
+  toggleBookmark(userId, itemId, itemType = 'test') {
+    if (!userId || !itemId) return false;
+    let list = this.getBookmarks();
+    const existingIdx = list.findIndex(b => b.userId === userId && b.itemId === itemId);
+    let isNowBookmarked = false;
+    let targetBm = null;
+
+    if (existingIdx >= 0) {
+      targetBm = list[existingIdx];
+      list.splice(existingIdx, 1);
+      isNowBookmarked = false;
+      if (window.firebaseSync && typeof window.firebaseSync.deleteBookmark === 'function') {
+        window.firebaseSync.deleteBookmark(targetBm.id || `${userId}_${itemId}`);
+      }
+    } else {
+      targetBm = {
+        id: 'bm-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        userId,
+        itemId,
+        itemType,
+        createdAt: new Date().toISOString()
+      };
+      list.unshift(targetBm);
+      isNowBookmarked = true;
+      if (window.firebaseSync && typeof window.firebaseSync.saveBookmark === 'function') {
+        window.firebaseSync.saveBookmark(targetBm);
+      }
+    }
+
+    this.saveBookmarks(list);
+
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    const token = user ? (user.token || user.email) : '';
+    fetch('/api/bookmarks/toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ itemId, itemType })
+    }).catch(() => {});
+
+    return isNowBookmarked;
+  }
+
+  // Notifications
+  getNotifications(userId = null) {
+    const raw = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
+    let list = [];
+    try { list = raw ? JSON.parse(raw) : []; } catch (e) { list = []; }
+    if (userId) {
+      list = list.filter(n => n.userId === userId);
+    }
+    return list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }
+  saveNotifications(notifications) {
+    localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications));
+  }
+  addNotification(notif) {
+    if (!notif) return;
+    const notifObj = {
+      id: notif.id || 'notif-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      userId: notif.userId,
+      type: notif.type || 'general',
+      title: notif.title || '',
+      message: notif.message || '',
+      link: notif.link || '',
+      read: false,
+      metadata: notif.metadata || {},
+      createdAt: notif.createdAt || new Date().toISOString()
+    };
+    const list = this.getNotifications();
+    list.unshift(notifObj);
+    this.saveNotifications(list);
+
+    if (window.firebaseSync && typeof window.firebaseSync.saveNotification === 'function') {
+      window.firebaseSync.saveNotification(notifObj);
+    }
+
+    fetch('/api/notifications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(notifObj)
+    }).catch(() => {});
+
+    if (window.app && typeof window.app.updateNotificationBadge === 'function') {
+      window.app.updateNotificationBadge();
+    }
+
+    return notifObj;
+  }
+  markNotificationRead(id) {
+    const list = this.getNotifications();
+    const item = list.find(n => n.id === id);
+    if (item) {
+      item.read = true;
+      this.saveNotifications(list);
+      if (window.firebaseSync && typeof window.firebaseSync.markNotificationRead === 'function') {
+        window.firebaseSync.markNotificationRead(id);
+      }
+      const user = window.auth ? window.auth.getCurrentUser() : null;
+      const token = user ? (user.token || user.email) : '';
+      fetch('/api/notifications/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ id })
+      }).catch(() => {});
+      if (window.app && typeof window.app.updateNotificationBadge === 'function') {
+        window.app.updateNotificationBadge();
+      }
+    }
+  }
+  markAllNotificationsRead(userId) {
+    const list = this.getNotifications();
+    list.forEach(n => {
+      if (!userId || n.userId === userId) {
+        n.read = true;
+      }
+    });
+    this.saveNotifications(list);
+    if (window.firebaseSync && typeof window.firebaseSync.markAllNotificationsRead === 'function') {
+      window.firebaseSync.markAllNotificationsRead(userId);
+    }
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    const token = user ? (user.token || user.email) : '';
+    fetch('/api/notifications/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ all: true })
+    }).catch(() => {});
+    if (window.app && typeof window.app.updateNotificationBadge === 'function') {
+      window.app.updateNotificationBadge();
+    }
+  }
+  getUnreadNotificationCount(userId) {
+    if (!userId) return 0;
+    return this.getNotifications(userId).filter(n => !n.read).length;
   }
 
   // Lectures

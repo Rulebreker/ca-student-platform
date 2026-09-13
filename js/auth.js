@@ -399,7 +399,30 @@ class AuthManager {
             createdAt: new Date().toISOString()
           });
         }
+
+        // Real-time notification to referrer
+        if (window.store.addNotification) {
+          window.store.addNotification({
+            userId: referrer.id,
+            type: 'referral',
+            title: 'Referral Bonus Credited! 🎉',
+            message: `${newUser.name} (@${newUser.username}) registered using your link! You earned +100 Platform Points.`,
+            link: 'leaderboard',
+            metadata: { referredUserId: newUser.id, points: 100 }
+          });
+        }
       }
+    }
+
+    // Welcome notification to newly registered student
+    if (window.store.addNotification) {
+      window.store.addNotification({
+        userId: newUser.id,
+        type: 'general',
+        title: 'Welcome to ExcellenceCA! 🎓',
+        message: 'Your account is active. Start practicing MCQ Tests and downloading Question Papers!',
+        link: 'dashboard'
+      });
     }
 
     users.unshift(newUser);
@@ -584,6 +607,10 @@ class AuthManager {
       if (mobileNavAdmin) mobileNavAdmin.style.display = 'none';
       if (teacherNavTab) teacherNavTab.style.display = 'none';
       if (mobileNavTeacher) mobileNavTeacher.style.display = 'none';
+    }
+
+    if (window.app && typeof window.app.updateNotificationBadge === 'function') {
+      window.app.updateNotificationBadge();
     }
   }
 }

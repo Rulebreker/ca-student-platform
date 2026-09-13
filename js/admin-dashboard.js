@@ -41,6 +41,7 @@ class AdminDashboard {
     else if (this.currentTab === 'mcq-tests') this.renderMCQTests();
     else if (this.currentTab === 'ranks-config') this.renderRanksConfig();
     else if (this.currentTab === 'lectures') this.renderLectures();
+    else if (this.currentTab === 'subjects') this.renderSubjects();
   }
 
   switchTab(tab) {
@@ -63,6 +64,7 @@ class AdminDashboard {
       { id: 'banners', name: 'Website Updates Banner', icon: 'image' },
       { id: 'students', name: 'Students & Passwords', icon: 'users' },
       { id: 'teachers', name: 'Teachers & Privileges', icon: 'user-check' },
+      { id: 'subjects', name: 'Subject Management', icon: 'book-open' },
       { id: 'papers', name: 'Question Papers (PDF)', icon: 'file-up' },
       { id: 'grading', name: 'Checked Copy Grading', icon: 'file-check-2' },
       { id: 'referrals', name: 'Referral Management', icon: 'share-2' },
@@ -1250,12 +1252,7 @@ class AdminDashboard {
     this.selectedNewQuestionFile = null;
     this.selectedNewAnswerFile = null;
 
-    const validSubjects = [
-      { id: 'sub-1', name: 'Accounting' },
-      { id: 'sub-2', name: 'Business Law' },
-      { id: 'sub-3', name: 'Business Economics' },
-      { id: 'sub-4', name: 'Quantitative Aptitude' }
-    ];
+    const validSubjects = window.store.getSubjects ? window.store.getSubjects() : [];
 
     modalContent.innerHTML = `
       <div class="p-6 sm:p-7 max-h-[90vh] overflow-y-auto">
@@ -1283,13 +1280,23 @@ class AdminDashboard {
             >
           </div>
 
-          <!-- Subject and Topic -->
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <!-- Exam Level, Subject and Topic -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label class="block font-bold text-slate-700 mb-1">Subject (Strictly CA Foundation) <span class="text-rose-500">*</span></label>
+              <label class="block font-bold text-slate-700 mb-1">Exam Level <span class="text-rose-500">*</span></label>
+              <select id="admin-paper-exam-level" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold bg-white">
+                <option value="CA Foundation" ${!paper || paper.examLevel === 'CA Foundation' ? 'selected' : ''}>CA Foundation</option>
+                <option value="CA Intermediate" ${paper && paper.examLevel === 'CA Intermediate' ? 'selected' : ''}>CA Intermediate</option>
+                <option value="CA Final" ${paper && paper.examLevel === 'CA Final' ? 'selected' : ''}>CA Final</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Subject <span class="text-rose-500">*</span></label>
               <select id="admin-paper-subject" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-blue-900 focus:ring-2 focus:ring-blue-500 bg-white">
                 ${validSubjects.map(s => `
-                  <option value="${s.id}" ${paper && (paper.subjectId === s.id || paper.subject === s.name) ? 'selected' : ''}>${s.name}</option>
+                  <option value="${s.id}" ${paper && (paper.subjectId === s.id || paper.subject === s.name) ? 'selected' : ''}>
+                    ${s.name} (${s.level || 'Foundation'})
+                  </option>
                 `).join('')}
               </select>
             </div>
@@ -1442,6 +1449,7 @@ class AdminDashboard {
     e.preventDefault();
 
     const title = document.getElementById('admin-paper-title').value.trim();
+    const examLevel = document.getElementById('admin-paper-exam-level') ? document.getElementById('admin-paper-exam-level').value : 'CA Foundation';
     const subjectId = document.getElementById('admin-paper-subject').value;
     const subjectObj = window.store.getSubjectById(subjectId) || { name: 'Accounting' };
     const topic = document.getElementById('admin-paper-topic').value.trim();
@@ -1488,6 +1496,7 @@ class AdminDashboard {
     const paperObj = {
       id: isEdit ? existing.id : ('asg-' + Date.now()),
       title,
+      examLevel,
       subjectId,
       subject: subjectObj.name,
       topic,
@@ -1528,6 +1537,28 @@ class AdminDashboard {
       },
       body: JSON.stringify(paperObj)
     }).catch(() => {});
+
+    // Trigger notification to students matching exam level if newly created and published
+    if (!isEdit && paperObj.isPublished) {
+      const allStudents = window.store.getStudents ? window.store.getStudents() : [];
+      allStudents.forEach(st => {
+        const stLevel = (st.caLevel || '').toUpperCase();
+        const pLevel = (examLevel || '').toUpperCase();
+        if (!pLevel || stLevel.includes('FOUNDATION') && pLevel.includes('FOUNDATION') ||
+            stLevel.includes('INTER') && pLevel.includes('INTER') ||
+            stLevel.includes('FINAL') && pLevel.includes('FINAL') ||
+            !st.caLevel) {
+          window.store.addNotification({
+            userId: st.id,
+            type: 'new_paper',
+            title: 'New Test Paper Uploaded!',
+            message: `${paperObj.title} (${paperObj.subject}) is now available for download.`,
+            link: 'assignments',
+            metadata: { paperId: paperObj.id }
+          });
+        }
+      });
+    }
 
     window.app.closeModal('admin-generic-modal');
     this.renderTestPapers();
@@ -1992,9 +2023,9 @@ This will remove the question paper, attached answer keys, and student submissio
         </div>
 
         <form onsubmit="window.adminDashboard.saveGrade(event)" class="space-y-4 text-xs">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label class="block font-bold text-slate-700 mb-1">Marks (Out of ${asg ? asg.maximumMarks : 50})</label>
+              <label class="block font-bold text-slate-700 mb-1">Academic Marks (Max: ${asg ? asg.maximumMarks : 50})</label>
               <input 
                 type="number" 
                 id="admin-grade-marks" 
@@ -2004,6 +2035,19 @@ This will remove the question paper, attached answer keys, and student submissio
                 required 
                 value="${submission.marksObtained !== null ? submission.marksObtained : ''}" 
                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-emerald-800"
+              >
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Platform Points (XP)</label>
+              <input 
+                type="number" 
+                id="admin-grade-points" 
+                step="1" 
+                min="0" 
+                required 
+                value="${submission.pointsAwarded !== undefined && submission.pointsAwarded !== null ? submission.pointsAwarded : (submission.marksObtained !== null ? Math.round(submission.marksObtained) : 50)}" 
+                class="w-full px-3 py-2 border border-amber-300 bg-amber-50/30 rounded-lg text-xs font-bold text-amber-800"
+                title="XP Points awarded to student for the Leaderboard"
               >
             </div>
             <div>
@@ -2072,15 +2116,35 @@ This will remove the question paper, attached answer keys, and student submissio
     if (!submission) return;
 
     const marks = parseFloat(document.getElementById('admin-grade-marks').value);
+    const pointsAwarded = parseFloat(document.getElementById('admin-grade-points').value) || 0;
     const status = document.getElementById('admin-grade-status').value;
     const feedback = document.getElementById('admin-grade-feedback').value.trim();
     const currentUser = window.auth.getCurrentUser();
 
     submission.marksObtained = marks;
+    submission.pointsAwarded = pointsAwarded;
     submission.status = status;
     submission.adminFeedback = feedback;
     submission.evaluatedBy = currentUser ? currentUser.name : 'Administrator';
     submission.evaluatedAt = new Date().toISOString();
+
+    const notifyStudent = () => {
+      const asg = window.store.getAssignmentById(submission.assignmentId);
+      window.store.addNotification({
+        userId: submission.studentId,
+        type: 'points_received',
+        title: 'Paper Evaluated & Points Awarded',
+        message: `Your paper "${asg ? asg.title : 'Test Paper'}" was checked! Marks: ${marks}/${asg ? asg.maximumMarks : 100}, Points: +${pointsAwarded} XP.`,
+        link: 'assignments',
+        metadata: { submissionId: submission.id }
+      });
+      // Backend sync
+      fetch('/api/papers/submissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentUser ? currentUser.token : ''}` },
+        body: JSON.stringify(submission)
+      }).catch(() => {});
+    };
 
     if (this.selectedCheckedPdfFile) {
       const reader = new FileReader();
@@ -2088,15 +2152,17 @@ This will remove the question paper, attached answer keys, and student submissio
         submission.checkedCopyFileName = this.selectedCheckedPdfFile.name;
         submission.checkedCopyPdfData = reader.result;
         window.store.updateSubmission(submission);
+        notifyStudent();
         window.app.closeModal('admin-generic-modal');
-        window.app.showToast(`Checked copy and marks (${marks}) returned to student!`, 'success');
+        window.app.showToast(`Checked copy, marks (${marks}) and points (+${pointsAwarded} XP) saved!`, 'success');
         this.renderGradingCenter();
       };
       reader.readAsDataURL(this.selectedCheckedPdfFile);
     } else {
       window.store.updateSubmission(submission);
+      notifyStudent();
       window.app.closeModal('admin-generic-modal');
-      window.app.showToast(`Evaluation saved. Marks: ${marks}`, 'success');
+      window.app.showToast(`Evaluation saved. Marks: ${marks}, Points: +${pointsAwarded} XP`, 'success');
       this.renderGradingCenter();
     }
   }
@@ -2250,19 +2316,14 @@ This will remove the question paper, attached answer keys, and student submissio
     const modalContent = document.getElementById('admin-generic-modal-content');
     if (!modalContent) return;
 
-    const subjects = [
-      { id: 'sub-1', name: 'Accounting' },
-      { id: 'sub-2', name: 'Business Law' },
-      { id: 'sub-3', name: 'Business Economics' },
-      { id: 'sub-4', name: 'Quantitative Aptitude' }
-    ];
+    const subjects = window.store.getSubjects ? window.store.getSubjects() : [];
 
     modalContent.innerHTML = `
       <div class="p-6">
         <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
           <div>
             <h3 class="text-base font-bold text-slate-900">${isEdit ? 'Edit MCQ Test' : 'Create New MCQ Test'}</h3>
-            <p class="text-xs text-slate-500">Configure CA Foundation test parameters, dynamic marking, and attempt limits</p>
+            <p class="text-xs text-slate-500">Configure exam level, test parameters, academic marks, and platform points</p>
           </div>
           <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600 p-1">
             <i data-lucide="x" class="w-5 h-5"></i>
@@ -2282,13 +2343,21 @@ This will remove the question paper, attached answer keys, and student submissio
             >
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label class="block font-bold text-slate-700 mb-1">Subject (CA Foundation) *</label>
+              <label class="block font-bold text-slate-700 mb-1">Exam Level *</label>
+              <select id="tst-exam-level" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold">
+                <option value="CA Foundation" ${!test || test.examLevel === 'CA Foundation' ? 'selected' : ''}>CA Foundation</option>
+                <option value="CA Intermediate" ${test && test.examLevel === 'CA Intermediate' ? 'selected' : ''}>CA Intermediate</option>
+                <option value="CA Final" ${test && test.examLevel === 'CA Final' ? 'selected' : ''}>CA Final</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Subject *</label>
               <select id="tst-subject" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium">
                 ${subjects.map(s => `
                   <option value="${s.id}" ${test && (test.subjectId === s.id || test.subject === s.name) ? 'selected' : ''}>
-                    ${s.name}
+                    ${s.name} (${s.level || 'Foundation'})
                   </option>
                 `).join('')}
               </select>
@@ -2306,7 +2375,7 @@ This will remove the question paper, attached answer keys, and student submissio
             </div>
           </div>
 
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+          <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
             <div>
               <label class="block font-bold text-slate-700 mb-1">Duration (Mins) *</label>
               <input 
@@ -2331,7 +2400,7 @@ This will remove the question paper, attached answer keys, and student submissio
               >
             </div>
             <div>
-              <label class="block font-bold text-emerald-800 mb-1">Correct Mark (+) *</label>
+              <label class="block font-bold text-emerald-800 mb-1">Exam Mark (+) *</label>
               <input 
                 type="number" 
                 id="tst-positive" 
@@ -2352,6 +2421,19 @@ This will remove the question paper, attached answer keys, and student submissio
                 required 
                 value="${test && typeof test.negativeMarksPerWrong === 'number' ? test.negativeMarksPerWrong : 0.5}"
                 class="w-full px-2.5 py-1.5 border border-rose-300 bg-rose-50/50 rounded-lg text-xs font-bold text-rose-800"
+              >
+            </div>
+            <div>
+              <label class="block font-bold text-amber-800 mb-1">Platform XP (+) *</label>
+              <input 
+                type="number" 
+                id="tst-points" 
+                step="1" 
+                min="1" 
+                required 
+                value="${test && typeof test.pointsPerCorrect === 'number' ? test.pointsPerCorrect : 10}"
+                class="w-full px-2.5 py-1.5 border border-amber-300 bg-amber-50/50 rounded-lg text-xs font-bold text-amber-800"
+                title="Leaderboard XP points earned per correct answer"
               >
             </div>
           </div>
@@ -2419,27 +2501,26 @@ This will remove the question paper, attached answer keys, and student submissio
   async saveTest(e, existingId = '') {
     e.preventDefault();
     const title = document.getElementById('tst-title').value.trim();
+    const examLevel = document.getElementById('tst-exam-level').value;
     const subjectId = document.getElementById('tst-subject').value;
     const topic = document.getElementById('tst-topic').value.trim();
     const durationMinutes = parseInt(document.getElementById('tst-duration').value, 10);
     const maximumMarks = parseFloat(document.getElementById('tst-maxmarks').value);
     const marksPerCorrect = parseFloat(document.getElementById('tst-positive').value);
     const negativeMarksPerWrong = parseFloat(document.getElementById('tst-negative').value);
+    const pointsPerCorrect = parseFloat(document.getElementById('tst-points').value) || 10;
     const maxAttempts = parseInt(document.getElementById('tst-maxattempts').value, 10);
     const status = document.getElementById('tst-status').value;
     const description = document.getElementById('tst-desc').value.trim();
 
-    const subMap = {
-      'sub-1': 'Accounting',
-      'sub-2': 'Business Law',
-      'sub-3': 'Business Economics',
-      'sub-4': 'Quantitative Aptitude'
-    };
-    const subjectName = subMap[subjectId] || 'Accounting';
+    const allSubjs = window.store.getSubjects ? window.store.getSubjects() : [];
+    const matchedSub = allSubjs.find(s => s.id === subjectId || s.name === subjectId);
+    const subjectName = matchedSub ? matchedSub.name : (document.getElementById('tst-subject').selectedOptions[0]?.text || 'Accounting');
 
     const testPayload = {
       id: existingId || ('tst-' + Date.now()),
       title,
+      examLevel,
       subjectId,
       subject: subjectName,
       chapter: topic,
@@ -2448,6 +2529,7 @@ This will remove the question paper, attached answer keys, and student submissio
       maximumMarks,
       marksPerCorrect,
       negativeMarksPerWrong,
+      pointsPerCorrect,
       unattemptedMarks: 0.0,
       maxAttempts,
       status,
@@ -2476,6 +2558,28 @@ This will remove the question paper, attached answer keys, and student submissio
       });
     } catch (err) {
       console.warn('Backend sync error:', err);
+    }
+
+    // Trigger notification to students matching exam level if newly created and published
+    if (!existingId && testPayload.isPublished) {
+      const allStudents = window.store.getStudents ? window.store.getStudents() : [];
+      allStudents.forEach(st => {
+        const stLevel = (st.caLevel || '').toUpperCase();
+        const tLevel = (examLevel || '').toUpperCase();
+        if (!tLevel || stLevel.includes('FOUNDATION') && tLevel.includes('FOUNDATION') ||
+            stLevel.includes('INTER') && tLevel.includes('INTER') ||
+            stLevel.includes('FINAL') && tLevel.includes('FINAL') ||
+            !st.caLevel) {
+          window.store.addNotification({
+            userId: st.id,
+            type: 'new_test',
+            title: 'New MCQ Test Published!',
+            message: `${testPayload.title} (${testPayload.subject}) is now live.`,
+            link: 'tests',
+            metadata: { testId: testPayload.id }
+          });
+        }
+      });
     }
 
     window.app.showToast(existingId ? 'Test updated successfully!' : 'Test created! You can now add questions.', 'success');
@@ -4586,7 +4690,261 @@ This will remove the question paper, attached answer keys, and student submissio
     }
   }
 
+  // --- SUBJECT MANAGEMENT TAB ---
+  renderSubjects() {
+    const container = document.getElementById('admin-content-area');
+    if (!container) return;
+
+    const subjects = window.store.getSubjects ? window.store.getSubjects() : [];
+    const tests = window.store.getTests ? window.store.getTests() : [];
+    const assignments = window.store.getAssignments ? window.store.getAssignments() : [];
+
+    container.innerHTML = `
+      <div class="space-y-6">
+        <!-- Header banner -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+          <div>
+            <div class="flex items-center gap-2">
+              <h2 class="text-xl font-black text-slate-900">Dynamic Subject Management</h2>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800">
+                ${subjects.length} Subjects Active
+              </span>
+            </div>
+            <p class="text-xs text-slate-500 mt-1">
+              Create and manage subjects dynamically. Newly added subjects instantly sync across all devices, tests, papers, and student filters.
+            </p>
+          </div>
+          <button 
+            onclick="window.adminDashboard.openSubjectModal()"
+            class="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center gap-2 cursor-pointer self-start sm:self-auto"
+          >
+            <i data-lucide="plus-circle" class="w-4 h-4"></i> Add New Subject
+          </button>
+        </div>
+
+        <!-- Subjects Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="admin-subjects-grid">
+          ${subjects.map(s => {
+            const subjectTestsCount = tests.filter(t => t.subjectId === s.id || t.subject === s.name).length;
+            const subjectPapersCount = assignments.filter(a => a.subjectId === s.id || a.subject === s.name).length;
+            const iconName = s.icon || 'book-open';
+            const levelBadge = s.level || 'CA Foundation';
+
+            return `
+              <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between">
+                <div>
+                  <div class="flex items-center justify-between gap-2 mb-3">
+                    <span class="px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200">
+                      ${s.code || s.id}
+                    </span>
+                    <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                      ${levelBadge}
+                    </span>
+                  </div>
+
+                  <div class="flex items-center gap-3 mb-3">
+                    <div class="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700 shrink-0">
+                      <i data-lucide="${iconName}" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                      <h3 class="font-bold text-slate-900 text-sm">${s.name}</h3>
+                      <p class="text-[11px] text-slate-400 line-clamp-1">${s.description || 'Core CA Syllabus Subject'}</p>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-2 my-3 p-2.5 bg-slate-50 rounded-lg text-[11px] font-medium text-slate-600">
+                    <div>
+                      <span class="text-slate-400 block text-[10px]">MCQ Tests</span>
+                      <strong class="text-slate-800 text-xs">${subjectTestsCount} Tests</strong>
+                    </div>
+                    <div>
+                      <span class="text-slate-400 block text-[10px]">Test Papers</span>
+                      <strong class="text-slate-800 text-xs">${subjectPapersCount} Papers</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 mt-2">
+                  <button 
+                    onclick="window.adminDashboard.openSubjectModal('${s.id}')" 
+                    class="px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    <i data-lucide="edit-3" class="w-3.5 h-3.5"></i> Edit
+                  </button>
+                  <button 
+                    onclick="window.adminDashboard.deleteSubject('${s.id}')" 
+                    class="px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Delete
+                  </button>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  openSubjectModal(subjectId = null) {
+    const isEdit = !!subjectId;
+    const subject = isEdit ? window.store.getSubjectById(subjectId) : null;
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    modalContent.innerHTML = `
+      <div class="p-6">
+        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
+          <div>
+            <h3 class="text-base font-bold text-slate-900">${isEdit ? 'Edit Subject' : 'Add New Subject'}</h3>
+            <p class="text-xs text-slate-500">Configure subject details, code, level, and icon</p>
+          </div>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600 p-1 cursor-pointer">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <form onsubmit="window.adminDashboard.saveSubject(event, '${subjectId || ''}')" class="space-y-4 text-xs">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Subject Name *</label>
+            <input 
+              type="text" 
+              id="sub-name" 
+              required 
+              value="${subject ? subject.name : ''}"
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-rose-500" 
+              placeholder="e.g. Taxation, Advanced Accounting, Auditing"
+            >
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Subject Code / Abbreviation *</label>
+              <input 
+                type="text" 
+                id="sub-code" 
+                required 
+                value="${subject ? (subject.code || subject.id.replace('sub-', '').toUpperCase()) : ''}"
+                class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase focus:ring-2 focus:ring-rose-500" 
+                placeholder="e.g. TAX, ADV-ACC, AUD"
+              >
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Exam Level *</label>
+              <select id="sub-level" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold">
+                <option value="CA Foundation" ${!subject || subject.level === 'CA Foundation' ? 'selected' : ''}>CA Foundation</option>
+                <option value="CA Intermediate" ${subject && subject.level === 'CA Intermediate' ? 'selected' : ''}>CA Intermediate</option>
+                <option value="CA Final" ${subject && subject.level === 'CA Final' ? 'selected' : ''}>CA Final</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Icon Name (Lucide)</label>
+              <select id="sub-icon" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium">
+                <option value="book-open" ${!subject || subject.icon === 'book-open' ? 'selected' : ''}>book-open (General/Reading)</option>
+                <option value="calculator" ${subject && subject.icon === 'calculator' ? 'selected' : ''}>calculator (Accounting/Math)</option>
+                <option value="scale" ${subject && subject.icon === 'scale' ? 'selected' : ''}>scale (Law/Ethics)</option>
+                <option value="trending-up" ${subject && subject.icon === 'trending-up' ? 'selected' : ''}>trending-up (Economics/Finance)</option>
+                <option value="file-text" ${subject && subject.icon === 'file-text' ? 'selected' : ''}>file-text (Tax/Auditing)</option>
+                <option value="shield-check" ${subject && subject.icon === 'shield-check' ? 'selected' : ''}>shield-check (Compliance)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Color Theme</label>
+              <select id="sub-color" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium">
+                <option value="blue" ${!subject || subject.color === 'blue' ? 'selected' : ''}>Blue</option>
+                <option value="rose" ${subject && subject.color === 'rose' ? 'selected' : ''}>Rose</option>
+                <option value="emerald" ${subject && subject.color === 'emerald' ? 'selected' : ''}>Emerald</option>
+                <option value="purple" ${subject && subject.color === 'purple' ? 'selected' : ''}>Purple</option>
+                <option value="amber" ${subject && subject.color === 'amber' ? 'selected' : ''}>Amber</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Subject Description / Notes</label>
+            <textarea 
+              id="sub-desc" 
+              rows="2" 
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-rose-500" 
+              placeholder="Brief summary of syllabus coverage..."
+            >${subject ? (subject.description || '') : ''}</textarea>
+          </div>
+
+          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+            <button 
+              type="button" 
+              onclick="window.app.closeModal('admin-generic-modal')" 
+              class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit" 
+              class="px-5 py-2 font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm transition-colors cursor-pointer"
+            >
+              ${isEdit ? 'Save Changes' : 'Create Subject'}
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    window.app.openModal('admin-generic-modal');
+  }
+
+  saveSubject(e, existingId = '') {
+    e.preventDefault();
+    const name = document.getElementById('sub-name').value.trim();
+    const code = document.getElementById('sub-code').value.trim().toUpperCase();
+    const level = document.getElementById('sub-level').value;
+    const icon = document.getElementById('sub-icon').value;
+    const color = document.getElementById('sub-color').value;
+    const description = document.getElementById('sub-desc').value.trim();
+
+    if (!name || !code) {
+      window.app.showToast('Please fill in Subject Name and Code.', 'error');
+      return;
+    }
+
+    const subjectObj = {
+      id: existingId || ('sub-' + Date.now()),
+      code,
+      name,
+      level,
+      icon,
+      color,
+      description,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (!existingId) {
+      subjectObj.createdAt = new Date().toISOString();
+    }
+
+    window.store.addSubject(subjectObj);
+    window.app.closeModal('admin-generic-modal');
+    window.app.showToast(existingId ? 'Subject updated successfully!' : 'New subject created successfully!', 'success');
+    this.renderSubjects();
+  }
+
+  deleteSubject(subjectId) {
+    const subject = window.store.getSubjectById(subjectId);
+    if (!subject) return;
+
+    if (!confirm(`Are you sure you want to delete "${subject.name}"?`)) return;
+
+    window.store.deleteSubject(subjectId);
+    window.app.showToast(`Subject "${subject.name}" deleted.`, 'info');
+    this.renderSubjects();
+  }
+
 }
 
-
 window.adminDashboard = new AdminDashboard();
+
