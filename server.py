@@ -15,12 +15,20 @@ import hashlib
 
 PORT = 8000
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PRIVATE_STORAGE_DIR = os.path.join(BASE_DIR, 'private_storage')
-PRIVATE_IMAGES_DIR = os.path.join(PRIVATE_STORAGE_DIR, 'images')
-DATA_STORE_FILE = os.path.join(BASE_DIR, 'backend_data.json')
 
-os.makedirs(PRIVATE_STORAGE_DIR, exist_ok=True)
-os.makedirs(PRIVATE_IMAGES_DIR, exist_ok=True)
+# Support serverless / read-only filesystem environments (e.g. Vercel / AWS Lambda)
+IS_SERVERLESS = bool(os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME'))
+STORAGE_BASE = '/tmp' if IS_SERVERLESS else BASE_DIR
+
+PRIVATE_STORAGE_DIR = os.path.join(STORAGE_BASE, 'private_storage')
+PRIVATE_IMAGES_DIR = os.path.join(PRIVATE_STORAGE_DIR, 'images')
+DATA_STORE_FILE = os.path.join(STORAGE_BASE, 'backend_data.json')
+
+try:
+    os.makedirs(PRIVATE_STORAGE_DIR, exist_ok=True)
+    os.makedirs(PRIVATE_IMAGES_DIR, exist_ok=True)
+except Exception as _storage_init_err:
+    print(f"[STORAGE_INIT_WARNING] {_storage_init_err}", flush=True)
 
 def hash_password(plain_password, salt=None):
     if not plain_password:
@@ -783,6 +791,15 @@ _backend_data_lock = threading.RLock()
 
 def load_backend_data():
     with _backend_data_lock:
+        if IS_SERVERLESS and not os.path.exists(DATA_STORE_FILE):
+            bundled_seed = os.path.join(BASE_DIR, 'backend_data.json')
+            if os.path.exists(bundled_seed):
+                try:
+                    import shutil
+                    shutil.copyfile(bundled_seed, DATA_STORE_FILE)
+                except Exception as _seed_err:
+                    print(f"[SEED_COPY_WARNING] {_seed_err}", flush=True)
+
         if os.path.exists(DATA_STORE_FILE):
             d = None
             for attempt in range(5):
@@ -1182,14 +1199,33 @@ def parse_mcq_text_from_doc(raw_text, existing_questions=None):
 
 class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=BASE_DIR, **kwargs)
+        if 'directory' not in kwargs:
+            kwargs['directory'] = BASE_DIR
+        super().__init__(*args, **kwargs)
 
     def _send_cors_headers(self):
         req_origin = self.headers.get('Origin', '') if hasattr(self, 'headers') and self.headers else ''
-        self.send_header('Access-Control-Allow-Origin', req_origin if req_origin else '*')
+        
+        # Allowed origins: production Vercel domain, Vercel preview deployments, and local development
+        allowed_origin = None
+        if req_origin:
+            normalized_origin = req_origin.strip().rstrip('/')
+            if (normalized_origin == 'https://excellenceca.vercel.app' or
+                re.match(r'^https:\/\/[a-zA-Z0-9_\-]+\.vercel\.app$', normalized_origin) or
+                re.match(r'^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$', normalized_origin) or
+                normalized_origin == 'null'):
+                allowed_origin = req_origin
+
+        if allowed_origin:
+            self.send_header('Access-Control-Allow-Origin', allowed_origin)
+            self.send_header('Access-Control-Allow-Credentials', 'true')
+        else:
+            # Fallback for production frontend domain
+            self.send_header('Access-Control-Allow-Origin', 'https://excellenceca.vercel.app')
+            self.send_header('Access-Control-Allow-Credentials', 'true')
+
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Auth-Token, Origin, Accept')
-        self.send_header('Access-Control-Allow-Credentials', 'true')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Auth-Token, Origin, Accept, Cache-Control')
         self.send_header('Access-Control-Max-Age', '86400')
 
     def send_json(self, status_code, data):
@@ -1214,6 +1250,20 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             pass
 
+    def _get_request_path(self):
+        matched_path = self.headers.get('x-matched-path') if hasattr(self, 'headers') and self.headers else None
+        forwarded_uri = self.headers.get('x-forwarded-uri') if hasattr(self, 'headers') and self.headers else None
+        req_path = matched_path or forwarded_uri or self.path
+        if req_path.startswith('/api/index.py'):
+            parsed = urllib.parse.urlparse(self.path)
+            if parsed.path != '/api/index.py' and parsed.path.startswith('/api/'):
+                req_path = parsed.path
+            elif forwarded_uri:
+                req_path = forwarded_uri
+        parsed_url = urllib.parse.urlparse(req_path)
+        raw_path = parsed_url.path
+        return raw_path.rstrip('/') if raw_path != '/' else '/'
+
     def get_auth_token(self):
         auth_header = self.headers.get('Authorization', '')
         if auth_header.startswith('Bearer '):
@@ -1221,7 +1271,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         x_token = self.headers.get('X-Auth-Token')
         if x_token:
             return x_token.strip()
-        parsed = urllib.parse.urlparse(self.path)
+        req_path = self.headers.get('x-matched-path') or self.headers.get('x-forwarded-uri') or self.path
+        parsed = urllib.parse.urlparse(req_path)
         qs = urllib.parse.parse_qs(parsed.query)
         if 'token' in qs:
             return qs['token'][0].strip()
@@ -1229,10 +1280,19 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         print(f"[SERVER] Incoming GET: {self.path}", flush=True)
-        parsed_url = urllib.parse.urlparse(self.path)
-        raw_path = parsed_url.path
+        raw_path = self._get_request_path()
         path = raw_path.rstrip('/') if raw_path != '/' else '/'
-        query = urllib.parse.parse_qs(parsed_url.query)
+        effective_full = self.headers.get('x-matched-path') or self.headers.get('x-forwarded-uri') or self.path
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(effective_full).query)
+
+        # 0. Health check endpoint
+        if path == '/api/health':
+            self.send_json(200, {
+                'status': 'ok',
+                'service': 'excellenceca-backend',
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            })
+            return
 
         # Direct static access forbidden
         if '/private_storage' in path or path.startswith('/private_storage'):
@@ -1264,7 +1324,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_header('Content-Type', ctype)
                     self.send_header('Content-Length', str(len(img_bytes)))
                     self.send_header('Cache-Control', 'public, max-age=86400')
-                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self._send_cors_headers()
                     self.end_headers()
                     self.wfile.write(img_bytes)
                     return
@@ -2008,7 +2068,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header('Content-Disposition', f'attachment; filename="{safe_download_name}"')
                 self.send_header('Cache-Control', 'private, no-cache, no-store, must-revalidate')
                 self.send_header('Pragma', 'no-cache')
-                self.send_header('Access-Control-Allow-Origin', '*')
+                self._send_cors_headers()
                 self.end_headers()
                 self.wfile.write(content)
                 return
@@ -2019,9 +2079,10 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self):
-        parsed_url = urllib.parse.urlparse(self.path)
-        raw_path = parsed_url.path
+        raw_path = self._get_request_path()
         path = raw_path.rstrip('/') if raw_path != '/' else '/'
+        effective_full = self.headers.get('x-matched-path') or self.headers.get('x-forwarded-uri') or self.path
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(effective_full).query)
 
         # Test Reporter Endpoint
         if path in ('/api/test-report', '/api/test_report'):

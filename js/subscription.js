@@ -1042,9 +1042,6 @@ class SubscriptionManager {
                 <p class="text-xs text-slate-500 mt-0.5">You are currently on the standard Free tier. Choose a pass below to unlock verified copy grading and premium MCQs.</p>
               </div>
             </div>
-            <a href="#passes-grid-section" class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 flex-shrink-0">
-              <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-200"></i> View Passes Below
-            </a>
           </div>
         `;
       }

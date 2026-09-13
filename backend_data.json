@@ -26,7 +26,7 @@
       "caLevel": "CA FOUNDATION",
       "referralPoints": 600,
       "referralCount": 6,
-      "totalXp": 1000
+      "totalXp": 1500
     },
     "priya.patel@castudent.in": {
       "id": "usr-student-2",
@@ -4140,6 +4140,20 @@
   ],
   "xp_transactions": [
     {
+      "id": "tx_sub_psess_1789332293228_9383fd01",
+      "userId": "usr-student-1",
+      "userName": "Rohan Sharma",
+      "activityName": "Bonus XP: Core Pass (Monthly) Activation",
+      "points": 500,
+      "timestamp": "2026-09-13T20:44:53.433883+00:00",
+      "createdAt": "2026-09-13T20:44:53.433883+00:00",
+      "metadata": {
+        "paymentSessionId": "psess_1789332293228_9383fd01",
+        "planId": "core_monthly",
+        "amount": 500
+      }
+    },
+    {
       "id": "tx_sub_psess_1789329430713_813c0084",
       "userId": "usr-student-1",
       "userName": "Rohan Sharma",
@@ -6292,6 +6306,34 @@
   ],
   "notifications": [
     {
+      "id": "notif_sub_1789332293433",
+      "userId": "usr-student-1",
+      "title": "Core Pass Activated!",
+      "message": "Your payment of \u20b949 (UTR: UTR1789332293248) has been verified. Welcome to Core Pass (Monthly)! You received +500 bonus XP. Note: Verified with Institutional HDFC Bank Statement",
+      "type": "subscription",
+      "createdAt": "2026-09-13T20:44:53.433883+00:00",
+      "isRead": false
+    },
+    {
+      "id": "notif_sub_1789330977235",
+      "userId": "usr-admin-1",
+      "title": "Trial Pass Activated!",
+      "message": "Your payment of \u20b99 (UTR: 78945612366) has been verified. Welcome to \u20b99 Elite 10-Day Trial! You received +0 bonus XP. Note: Approved with instant pass activation",
+      "type": "subscription",
+      "createdAt": "2026-09-13T20:22:57.234433+00:00",
+      "isRead": false,
+      "read": true
+    },
+    {
+      "id": "notif_sub_canc_1789330555776_9c7c",
+      "userId": "usr-student-1789308468650",
+      "title": "Subscription Cancelled",
+      "message": "Your subscription has been cancelled. Reason: d",
+      "type": "subscription",
+      "createdAt": "2026-09-13T20:15:55.776517+00:00",
+      "isRead": false
+    },
+    {
       "id": "notif_sub_1789329430913",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -6694,6 +6736,72 @@
   ],
   "payment_sessions": [
     {
+      "paymentSessionId": "psess_1789332293228_9383fd01",
+      "sessionId": "psess_1789332293228_9383fd01",
+      "userId": "usr-student-1",
+      "userEmail": "rohan.sharma@castudent.in",
+      "userName": "Rohan Sharma",
+      "userPhone": "",
+      "caLevel": "CA FOUNDATION",
+      "planId": "core_monthly",
+      "planName": "Core Pass (Monthly)",
+      "planTier": "core",
+      "amount": 49,
+      "currency": "INR",
+      "durationDays": 30,
+      "channelSnapshot": {
+        "id": "chan-primary-1",
+        "name": "Primary UPI (HDFC Bank)",
+        "upiId": "excellenceca@okhdfcbank",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR"
+      },
+      "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
+      "status": "approved",
+      "createdAt": "2026-09-13T20:44:53.228439+00:00",
+      "expiresAt": "2026-09-13T20:54:53.228439+00:00",
+      "utr": "UTR1789332293248",
+      "screenshot": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFWM0AAAADUlEQVR4nGP4//8/AAX+Av4N7wqlAAAAAElFTkSuQmCC",
+      "submittedAt": "2026-09-13T20:44:53.342799+00:00",
+      "verifiedAt": "2026-09-13T20:44:53.433883+00:00",
+      "verifiedBy": "usr-admin-1",
+      "rejectionReason": null,
+      "remarks": "Verified with Institutional HDFC Bank Statement",
+      "adminRemarks": "Verified with Institutional HDFC Bank Statement"
+    },
+    {
+      "paymentSessionId": "psess_1789330262968_df725867",
+      "sessionId": "psess_1789330262968_df725867",
+      "userId": "usr-admin-1",
+      "userEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "userName": "Administrator",
+      "userPhone": "",
+      "caLevel": "CA FOUNDATION",
+      "planId": "elite_trial",
+      "planName": "\u20b99 Elite 10-Day Trial",
+      "planTier": "trial",
+      "amount": 9,
+      "currency": "INR",
+      "durationDays": 10,
+      "channelSnapshot": {
+        "id": "chan-primary-1",
+        "name": "Primary UPI (HDFC Bank)",
+        "upiId": "excellenceca@okhdfcbank",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR"
+      },
+      "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR",
+      "status": "approved",
+      "createdAt": "2026-09-13T20:11:02.968775+00:00",
+      "expiresAt": "2026-09-13T20:21:02.968775+00:00",
+      "utr": "78945612366",
+      "screenshot": "data:image/jpeg;base64,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",
+      "submittedAt": "2026-09-13T20:11:49.127903+00:00",
+      "verifiedAt": "2026-09-13T20:22:57.234433+00:00",
+      "verifiedBy": "usr-admin-1",
+      "rejectionReason": null,
+      "remarks": "Approved with instant pass activation",
+      "adminRemarks": "Approved with instant pass activation"
+    },
+    {
       "paymentSessionId": "psess_1789329430713_813c0084",
       "sessionId": "psess_1789329430713_813c0084",
       "userId": "usr-student-1",
@@ -7010,18 +7118,18 @@
   ],
   "subscriptions": {
     "usr-student-1": {
-      "id": "sub_usr-student-1_1789329430",
+      "id": "sub_usr-student-1_1789332293",
       "userId": "usr-student-1",
       "planId": "core_monthly",
       "planName": "Core Pass (Monthly)",
       "planTier": "core",
       "isTrial": false,
       "status": "active",
-      "startedAt": "2026-09-13T19:57:10.912598+00:00",
-      "expiresAt": "2026-12-27T18:09:43.741015+00:00",
+      "startedAt": "2026-09-13T20:44:53.433883+00:00",
+      "expiresAt": "2027-01-26T18:09:43.741015+00:00",
       "purchasedAmount": 49,
-      "paymentSessionId": "psess_1789329430713_813c0084",
-      "utr": "UTR1789329430727",
+      "paymentSessionId": "psess_1789332293228_9383fd01",
+      "utr": "UTR1789332293248",
       "history": [
         {
           "action": "payment_approved",
@@ -7091,6 +7199,14 @@
           "adminName": "Administrator",
           "timestamp": "2026-09-13T19:57:10.912598+00:00",
           "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement"
+        },
+        {
+          "action": "payment_approved",
+          "paymentSessionId": "psess_1789332293228_9383fd01",
+          "adminId": "usr-admin-1",
+          "adminName": "Administrator",
+          "timestamp": "2026-09-13T20:44:53.433883+00:00",
+          "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement"
         }
       ]
     },
@@ -7145,7 +7261,7 @@
       "planName": "Elite Pass (Monthly)",
       "planTier": "elite",
       "isTrial": false,
-      "status": "manually_granted",
+      "status": "cancelled",
       "startedAt": "2026-09-13T17:22:45.168943+00:00",
       "expiresAt": "2026-10-13T17:22:45.168943+00:00",
       "purchasedAmount": 0,
@@ -7156,8 +7272,15 @@
           "adminName": "Administrator",
           "timestamp": "2026-09-13T17:22:45.168943+00:00",
           "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: x"
+        },
+        {
+          "action": "admin_cancelled",
+          "adminId": "usr-admin-1",
+          "timestamp": "2026-09-13T20:15:55.776517+00:00",
+          "details": "Admin cancelled subscription. Reason: d"
         }
-      ]
+      ],
+      "cancelledAt": "2026-09-13T20:15:55.776517+00:00"
     },
     "usr-student-4": {
       "id": "sub_usr-student-4_1789323008",
@@ -7206,9 +7329,125 @@
         }
       ],
       "cancelledAt": "2026-09-13T18:10:09.194755+00:00"
+    },
+    "usr-admin-1": {
+      "id": "sub_usr-admin-1_1789330977",
+      "userId": "usr-admin-1",
+      "planId": "elite_trial",
+      "planName": "\u20b99 Elite 10-Day Trial",
+      "planTier": "trial",
+      "isTrial": true,
+      "status": "active",
+      "startedAt": "2026-09-13T20:22:57.234433+00:00",
+      "expiresAt": "2026-09-23T20:22:57.234433+00:00",
+      "purchasedAmount": 9,
+      "paymentSessionId": "psess_1789330262968_df725867",
+      "utr": "78945612366",
+      "history": [
+        {
+          "action": "payment_approved",
+          "paymentSessionId": "psess_1789330262968_df725867",
+          "adminId": "usr-admin-1",
+          "adminName": "Administrator",
+          "timestamp": "2026-09-13T20:22:57.234433+00:00",
+          "details": "Approved payment of \u20b99 for \u20b99 Elite 10-Day Trial with note: Approved with instant pass activation"
+        }
+      ]
     }
   },
   "admin_audit_logs": [
+    {
+      "id": "audit_1789332293634_b20f68",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "APPROVE_PAYMENT",
+      "targetId": "usr-student-1",
+      "target": "usr-student-1",
+      "details": "Approved payment of \u20b949 for Core Pass (Monthly) (UTR: UTR1789332293248) - Remarks: Verified with Institutional HDFC Bank Statement",
+      "oldValue": "pending_verification",
+      "newValue": "approved",
+      "timestamp": "2026-09-13T20:44:53.634776+00:00"
+    },
+    {
+      "id": "audit_1789330977235_3487ec",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "APPROVE_PAYMENT",
+      "targetId": "usr-admin-1",
+      "target": "usr-admin-1",
+      "details": "Approved payment of \u20b99 for \u20b99 Elite 10-Day Trial (UTR: 78945612366) - Remarks: Approved with instant pass activation",
+      "oldValue": "pending_verification",
+      "newValue": "approved",
+      "timestamp": "2026-09-13T20:22:57.235448+00:00"
+    },
+    {
+      "id": "audit_1789330555777_935ed5",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "CANCEL_SUBSCRIPTION",
+      "targetId": "usr-student-1789308468650",
+      "target": "usr-student-1789308468650",
+      "details": "Cancelled subscription",
+      "oldValue": {
+        "id": "sub_usr-student-1789308468650_1789320165",
+        "userId": "usr-student-1789308468650",
+        "planId": "elite_monthly",
+        "planName": "Elite Pass (Monthly)",
+        "planTier": "elite",
+        "isTrial": false,
+        "status": "manually_granted",
+        "startedAt": "2026-09-13T17:22:45.168943+00:00",
+        "expiresAt": "2026-10-13T17:22:45.168943+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T17:22:45.168943+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: x"
+          },
+          {
+            "action": "admin_cancelled",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T20:15:55.776517+00:00",
+            "details": "Admin cancelled subscription. Reason: d"
+          }
+        ]
+      },
+      "newValue": {
+        "id": "sub_usr-student-1789308468650_1789320165",
+        "userId": "usr-student-1789308468650",
+        "planId": "elite_monthly",
+        "planName": "Elite Pass (Monthly)",
+        "planTier": "elite",
+        "isTrial": false,
+        "status": "cancelled",
+        "startedAt": "2026-09-13T17:22:45.168943+00:00",
+        "expiresAt": "2026-10-13T17:22:45.168943+00:00",
+        "purchasedAmount": 0,
+        "history": [
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-13T17:22:45.168943+00:00",
+            "details": "Admin granted Elite Pass (Monthly) (30 days). Reason: x"
+          },
+          {
+            "action": "admin_cancelled",
+            "adminId": "usr-admin-1",
+            "timestamp": "2026-09-13T20:15:55.776517+00:00",
+            "details": "Admin cancelled subscription. Reason: d"
+          }
+        ],
+        "cancelledAt": "2026-09-13T20:15:55.776517+00:00"
+      },
+      "timestamp": "2026-09-13T20:15:55.777552+00:00"
+    },
     {
       "id": "audit_1789329431117_bf056a",
       "adminId": "usr-admin-1",
