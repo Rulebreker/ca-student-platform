@@ -42,6 +42,24 @@ def verify_password(plain_password, stored_password):
     # Legacy plain-text fallback for backward compatibility
     return plain_password == stored_password
 
+FIREBASE_RTDB_URL = "https://excellenceca-45a9d-default-rtdb.firebaseio.com"
+
+def sync_to_firebase(path, data, method='PUT'):
+    """Asynchronously sync updates to Firebase Realtime Database via REST API"""
+    def _do_sync():
+        try:
+            import urllib.request
+            url = f"{FIREBASE_RTDB_URL}/{path.lstrip('/')}.json"
+            body = json.dumps(data).encode('utf-8')
+            req = urllib.request.Request(url, data=body, method=method)
+            req.add_header('Content-Type', 'application/json')
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                pass
+        except Exception as e:
+            # Silent fallback if offline
+            pass
+    threading.Thread(target=_do_sync, daemon=True).start()
+
 INITIAL_USERS = {
     'adminrulebreker@rulebrekerdothunter.com': {
         'id': 'usr-admin-1',
@@ -61,7 +79,9 @@ INITIAL_USERS = {
         'password': hash_password('password123', 'rohan_salt_2026'),
         'role': 'student',
         'token': 'token_rohan_sharma_student',
-        'isActive': True
+        'isActive': True,
+        'referralPoints': 0,
+        'referralCount': 0
     },
     'priya.patel@castudent.in': {
         'id': 'usr-student-2',
@@ -71,7 +91,9 @@ INITIAL_USERS = {
         'password': hash_password('priyapassword', 'priya_salt_2026'),
         'role': 'student',
         'token': 'token_priya_patel_student',
-        'isActive': True
+        'isActive': True,
+        'referralPoints': 0,
+        'referralCount': 0
     },
     'prof.sharma@excellenceca.com': {
         'id': 'usr-teacher-1',
@@ -275,6 +297,12 @@ def load_backend_data():
                             u['username'] = init_u['username']
                         if not u.get('token') and init_u.get('token'):
                             u['token'] = init_u['token']
+                for u in d.get('users', {}).values():
+                    if u.get('role') == 'student':
+                        if 'referralPoints' not in u:
+                            u['referralPoints'] = 0
+                        if 'referralCount' not in u:
+                            u['referralCount'] = 0
                 sync_historical_xp(d)
                 return d
         except Exception:
@@ -303,6 +331,8 @@ def save_backend_data(data):
     with open(DATA_STORE_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2)
 
+_xp_reset_lock = threading.Lock()
+
 def execute_xp_reset(data, triggered_by='scheduled', admin_user=None):
     reset_id = f"reset-{int(datetime.now().timestamp() * 1000)}-{uuid.uuid4().hex[:6]}"
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -317,10 +347,13 @@ def execute_xp_reset(data, triggered_by='scheduled', admin_user=None):
             u['totalXp'] = 0
             if 'baseXp' in u:
                 u['baseXp'] = 0
+            # Sync student XP reset to Firebase RTDB in real time!
+            if u.get('id'):
+                sync_to_firebase(f"users/{u['id']}", {'totalXp': 0, 'baseXp': 0}, method='PATCH')
     
     # Calculate next reset if automatic
     reset_settings = data.get('xp_reset_settings', {})
-    interval_days = int(reset_settings.get('intervalDays', 90))
+    interval = reset_settings.get('interval', 'quarterly')
     custom_seconds = reset_settings.get('customSeconds')
     
     next_reset = None
@@ -328,9 +361,25 @@ def execute_xp_reset(data, triggered_by='scheduled', admin_user=None):
         now_dt = datetime.now(timezone.utc)
         if custom_seconds:
             next_dt = now_dt + timedelta(seconds=int(custom_seconds))
+            next_reset = next_dt.isoformat()
+        elif interval == 'once':
+            next_reset = None
+            reset_settings['enabled'] = False
+        elif interval == 'daily':
+            next_reset = (now_dt + timedelta(days=1)).isoformat()
+        elif interval == 'weekly':
+            next_reset = (now_dt + timedelta(weeks=1)).isoformat()
+        elif interval == 'monthly':
+            next_reset = (now_dt + timedelta(days=30)).isoformat()
+        elif interval == 'quarterly':
+            next_reset = (now_dt + timedelta(days=90)).isoformat()
+        elif interval == 'biannual':
+            next_reset = (now_dt + timedelta(days=182)).isoformat()
+        elif interval == 'yearly':
+            next_reset = (now_dt + timedelta(days=365)).isoformat()
         else:
-            next_dt = now_dt + timedelta(days=interval_days)
-        next_reset = next_dt.isoformat()
+            days = int(reset_settings.get('intervalDays', 90))
+            next_reset = (now_dt + timedelta(days=days)).isoformat()
         reset_settings['nextReset'] = next_reset
 
     reset_settings['lastReset'] = now_iso
@@ -338,18 +387,29 @@ def execute_xp_reset(data, triggered_by='scheduled', admin_user=None):
     data['xp_reset_settings'] = reset_settings
 
     # Record event in reset history
+    admin_name = admin_user.get('name', admin_user.get('username', 'Administrator')) if admin_user else 'System Scheduler'
     event = {
         'id': reset_id,
         'timestamp': now_iso,
+        'resetAt': now_iso,
         'type': triggered_by,
+        'triggeredBy': triggered_by,
         'studentsAffected': students_affected,
-        'admin': admin_user.get('name', admin_user.get('username', 'Administrator')) if admin_user else 'System Scheduler',
-        'nextScheduledReset': next_reset
+        'studentsReset': students_affected,
+        'admin': admin_name,
+        'adminUser': admin_name,
+        'nextScheduledReset': next_reset,
+        'notes': f"{triggered_by.capitalize()} XP reset executed for {students_affected} students"
     }
     if 'xp_reset_history' not in data:
         data['xp_reset_history'] = []
     data['xp_reset_history'].insert(0, event)
     save_backend_data(data)
+
+    # Sync settings and history to Firebase Realtime Database
+    sync_to_firebase("xp_reset_settings", reset_settings, method='PUT')
+    sync_to_firebase(f"xp_reset_history/{reset_id}", event, method='PUT')
+
     return event
 
 _last_checked_schedule_time = None
@@ -359,22 +419,23 @@ def xp_reset_background_worker():
     while True:
         try:
             time.sleep(10)
-            data = load_backend_data()
-            reset_settings = data.get('xp_reset_settings', {})
-            if reset_settings.get('enabled') and reset_settings.get('nextReset'):
-                next_reset_str = reset_settings.get('nextReset')
-                try:
-                    next_reset_dt = datetime.fromisoformat(next_reset_str.replace('Z', '+00:00'))
-                    now_utc = datetime.now(timezone.utc)
-                    if now_utc >= next_reset_dt:
-                        # Idempotency guard: prevent duplicate runs within 15 seconds
-                        if _last_checked_schedule_time and (now_utc - _last_checked_schedule_time).total_seconds() < 15:
-                            continue
-                        _last_checked_schedule_time = now_utc
-                        print(f"[XP Reset Engine] Scheduled automatic reset triggering at {now_utc.isoformat()}")
-                        execute_xp_reset(data, triggered_by='scheduled')
-                except Exception as ex:
-                    pass
+            with _xp_reset_lock:
+                data = load_backend_data()
+                reset_settings = data.get('xp_reset_settings', {})
+                if reset_settings.get('enabled') and reset_settings.get('nextReset'):
+                    next_reset_str = reset_settings.get('nextReset')
+                    try:
+                        next_reset_dt = datetime.fromisoformat(next_reset_str.replace('Z', '+00:00'))
+                        now_utc = datetime.now(timezone.utc)
+                        if now_utc >= next_reset_dt:
+                            # Idempotency guard: prevent duplicate runs within 30 seconds
+                            if _last_checked_schedule_time and (now_utc - _last_checked_schedule_time).total_seconds() < 30:
+                                continue
+                            _last_checked_schedule_time = now_utc
+                            print(f"[XP Reset Engine] Scheduled automatic reset triggering at {now_utc.isoformat()}")
+                            execute_xp_reset(data, triggered_by='scheduled')
+                    except Exception as ex:
+                        pass
         except Exception as e:
             pass
 
@@ -1243,6 +1304,17 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 sanitized = dict(new_user)
                 sanitized.pop('password', None)
+
+                # Real-time synchronization to Firebase Realtime Database
+                sync_to_firebase(f"users/{user_id}", sanitized, method='PUT')
+                if raw_ref and 'referrer' in locals() and referrer:
+                    sync_to_firebase(f"users/{referrer.get('id')}", {
+                        'referralPoints': referrer.get('referralPoints', 0),
+                        'referralCount': referrer.get('referralCount', 0)
+                    }, method='PATCH')
+                    if 'ref_record' in locals() and ref_record:
+                        sync_to_firebase(f"referrals/{ref_record['id']}", ref_record, method='PUT')
+
                 self.send_json(200, {
                     'success': True,
                     'message': 'Student registered successfully.',
@@ -1630,14 +1702,23 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 # Record authoritative audit transaction in xp_transactions
                 tx_id = f"tx-admin-{int(datetime.now().timestamp() * 1000)}-{uuid.uuid4().hex[:6]}"
                 act_str = action == 'set' and f"Set to {new_xp} XP" or f"{diff >= 0 and '+' or ''}{diff} XP"
+                admin_display = user.get('name') or user.get('username') or 'admin'
                 tx = {
                     'id': tx_id,
                     'idempotencyKey': f"admin_adj_{target_student.get('id')}_{int(datetime.now().timestamp() * 1000)}",
                     'userId': target_student.get('id'),
+                    'studentName': target_student.get('name') or 'Student',
+                    'studentUsername': target_student.get('username') or 'Not set',
                     'sourceType': 'admin_adjustment',
+                    'source': f'admin_{action}',
                     'sourceId': user.get('id'),
+                    'action': action,
                     'activityName': f"Admin XP {action.capitalize()}: {act_str}",
+                    'description': reason or f"Admin {action} XP",
                     'points': diff,
+                    'previousXp': old_xp,
+                    'newXp': new_xp,
+                    'adminUser': admin_display,
                     'resultStatus': f"Previous: {old_xp} XP → New: {new_xp} XP",
                     'metadata': {
                         'action': action,
@@ -1670,6 +1751,10 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 data['notifications'] = notifs
 
                 save_backend_data(data)
+
+                # Real-time synchronization to Firebase Realtime Database
+                sync_to_firebase(f"users/{target_student.get('id')}", {'totalXp': new_xp, 'baseXp': target_student.get('baseXp', 0)}, method='PATCH')
+                sync_to_firebase(f"xp_transactions/{tx_id}", tx, method='PUT')
 
                 sanitized_student = dict(target_student)
                 sanitized_student.pop('password', None)
@@ -1705,6 +1790,10 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 if 'enabled' in req_data:
                     current_settings['enabled'] = bool(req_data['enabled'])
+                if 'interval' in req_data:
+                    current_settings['interval'] = str(req_data['interval'])
+                if 'scheduledTime' in req_data:
+                    current_settings['scheduledTime'] = str(req_data['scheduledTime'])
                 if 'intervalDays' in req_data:
                     current_settings['intervalDays'] = max(1, int(req_data['intervalDays']))
                 if 'customSeconds' in req_data:
@@ -1719,6 +1808,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 current_settings['updatedBy'] = user.get('name')
                 data['xp_reset_settings'] = current_settings
                 save_backend_data(data)
+
+                # Sync to Firebase Realtime Database
+                sync_to_firebase("xp_reset_settings", current_settings, method='PUT')
 
                 self.send_json(200, {'success': True, 'settings': current_settings})
                 return

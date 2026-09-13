@@ -20,7 +20,9 @@
       "isActive": true,
       "password": "sha256:rohan_salt_2026:4bc09285fc316fdb16fabcc092c15d15b9b9fbb7a19e926d55796dd509278baa",
       "username": "rohan_sharma",
-      "totalXp": 4200
+      "totalXp": 3200,
+      "referralPoints": 100,
+      "referralCount": 1
     },
     "priya.patel@castudent.in": {
       "id": "usr-student-2",
@@ -31,7 +33,9 @@
       "isActive": true,
       "password": "sha256:priya_salt_2026:d9d13c19c3b68e0af57d22a854944d6e0c3e42466e53cbae186bff1d054c43ce",
       "username": "priya_patel",
-      "totalXp": 0
+      "totalXp": 0,
+      "referralPoints": 0,
+      "referralCount": 0
     },
     "prof.sharma@excellenceca.com": {
       "id": "usr-teacher-1",
@@ -3502,6 +3506,244 @@
   ],
   "notifications": [
     {
+      "id": "notif-1789292717268",
+      "userId": "usr-student-1",
+      "type": "points_received",
+      "title": "Academic XP Adjusted \u2696\ufe0f",
+      "message": "Your XP was adjusted by Administrator: +2500 XP (New Total: 2500 XP). Reason: Post-test baseline restoration",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "previousXp": 0,
+        "newXp": 2500,
+        "diff": 2500
+      },
+      "createdAt": "2026-09-13T09:45:17.268692+00:00"
+    },
+    {
+      "id": "notif-1789292716552",
+      "userId": "usr-student-1",
+      "type": "points_received",
+      "title": "Academic XP Adjusted \u2696\ufe0f",
+      "message": "Your XP was adjusted by Administrator: +2000 XP (New Total: 2000 XP). Reason: Restore reasonable XP balance",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "previousXp": 0,
+        "newXp": 2000,
+        "diff": 2000
+      },
+      "createdAt": "2026-09-13T09:45:16.552450+00:00"
+    },
+    {
+      "id": "notif-1789292716401",
+      "userId": "usr-student-1",
+      "type": "points_received",
+      "title": "Academic XP Adjusted \u2696\ufe0f",
+      "message": "Your XP was adjusted by Administrator: -5500 XP (New Total: 0 XP). Reason: Test XP Clamp at 0",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "previousXp": 5500,
+        "newXp": 0,
+        "diff": -5500
+      },
+      "createdAt": "2026-09-13T09:45:16.401402+00:00"
+    },
+    {
+      "id": "notif-1789292716244",
+      "userId": "usr-student-1",
+      "type": "points_received",
+      "title": "Academic XP Adjusted \u2696\ufe0f",
+      "message": "Your XP was adjusted by Administrator: -250 XP (New Total: 5500 XP). Reason: Test XP Remove 250",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "previousXp": 5750,
+        "newXp": 5500,
+        "diff": -250
+      },
+      "createdAt": "2026-09-13T09:45:16.244905+00:00"
+    },
+    {
+      "id": "notif-1789292716092",
+      "userId": "usr-student-1",
+      "type": "points_received",
+      "title": "Academic XP Adjusted \u2696\ufe0f",
+      "message": "Your XP was adjusted by Administrator: +750 XP (New Total: 5750 XP). Reason: Test XP Add 750",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "previousXp": 5000,
+        "newXp": 5750,
+        "diff": 750
+      },
+      "createdAt": "2026-09-13T09:45:16.092231+00:00"
+    },
+    {
+      "id": "notif-1789292715938",
+      "userId": "usr-student-1",
+      "type": "points_received",
+      "title": "Academic XP Adjusted \u2696\ufe0f",
+      "message": "Your XP was adjusted by Administrator: +2500 XP (New Total: 5000 XP). Reason: Test XP Set 5000",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "previousXp": 2500,
+        "newXp": 5000,
+        "diff": 2500
+      },
+      "createdAt": "2026-09-13T09:45:15.938518+00:00"
+    },
+    {
+      "id": "notif-1789292715702",
+      "userId": "usr-student-1789292715701",
+      "type": "referral",
+      "title": "Welcome Referral Bonus! \ud83c\udf81",
+      "message": "You joined with referral code @rohan_sharma! +100 Referral Points credited to your account.",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "points": 100,
+        "referrerId": "usr-student-1"
+      },
+      "createdAt": "2026-09-13T09:45:15.701498+00:00"
+    },
+    {
+      "id": "notif-1789292715701",
+      "userId": "usr-student-1",
+      "type": "referral",
+      "title": "Referral Bonus Credited! \ud83c\udf89",
+      "message": "Student B Referral Test (@student_b_cea581) registered using your code! +100 Referral Points credited.",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "points": 100,
+        "referredId": "usr-student-1789292715701",
+        "referredUsername": "student_b_cea581"
+      },
+      "createdAt": "2026-09-13T09:45:15.701498+00:00"
+    },
+    {
+      "id": "notif-1789292613456",
+      "userId": "usr-student-1",
+      "type": "points_received",
+      "title": "Academic XP Adjusted \u2696\ufe0f",
+      "message": "Your XP was adjusted by Administrator: +2500 XP (New Total: 2500 XP). Reason: Post-test baseline restoration",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "previousXp": 0,
+        "newXp": 2500,
+        "diff": 2500
+      },
+      "createdAt": "2026-09-13T09:43:33.456504+00:00"
+    },
+    {
+      "id": "notif-1789292612802",
+      "userId": "usr-student-1",
+      "type": "points_received",
+      "title": "Academic XP Adjusted \u2696\ufe0f",
+      "message": "Your XP was adjusted by Administrator: +2000 XP (New Total: 2000 XP). Reason: Restore reasonable XP balance",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "previousXp": 0,
+        "newXp": 2000,
+        "diff": 2000
+      },
+      "createdAt": "2026-09-13T09:43:32.802357+00:00"
+    },
+    {
+      "id": "notif-1789292612651",
+      "userId": "usr-student-1",
+      "type": "points_received",
+      "title": "Academic XP Adjusted \u2696\ufe0f",
+      "message": "Your XP was adjusted by Administrator: -5500 XP (New Total: 0 XP). Reason: Test XP Clamp at 0",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "previousXp": 5500,
+        "newXp": 0,
+        "diff": -5500
+      },
+      "createdAt": "2026-09-13T09:43:32.651263+00:00"
+    },
+    {
+      "id": "notif-1789292612499",
+      "userId": "usr-student-1",
+      "type": "points_received",
+      "title": "Academic XP Adjusted \u2696\ufe0f",
+      "message": "Your XP was adjusted by Administrator: -250 XP (New Total: 5500 XP). Reason: Test XP Remove 250",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "previousXp": 5750,
+        "newXp": 5500,
+        "diff": -250
+      },
+      "createdAt": "2026-09-13T09:43:32.499143+00:00"
+    },
+    {
+      "id": "notif-1789292612343",
+      "userId": "usr-student-1",
+      "type": "points_received",
+      "title": "Academic XP Adjusted \u2696\ufe0f",
+      "message": "Your XP was adjusted by Administrator: +750 XP (New Total: 5750 XP). Reason: Test XP Add 750",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "previousXp": 5000,
+        "newXp": 5750,
+        "diff": 750
+      },
+      "createdAt": "2026-09-13T09:43:32.343435+00:00"
+    },
+    {
+      "id": "notif-1789292612188",
+      "userId": "usr-student-1",
+      "type": "points_received",
+      "title": "Academic XP Adjusted \u2696\ufe0f",
+      "message": "Your XP was adjusted by Administrator: +5000 XP (New Total: 5000 XP). Reason: Test XP Set 5000",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "previousXp": 0,
+        "newXp": 5000,
+        "diff": 5000
+      },
+      "createdAt": "2026-09-13T09:43:32.188379+00:00"
+    },
+    {
+      "id": "notif-1789292611948",
+      "userId": "usr-student-1789292611947",
+      "type": "referral",
+      "title": "Welcome Referral Bonus! \ud83c\udf81",
+      "message": "You joined with referral code @rohan_sharma! +100 Referral Points credited to your account.",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "points": 100,
+        "referrerId": "usr-student-1"
+      },
+      "createdAt": "2026-09-13T09:43:31.947759+00:00"
+    },
+    {
+      "id": "notif-1789292611947",
+      "userId": "usr-student-1",
+      "type": "referral",
+      "title": "Referral Bonus Credited! \ud83c\udf89",
+      "message": "Student B Referral Test (@student_b_cae07b) registered using your code! +100 Referral Points credited.",
+      "link": "profile",
+      "read": false,
+      "metadata": {
+        "points": 100,
+        "referredId": "usr-student-1789292611947",
+        "referredUsername": "student_b_cae07b"
+      },
+      "createdAt": "2026-09-13T09:43:31.947759+00:00"
+    },
+    {
       "id": "notif-1789289134527",
       "userId": "usr-student-1",
       "type": "points_received",
@@ -3748,6 +3990,342 @@
   ],
   "bookmarks": [],
   "xp_transactions": [
+    {
+      "id": "tx-admin-1789292717268-59d52b",
+      "idempotencyKey": "admin_adj_usr-student-1_1789292717268",
+      "userId": "usr-student-1",
+      "studentName": "Rohan Sharma",
+      "studentUsername": "rohan_sharma",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin XP Set: Set to 2500 XP",
+      "description": "Post-test baseline restoration",
+      "points": 2500,
+      "previousXp": 0,
+      "newXp": 2500,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 0 XP \u2192 New: 2500 XP",
+      "metadata": {
+        "action": "set",
+        "amount": 2500,
+        "previousXp": 0,
+        "newXp": 2500,
+        "adminName": "Administrator",
+        "adminUsername": "adminrulebreker@rulebrekerdothunter.com",
+        "reason": "Post-test baseline restoration"
+      },
+      "createdAt": "2026-09-13T09:45:17.268692+00:00"
+    },
+    {
+      "id": "tx-admin-1789292716552-a39930",
+      "idempotencyKey": "admin_adj_usr-student-1_1789292716552",
+      "userId": "usr-student-1",
+      "studentName": "Rohan Sharma",
+      "studentUsername": "rohan_sharma",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin XP Set: Set to 2000 XP",
+      "description": "Restore reasonable XP balance",
+      "points": 2000,
+      "previousXp": 0,
+      "newXp": 2000,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 0 XP \u2192 New: 2000 XP",
+      "metadata": {
+        "action": "set",
+        "amount": 2000,
+        "previousXp": 0,
+        "newXp": 2000,
+        "adminName": "Administrator",
+        "adminUsername": "adminrulebreker@rulebrekerdothunter.com",
+        "reason": "Restore reasonable XP balance"
+      },
+      "createdAt": "2026-09-13T09:45:16.552450+00:00"
+    },
+    {
+      "id": "tx-admin-1789292716401-793d6b",
+      "idempotencyKey": "admin_adj_usr-student-1_1789292716401",
+      "userId": "usr-student-1",
+      "studentName": "Rohan Sharma",
+      "studentUsername": "rohan_sharma",
+      "sourceType": "admin_adjustment",
+      "source": "admin_remove",
+      "sourceId": "usr-admin-1",
+      "action": "remove",
+      "activityName": "Admin XP Remove: -5500 XP",
+      "description": "Test XP Clamp at 0",
+      "points": -5500,
+      "previousXp": 5500,
+      "newXp": 0,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 5500 XP \u2192 New: 0 XP",
+      "metadata": {
+        "action": "remove",
+        "amount": 9999999,
+        "previousXp": 5500,
+        "newXp": 0,
+        "adminName": "Administrator",
+        "adminUsername": "adminrulebreker@rulebrekerdothunter.com",
+        "reason": "Test XP Clamp at 0"
+      },
+      "createdAt": "2026-09-13T09:45:16.401402+00:00"
+    },
+    {
+      "id": "tx-admin-1789292716244-88c10a",
+      "idempotencyKey": "admin_adj_usr-student-1_1789292716244",
+      "userId": "usr-student-1",
+      "studentName": "Rohan Sharma",
+      "studentUsername": "rohan_sharma",
+      "sourceType": "admin_adjustment",
+      "source": "admin_remove",
+      "sourceId": "usr-admin-1",
+      "action": "remove",
+      "activityName": "Admin XP Remove: -250 XP",
+      "description": "Test XP Remove 250",
+      "points": -250,
+      "previousXp": 5750,
+      "newXp": 5500,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 5750 XP \u2192 New: 5500 XP",
+      "metadata": {
+        "action": "remove",
+        "amount": 250,
+        "previousXp": 5750,
+        "newXp": 5500,
+        "adminName": "Administrator",
+        "adminUsername": "adminrulebreker@rulebrekerdothunter.com",
+        "reason": "Test XP Remove 250"
+      },
+      "createdAt": "2026-09-13T09:45:16.244905+00:00"
+    },
+    {
+      "id": "tx-admin-1789292716092-b53a49",
+      "idempotencyKey": "admin_adj_usr-student-1_1789292716092",
+      "userId": "usr-student-1",
+      "studentName": "Rohan Sharma",
+      "studentUsername": "rohan_sharma",
+      "sourceType": "admin_adjustment",
+      "source": "admin_add",
+      "sourceId": "usr-admin-1",
+      "action": "add",
+      "activityName": "Admin XP Add: +750 XP",
+      "description": "Test XP Add 750",
+      "points": 750,
+      "previousXp": 5000,
+      "newXp": 5750,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 5000 XP \u2192 New: 5750 XP",
+      "metadata": {
+        "action": "add",
+        "amount": 750,
+        "previousXp": 5000,
+        "newXp": 5750,
+        "adminName": "Administrator",
+        "adminUsername": "adminrulebreker@rulebrekerdothunter.com",
+        "reason": "Test XP Add 750"
+      },
+      "createdAt": "2026-09-13T09:45:16.092231+00:00"
+    },
+    {
+      "id": "tx-admin-1789292715938-22ce54",
+      "idempotencyKey": "admin_adj_usr-student-1_1789292715938",
+      "userId": "usr-student-1",
+      "studentName": "Rohan Sharma",
+      "studentUsername": "rohan_sharma",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin XP Set: Set to 5000 XP",
+      "description": "Test XP Set 5000",
+      "points": 2500,
+      "previousXp": 2500,
+      "newXp": 5000,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 2500 XP \u2192 New: 5000 XP",
+      "metadata": {
+        "action": "set",
+        "amount": 5000,
+        "previousXp": 2500,
+        "newXp": 5000,
+        "adminName": "Administrator",
+        "adminUsername": "adminrulebreker@rulebrekerdothunter.com",
+        "reason": "Test XP Set 5000"
+      },
+      "createdAt": "2026-09-13T09:45:15.938518+00:00"
+    },
+    {
+      "id": "tx-admin-1789292613456-0764dd",
+      "idempotencyKey": "admin_adj_usr-student-1_1789292613456",
+      "userId": "usr-student-1",
+      "studentName": "Rohan Sharma",
+      "studentUsername": "rohan_sharma",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin XP Set: Set to 2500 XP",
+      "description": "Post-test baseline restoration",
+      "points": 2500,
+      "previousXp": 0,
+      "newXp": 2500,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 0 XP \u2192 New: 2500 XP",
+      "metadata": {
+        "action": "set",
+        "amount": 2500,
+        "previousXp": 0,
+        "newXp": 2500,
+        "adminName": "Administrator",
+        "adminUsername": "adminrulebreker@rulebrekerdothunter.com",
+        "reason": "Post-test baseline restoration"
+      },
+      "createdAt": "2026-09-13T09:43:33.456504+00:00"
+    },
+    {
+      "id": "tx-admin-1789292612802-1c1db6",
+      "idempotencyKey": "admin_adj_usr-student-1_1789292612802",
+      "userId": "usr-student-1",
+      "studentName": "Rohan Sharma",
+      "studentUsername": "rohan_sharma",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin XP Set: Set to 2000 XP",
+      "description": "Restore reasonable XP balance",
+      "points": 2000,
+      "previousXp": 0,
+      "newXp": 2000,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 0 XP \u2192 New: 2000 XP",
+      "metadata": {
+        "action": "set",
+        "amount": 2000,
+        "previousXp": 0,
+        "newXp": 2000,
+        "adminName": "Administrator",
+        "adminUsername": "adminrulebreker@rulebrekerdothunter.com",
+        "reason": "Restore reasonable XP balance"
+      },
+      "createdAt": "2026-09-13T09:43:32.802357+00:00"
+    },
+    {
+      "id": "tx-admin-1789292612651-3534b3",
+      "idempotencyKey": "admin_adj_usr-student-1_1789292612651",
+      "userId": "usr-student-1",
+      "studentName": "Rohan Sharma",
+      "studentUsername": "rohan_sharma",
+      "sourceType": "admin_adjustment",
+      "source": "admin_remove",
+      "sourceId": "usr-admin-1",
+      "action": "remove",
+      "activityName": "Admin XP Remove: -5500 XP",
+      "description": "Test XP Clamp at 0",
+      "points": -5500,
+      "previousXp": 5500,
+      "newXp": 0,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 5500 XP \u2192 New: 0 XP",
+      "metadata": {
+        "action": "remove",
+        "amount": 9999999,
+        "previousXp": 5500,
+        "newXp": 0,
+        "adminName": "Administrator",
+        "adminUsername": "adminrulebreker@rulebrekerdothunter.com",
+        "reason": "Test XP Clamp at 0"
+      },
+      "createdAt": "2026-09-13T09:43:32.651263+00:00"
+    },
+    {
+      "id": "tx-admin-1789292612499-49c1b4",
+      "idempotencyKey": "admin_adj_usr-student-1_1789292612499",
+      "userId": "usr-student-1",
+      "studentName": "Rohan Sharma",
+      "studentUsername": "rohan_sharma",
+      "sourceType": "admin_adjustment",
+      "source": "admin_remove",
+      "sourceId": "usr-admin-1",
+      "action": "remove",
+      "activityName": "Admin XP Remove: -250 XP",
+      "description": "Test XP Remove 250",
+      "points": -250,
+      "previousXp": 5750,
+      "newXp": 5500,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 5750 XP \u2192 New: 5500 XP",
+      "metadata": {
+        "action": "remove",
+        "amount": 250,
+        "previousXp": 5750,
+        "newXp": 5500,
+        "adminName": "Administrator",
+        "adminUsername": "adminrulebreker@rulebrekerdothunter.com",
+        "reason": "Test XP Remove 250"
+      },
+      "createdAt": "2026-09-13T09:43:32.499143+00:00"
+    },
+    {
+      "id": "tx-admin-1789292612343-20c007",
+      "idempotencyKey": "admin_adj_usr-student-1_1789292612343",
+      "userId": "usr-student-1",
+      "studentName": "Rohan Sharma",
+      "studentUsername": "rohan_sharma",
+      "sourceType": "admin_adjustment",
+      "source": "admin_add",
+      "sourceId": "usr-admin-1",
+      "action": "add",
+      "activityName": "Admin XP Add: +750 XP",
+      "description": "Test XP Add 750",
+      "points": 750,
+      "previousXp": 5000,
+      "newXp": 5750,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 5000 XP \u2192 New: 5750 XP",
+      "metadata": {
+        "action": "add",
+        "amount": 750,
+        "previousXp": 5000,
+        "newXp": 5750,
+        "adminName": "Administrator",
+        "adminUsername": "adminrulebreker@rulebrekerdothunter.com",
+        "reason": "Test XP Add 750"
+      },
+      "createdAt": "2026-09-13T09:43:32.343435+00:00"
+    },
+    {
+      "id": "tx-admin-1789292612188-fd1ce5",
+      "idempotencyKey": "admin_adj_usr-student-1_1789292612188",
+      "userId": "usr-student-1",
+      "studentName": "Rohan Sharma",
+      "studentUsername": "rohan_sharma",
+      "sourceType": "admin_adjustment",
+      "source": "admin_set",
+      "sourceId": "usr-admin-1",
+      "action": "set",
+      "activityName": "Admin XP Set: Set to 5000 XP",
+      "description": "Test XP Set 5000",
+      "points": 5000,
+      "previousXp": 0,
+      "newXp": 5000,
+      "adminUser": "Administrator",
+      "resultStatus": "Previous: 0 XP \u2192 New: 5000 XP",
+      "metadata": {
+        "action": "set",
+        "amount": 5000,
+        "previousXp": 0,
+        "newXp": 5000,
+        "adminName": "Administrator",
+        "adminUsername": "adminrulebreker@rulebrekerdothunter.com",
+        "reason": "Test XP Set 5000"
+      },
+      "createdAt": "2026-09-13T09:43:32.188379+00:00"
+    },
     {
       "id": "tx-admin-1789289134527-907c97",
       "idempotencyKey": "admin_adj_usr-student-1_1789289134527",
@@ -4300,15 +4878,51 @@
   },
   "xp_reset_settings": {
     "enabled": true,
-    "nextReset": "2026-12-12T08:45:34.392302+00:00",
+    "nextReset": "2026-10-13T09:45:16.963262+00:00",
     "intervalDays": 90,
     "customSeconds": null,
-    "lastReset": "2026-09-13T08:45:34.392302+00:00",
-    "updatedAt": "2026-09-13T08:45:34.376214+00:00",
+    "lastReset": "2026-09-13T09:45:16.798183+00:00",
+    "updatedAt": "2026-09-13T09:45:16.703499+00:00",
     "updatedBy": "Administrator",
-    "lastResetStudentsCount": 0
+    "lastResetStudentsCount": 1,
+    "interval": "monthly",
+    "scheduledTime": "2026-12-31T23:59"
   },
   "xp_reset_history": [
+    {
+      "id": "reset-1789292716798-1570dc",
+      "timestamp": "2026-09-13T09:45:16.798183+00:00",
+      "resetAt": "2026-09-13T09:45:16.798183+00:00",
+      "type": "manual",
+      "triggeredBy": "manual",
+      "studentsAffected": 1,
+      "studentsReset": 1,
+      "admin": "Administrator",
+      "adminUser": "Administrator",
+      "nextScheduledReset": "2026-10-13T09:45:16.963262+00:00",
+      "notes": "Manual XP reset executed for 1 students"
+    },
+    {
+      "id": "reset-1789292613047-1f3abe",
+      "timestamp": "2026-09-13T09:43:33.047269+00:00",
+      "resetAt": "2026-09-13T09:43:33.047269+00:00",
+      "type": "manual",
+      "triggeredBy": "manual",
+      "studentsAffected": 1,
+      "studentsReset": 1,
+      "admin": "Administrator",
+      "adminUser": "Administrator",
+      "nextScheduledReset": "2026-10-13T09:43:33.078237+00:00",
+      "notes": "Manual XP reset executed for 1 students"
+    },
+    {
+      "id": "reset-1789290435762-73b7ca",
+      "timestamp": "2026-09-13T09:07:15.762976+00:00",
+      "type": "manual",
+      "studentsAffected": 1,
+      "admin": "Administrator",
+      "nextScheduledReset": "2026-12-12T09:07:15.762976+00:00"
+    },
     {
       "id": "reset-1789289134392-07a456",
       "timestamp": "2026-09-13T08:45:34.392302+00:00",

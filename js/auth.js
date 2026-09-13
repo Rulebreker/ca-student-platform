@@ -390,28 +390,33 @@ class AuthManager {
         referrer.referralPoints = (referrer.referralPoints || 0) + referrerReward;
         referrer.referralCount = (referrer.referralCount || 0) + 1;
         // IMPORTANT: DO NOT add to referrer.totalXp — referralPoints are separate
+        window.store.updateUser(referrer);
+        if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
+          window.firebaseSync.saveUser(referrer);
+        }
 
         // 2. Credit New Student Referral Reward
         newUser.referralPoints = newStudentReward;
         // IMPORTANT: DO NOT add to newUser.totalXp
 
         // 3. Log referral record
+        const refRecord = {
+          id: 'ref-' + Date.now(),
+          referrerId: referrer.id,
+          referrerName: referrer.name,
+          referrerUsername: referrer.username.replace(/^@+/, ''),
+          referredId: newUser.id,
+          referredName: newUser.name,
+          referredUsername: newUser.username.replace(/^@+/, ''),
+          examLevel: newUser.caLevel,
+          referrerReward: referrerReward,
+          referredReward: newStudentReward,
+          pointsAwarded: referrerReward,
+          status: 'completed',
+          createdAt: new Date().toISOString()
+        };
         if (window.store.addReferral) {
-          window.store.addReferral({
-            id: 'ref-' + Date.now(),
-            referrerId: referrer.id,
-            referrerName: referrer.name,
-            referrerUsername: referrer.username.replace(/^@+/, ''),
-            referredId: newUser.id,
-            referredName: newUser.name,
-            referredUsername: newUser.username.replace(/^@+/, ''),
-            examLevel: newUser.caLevel,
-            referrerReward: referrerReward,
-            referredReward: newStudentReward,
-            pointsAwarded: referrerReward,
-            status: 'completed',
-            createdAt: new Date().toISOString()
-          });
+          window.store.addReferral(refRecord);
         }
 
         // 4. Real-time notification to referrer
@@ -470,7 +475,8 @@ class AuthManager {
           phone: cleanPhone,
           caLevel: newUser.caLevel,
           password: password,
-          role: 'student'
+          role: 'student',
+          referralCode: cleanReferredBy || ''
         })
       }).then(r => r.ok ? r.json() : null)
         .then(data => {

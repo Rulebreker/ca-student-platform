@@ -23,6 +23,7 @@ class FirebaseSyncManager {
     this._isMergingNotifications = false;
     this._isMergingBookmarks = false;
     this._isMergingXpTransactions = false;
+    this._isMergingReferrals = false;
     this._knownUserIds = new Set();
   }
 
@@ -263,6 +264,40 @@ class FirebaseSyncManager {
     }, err => {
       console.warn('[FirebaseSync] XP transactions listener error:', err);
     });
+
+    // --- REFERRALS REALTIME LISTENER ---
+    this.db.ref('referrals').on('value', snap => {
+      if (this._isMergingReferrals) return;
+      const val = snap.val();
+      const remoteRefs = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
+      this.mergeRemoteReferrals(remoteRefs);
+    }, err => {
+      console.warn('[FirebaseSync] Referrals listener error:', err);
+    });
+
+    // --- XP RESET SETTINGS REALTIME LISTENER ---
+    this.db.ref('xp_reset_settings').on('value', snap => {
+      const val = snap.val();
+      if (val && window.store && typeof window.store.saveXpResetSettings === 'function') {
+        window.store.saveXpResetSettings(val);
+        if (window.adminDashboard && window.adminDashboard.currentTab === 'xp-reset') {
+          window.adminDashboard.renderXpResetSettings();
+        }
+      }
+    });
+
+    // --- XP RESET HISTORY REALTIME LISTENER ---
+    this.db.ref('xp_reset_history').on('value', snap => {
+      const val = snap.val();
+      if (val && window.store) {
+        const list = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
+        list.sort((a, b) => new Date(b.resetAt || b.timestamp || 0) - new Date(a.resetAt || a.timestamp || 0));
+        localStorage.setItem('excellenceca_xp_reset_history', JSON.stringify(list.slice(0, 100)));
+        if (window.adminDashboard && window.adminDashboard.currentTab === 'xp-reset') {
+          window.adminDashboard.renderXpResetSettings();
+        }
+      }
+    });
   }
 
   mergeRemoteUsers(remoteUsers) {
@@ -324,12 +359,50 @@ class FirebaseSyncManager {
         localUsers.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
         window.store.saveUsers(localUsers);
 
-        // Notify Admin Dashboard if currently rendered
+        // Real-time synchronization of current active user session
+        const current = window.store ? window.store.getCurrentUser() : null;
+        if (current) {
+          const freshCurrent = localUsers.find(u => u.id === current.id);
+          if (freshCurrent) {
+            window.store.setCurrentUser(freshCurrent);
+            if (window.auth) window.auth.currentUser = freshCurrent;
+          }
+        }
+
+        // Real-time update for Student Dashboard & Profile
+        if (window.app) {
+          if (window.app.currentView === 'dashboard' && window.studentDashboard && typeof window.studentDashboard.render === 'function') {
+            window.studentDashboard.render();
+          }
+          if (window.app.currentView === 'profile' && typeof window.app.renderProfilePage === 'function') {
+            window.app.renderProfilePage();
+          }
+        }
+
+        // Real-time update for Leaderboard
+        if (window.leaderboardManager) {
+          if (typeof window.leaderboardManager.calculateAllStandings === 'function') {
+            window.leaderboardManager.calculateAllStandings();
+          }
+          if (window.app && window.app.currentView === 'leaderboard' && typeof window.leaderboardManager.render === 'function') {
+            window.leaderboardManager.render();
+          }
+        }
+
+        // Real-time update for Admin Dashboard
         if (window.adminDashboard && window.auth && window.auth.isAdmin()) {
           if (window.adminDashboard.currentTab === 'students') {
             window.adminDashboard.renderStudents();
           } else if (window.adminDashboard.currentTab === 'overview') {
             window.adminDashboard.renderOverview();
+          } else if (window.adminDashboard.currentTab === 'xp-management') {
+            if (window.adminDashboard._currentXpStudent) {
+              window.adminDashboard._xpSearchStudent(window.adminDashboard._currentXpStudent.username || window.adminDashboard._currentXpStudent.id);
+            }
+            const tbody = document.getElementById('admin-xp-history-tbody');
+            if (tbody && typeof window.adminDashboard._renderXpAuditRows === 'function') {
+              tbody.innerHTML = window.adminDashboard._renderXpAuditRows();
+            }
           }
           if (newStudentArrived && window.app && window.app.showToast) {
             window.app.showToast(`New Student Registered Live: ${newStudentArrived.name} (${newStudentArrived.caLevel || 'CA'})`, 'info');
@@ -747,7 +820,13 @@ class FirebaseSyncManager {
         window.store.saveXpTransactions(localTxs);
         if (window.app && typeof window.app.renderProfilePage === 'function') {
           const u = window.auth ? window.auth.getCurrentUser() : null;
-          if (u) window.app.renderProfilePage();
+          if (u && window.app.currentView === 'profile') window.app.renderProfilePage();
+        }
+        if (window.adminDashboard && window.auth && window.auth.isAdmin() && window.adminDashboard.currentTab === 'xp-management') {
+          const tbody = document.getElementById('admin-xp-history-tbody');
+          if (tbody && typeof window.adminDashboard._renderXpAuditRows === 'function') {
+            tbody.innerHTML = window.adminDashboard._renderXpAuditRows();
+          }
         }
       }
     } catch (e) {
@@ -757,12 +836,70 @@ class FirebaseSyncManager {
     }
   }
 
+  mergeRemoteReferrals(remoteRefs) {
+    if (!window.store) return;
+    this._isMergingReferrals = true;
+    try {
+      let localRefs = window.store.getReferrals();
+      let changed = false;
+      remoteRefs.forEach(rr => {
+        if (!rr || !rr.id) return;
+        const idx = localRefs.findIndex(lr => lr.id === rr.id);
+        if (idx === -1) {
+          localRefs.unshift(rr);
+          changed = true;
+        } else {
+          localRefs[idx] = { ...localRefs[idx], ...rr };
+          changed = true;
+        }
+      });
+      if (changed) {
+        localRefs.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+        window.store.saveReferrals(localRefs);
+
+        // Real-time update for student profile page (referral card & table)
+        if (window.app && window.app.currentView === 'profile' && typeof window.app.renderProfilePage === 'function') {
+          window.app.renderProfilePage();
+        }
+        // Real-time update for admin referral audit tab
+        if (window.adminDashboard && window.auth && window.auth.isAdmin() && window.adminDashboard.currentTab === 'referrals') {
+          window.adminDashboard.renderReferrals();
+        }
+      }
+    } catch (e) {
+      console.warn('[FirebaseSync] Error merging referrals:', e);
+    } finally {
+      this._isMergingReferrals = false;
+    }
+  }
+
   // --- WRITE OPERATIONS TO CLOUD ---
 
   saveUser(user) {
     if (!this.db || !user || !user.id) return Promise.resolve();
     return this.db.ref('users/' + user.id).set(user).catch(err => {
       console.warn('[FirebaseSync] saveUser error:', err);
+    });
+  }
+
+  saveReferral(refRecord) {
+    if (!this.db || !refRecord || !refRecord.id) return Promise.resolve();
+    return this.db.ref('referrals/' + refRecord.id).set(refRecord).catch(err => {
+      console.warn('[FirebaseSync] saveReferral error:', err);
+    });
+  }
+
+  saveXpResetSettings(settings) {
+    if (!this.db || !settings) return Promise.resolve();
+    return this.db.ref('xp_reset_settings').set(settings).catch(err => {
+      console.warn('[FirebaseSync] saveXpResetSettings error:', err);
+    });
+  }
+
+  saveXpResetEvent(event) {
+    if (!this.db || !event || !event.id) return Promise.resolve();
+    return this.db.ref('xp_reset_history/' + event.id).set(event).catch(err => {
+      console.warn('[FirebaseSync] saveXpResetEvent error:', err);
     });
   }
 

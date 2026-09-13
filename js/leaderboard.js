@@ -1726,7 +1726,7 @@ class LeaderboardManager {
     return `
       <div 
         id="leaderboard-sticky-position"
-        class="fixed bottom-3 sm:bottom-6 left-3 sm:left-auto right-3 sm:right-6 z-40 bg-slate-900/95 text-white border border-slate-700 shadow-2xl rounded-2xl p-3 sm:p-4 flex items-center justify-between sm:justify-start gap-2.5 sm:gap-4 transition-all hover:border-blue-500/80 backdrop-blur-md"
+        class="fixed bottom-3 sm:bottom-6 left-3 sm:left-auto right-3 sm:right-6 z-40 bg-slate-900/95 text-white border border-slate-700 shadow-2xl rounded-2xl p-3 sm:p-4 flex items-center gap-2.5 sm:gap-4 transition-all hover:border-blue-500/80 backdrop-blur-md"
       >
         <div class="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <div class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-xs font-mono flex-shrink-0">
@@ -1740,35 +1740,8 @@ class LeaderboardManager {
             </div>
           </div>
         </div>
-        <button 
-          onclick="window.leaderboardManager.scrollToSelf('${student.id}')"
-          class="px-2.5 sm:px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-[10px] sm:text-[11px] font-bold rounded-lg border border-white/15 transition-colors flex items-center gap-1 cursor-pointer flex-shrink-0"
-        >
-          <span class="hidden sm:inline">Jump to My Rank</span><span class="sm:hidden">Jump</span> <i data-lucide="arrow-down" class="w-3.5 h-3.5"></i>
-        </button>
       </div>
     `;
-  }
-
-  scrollToSelf(studentId) {
-    const row = document.getElementById(`student-row-${studentId}`) || document.getElementById(`student-card-${studentId}`);
-    if (row) {
-      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      row.classList.add('ring-4', 'ring-blue-500', 'bg-blue-100');
-      setTimeout(() => {
-        row.classList.remove('ring-4', 'ring-blue-500');
-      }, 2500);
-    } else {
-      this.resetFilters();
-      setTimeout(() => {
-        const target = document.getElementById(`student-row-${studentId}`) || document.getElementById(`student-card-${studentId}`);
-        if (target) {
-          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          target.classList.add('ring-4', 'ring-blue-500');
-          setTimeout(() => target.classList.remove('ring-4', 'ring-blue-500'), 2500);
-        }
-      }, 200);
-    }
   }
 
   // ==========================================

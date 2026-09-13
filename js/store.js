@@ -2049,16 +2049,28 @@ class AppStore {
     }
   }
   updateUser(user) {
-    const users = this.getUsers().map(u => u.id === user.id ? user : u);
+    if (!user || !user.id) return null;
+    const users = this.getUsers();
+    const index = users.findIndex(u => u.id === user.id);
+    let updated;
+    if (index !== -1) {
+      users[index] = { ...users[index], ...user };
+      updated = users[index];
+    } else {
+      users.unshift(user);
+      updated = user;
+    }
     this.saveUsers(users);
     if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
-      window.firebaseSync.saveUser(user);
+      window.firebaseSync.saveUser(updated);
     }
     // If current logged-in user was updated, refresh session
     const current = this.getCurrentUser();
-    if (current && current.id === user.id) {
-      this.setCurrentUser(user);
+    if (current && current.id === updated.id) {
+      this.setCurrentUser(updated);
+      if (window.auth) window.auth.currentUser = updated;
     }
+    return updated;
   }
   deleteUser(id) {
     const users = this.getUsers().filter(u => u.id !== id);
@@ -2356,7 +2368,7 @@ class AppStore {
     localStorage.setItem(STORAGE_KEYS.XP_TRANSACTIONS, JSON.stringify(transactions));
   }
   recordXpTransaction(tx) {
-    if (!tx || !tx.userId || !tx.points) return null;
+    if (!tx || !tx.userId || tx.points === undefined || tx.points === null) return null;
     const list = this.getXpTransactions();
     
     // Idempotency protection
@@ -2368,20 +2380,31 @@ class AppStore {
           existing.points = tx.points;
           existing.resultStatus = tx.resultStatus || existing.resultStatus;
           this.saveXpTransactions(list);
-          this.adjustUserTotalXp(tx.userId, diff);
+          if (!tx.skipUserAdjustment && tx.sourceType !== 'admin_adjustment') {
+            this.adjustUserTotalXp(tx.userId, diff);
+          }
         }
         return existing;
       }
     }
 
+    const targetUser = this.getUserById(tx.userId);
     const txObj = {
       id: tx.id || 'tx-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
       idempotencyKey: tx.idempotencyKey || null,
       userId: tx.userId,
-      sourceType: tx.sourceType || 'general',
+      studentName: tx.studentName || (targetUser ? targetUser.name : 'Student'),
+      studentUsername: tx.studentUsername || (targetUser ? (targetUser.username || 'Not set') : 'Not set'),
+      sourceType: tx.sourceType || tx.source || 'general',
+      source: tx.source || tx.sourceType || 'general',
       sourceId: tx.sourceId || '',
-      activityName: tx.activityName || 'Platform Activity',
-      points: Math.round(Number(tx.points)),
+      action: tx.action || (tx.source && tx.source.startsWith('admin_') ? tx.source.replace('admin_', '') : 'add'),
+      activityName: tx.activityName || tx.description || 'Platform Activity',
+      description: tx.description || tx.activityName || 'Platform Activity',
+      points: Math.round(Number(tx.points || 0)),
+      previousXp: tx.previousXp !== undefined ? Number(tx.previousXp) : (targetUser ? Number(targetUser.totalXp || 0) : 0),
+      newXp: tx.newXp !== undefined ? Number(tx.newXp) : (targetUser ? Number(targetUser.totalXp || 0) : 0),
+      adminUser: tx.adminUser || 'admin',
       resultStatus: tx.resultStatus || '',
       metadata: tx.metadata || {},
       createdAt: tx.createdAt || new Date().toISOString()
@@ -2389,7 +2412,10 @@ class AppStore {
 
     list.unshift(txObj);
     this.saveXpTransactions(list);
-    this.adjustUserTotalXp(tx.userId, txObj.points);
+
+    if (!tx.skipUserAdjustment && tx.sourceType !== 'admin_adjustment') {
+      this.adjustUserTotalXp(tx.userId, txObj.points);
+    }
 
     if (window.firebaseSync && typeof window.firebaseSync.saveXpTransaction === 'function') {
       window.firebaseSync.saveXpTransaction(txObj);
@@ -2834,24 +2860,16 @@ class AppStore {
 
   addReferral(record) {
     const referrals = this.getReferrals();
+    // Idempotency: avoid duplicate referral ID
+    if (record.id && referrals.some(r => r.id === record.id)) {
+      return record;
+    }
     referrals.unshift(record);
     this.saveReferrals(referrals);
-    return record;
-  }
-
-  updateUser(updatedUser) {
-    const users = this.getUsers();
-    const index = users.findIndex(u => u.id === updatedUser.id);
-    if (index !== -1) {
-      users[index] = { ...users[index], ...updatedUser };
-      this.saveUsers(users);
-      const currentUser = this.getCurrentUser();
-      if (currentUser && currentUser.id === updatedUser.id) {
-        this.setCurrentUser(users[index]);
-      }
-      return users[index];
+    if (window.firebaseSync && typeof window.firebaseSync.saveReferral === 'function') {
+      window.firebaseSync.saveReferral(record);
     }
-    return null;
+    return record;
   }
 
   // Dynamic Exam Levels Discovery
@@ -2904,6 +2922,9 @@ class AppStore {
   saveXpResetSettings(settings) {
     const merged = { ...DEFAULT_XP_RESET_SETTINGS, ...settings };
     localStorage.setItem(STORAGE_KEYS.XP_RESET_SETTINGS, JSON.stringify(merged));
+    if (window.firebaseSync && typeof window.firebaseSync.saveXpResetSettings === 'function') {
+      window.firebaseSync.saveXpResetSettings(merged);
+    }
     return merged;
   }
 
@@ -2919,16 +2940,21 @@ class AppStore {
 
   recordXpResetEvent(event) {
     const history = this.getXpResetHistory();
-    history.unshift({
-      id: `xpreset-${Date.now()}`,
+    const item = {
+      id: event.id || `xpreset-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       triggeredBy: event.triggeredBy || 'admin',
       adminUser: event.adminUser || '',
       studentsReset: event.studentsReset || 0,
       resetAt: event.resetAt || new Date().toISOString(),
       notes: event.notes || ''
-    });
+    };
+    history.unshift(item);
     // Keep last 100 events
     localStorage.setItem(STORAGE_KEYS.XP_RESET_HISTORY, JSON.stringify(history.slice(0, 100)));
+    if (window.firebaseSync && typeof window.firebaseSync.saveXpResetEvent === 'function') {
+      window.firebaseSync.saveXpResetEvent(item);
+    }
+    return item;
   }
 
   // ─── Admin XP Adjustment ──────────────────────────────────────────────────────
@@ -2957,12 +2983,19 @@ class AppStore {
     // Record audit transaction
     this.recordXpTransaction({
       userId: studentId,
+      studentName: user.name || 'Student',
+      studentUsername: user.username || 'Not set',
       points: newXp - prevXp,
+      sourceType: 'admin_adjustment',
       source: `admin_${action}`,
+      action: action,
+      activityName: `Admin XP ${action.toUpperCase()}: ${newXp - prevXp >= 0 ? '+' : ''}${newXp - prevXp} XP`,
       description: reason || `Admin ${action} XP`,
+      reason: reason || `Admin ${action} XP`,
       adminUser: adminUser || 'admin',
       previousXp: prevXp,
       newXp: newXp,
+      skipUserAdjustment: true,
       createdAt: new Date().toISOString()
     });
 

@@ -523,6 +523,7 @@ class AdminDashboard {
                       />
                       <div>
                         <span class="font-bold text-slate-900 text-xs block">${st.name}</span>
+                        <span class="text-[11px] text-blue-600 font-mono font-bold block">@${(st.username || '').replace(/^@+/, '') || 'Not set'}</span>
                         <span class="text-[11px] text-slate-500 block">${st.email}</span>
                         ${st.phone ? `<span class="text-[10px] text-slate-400 font-mono block">${st.phone}</span>` : ''}
                       </div>
@@ -588,9 +589,9 @@ class AdminDashboard {
                   <td class="py-3.5 px-4 text-right whitespace-nowrap">
                     <button 
                       onclick="window.adminDashboard.openEditStudentModal('${st.id}')"
-                      class="px-2.5 py-1 text-xs font-semibold text-slate-700 hover:text-blue-600 hover:bg-slate-100 rounded mr-1 cursor-pointer"
+                      class="px-2.5 py-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded mr-1 cursor-pointer"
                     >
-                      Edit
+                      Details & Edit
                     </button>
                     <button 
                       onclick="window.adminDashboard.confirmRemoveStudent('${st.id}')"
@@ -724,9 +725,15 @@ class AdminDashboard {
         </div>
 
         <form onsubmit="window.adminDashboard.saveNewStudent(event)" class="space-y-4 text-xs">
-          <div>
-            <label class="block font-bold text-slate-700 mb-1">Student Full Name *</label>
-            <input type="text" id="add-st-name" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="e.g. Rahul Gupta">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Student Full Name *</label>
+              <input type="text" id="add-st-name" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" placeholder="e.g. Rahul Gupta">
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Username *</label>
+              <input type="text" id="add-st-username" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold text-blue-700" placeholder="e.g. rahul_gupta">
+            </div>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -750,6 +757,7 @@ class AdminDashboard {
               <select id="add-st-level" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-800 bg-white">
                 <option value="CA FOUNDATION">CA FOUNDATION</option>
                 <option value="CA INTER" selected>CA INTER</option>
+                <option value="CA FINAL">CA FINAL</option>
               </select>
             </div>
           </div>
@@ -776,6 +784,7 @@ class AdminDashboard {
   saveNewStudent(e) {
     e.preventDefault();
     const name = document.getElementById('add-st-name').value.trim();
+    const rawUsername = document.getElementById('add-st-username').value.trim().toLowerCase().replace(/^@+/, '');
     const email = document.getElementById('add-st-email').value.trim();
     const phone = document.getElementById('add-st-phone').value.trim();
     const password = document.getElementById('add-st-pass').value.trim();
@@ -788,13 +797,19 @@ class AdminDashboard {
       return;
     }
 
+    const cleanUsername = rawUsername || email.split('@')[0];
+    if (users.some(u => u.username && u.username.toLowerCase() === cleanUsername.toLowerCase())) {
+      window.app.showToast(`Username "@${cleanUsername}" is already taken. Please pick another.`, 'error');
+      return;
+    }
+
     const hashedPassword = window.auth ? window.auth.hashPassword(password) : password;
     const userToken = `token_student_${Date.now()}`;
 
     const newStudent = {
       id: 'usr-' + Date.now(),
       name,
-      username: email.split('@')[0],
+      username: cleanUsername,
       email,
       phone,
       password: hashedPassword,
@@ -803,13 +818,20 @@ class AdminDashboard {
       caLevel,
       registrationNo,
       isActive: true,
+      totalXp: 0,
+      baseXp: 0,
+      referralCount: 0,
+      referralPoints: 0,
       avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
       createdAt: new Date().toISOString()
     };
 
     window.store.addUser(newStudent);
+    if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
+      window.firebaseSync.saveUser(newStudent);
+    }
     window.app.closeModal('admin-generic-modal');
-    window.app.showToast(`Student ${name} added successfully.`, 'success');
+    window.app.showToast(`Student ${name} (@${cleanUsername}) added successfully.`, 'success');
     this.renderStudents();
 
     // Sync with backend if server is online
@@ -829,6 +851,135 @@ class AdminDashboard {
         })
       }).catch(() => {});
     }
+  }
+
+  openEditStudentModal(studentId) {
+    const student = window.store.getUserById(studentId);
+    if (!student) return;
+
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    const usernameVal = (student.username || '').replace(/^@+/, '');
+
+    modalContent.innerHTML = `
+      <div class="p-6">
+        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
+          <div class="flex items-center gap-3">
+            <img src="${student.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}" class="w-10 h-10 rounded-full object-cover border border-slate-200">
+            <div>
+              <h3 class="text-base font-bold text-slate-900">Student Account Details</h3>
+              <span class="text-xs text-blue-600 font-mono font-semibold">@${usernameVal || 'Not set'}</span>
+            </div>
+          </div>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <form onsubmit="window.adminDashboard.saveEditStudent(event, '${student.id}')" class="space-y-4 text-xs">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Full Name *</label>
+              <input type="text" id="edit-st-name" required value="${student.name || ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold">
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Username *</label>
+              <input type="text" id="edit-st-username" value="${usernameVal}" placeholder="Not set" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold text-blue-700">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Email Address *</label>
+              <input type="email" id="edit-st-email" required value="${student.email || ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs">
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Mobile / Phone Number</label>
+              <input type="tel" id="edit-st-phone" value="${student.phone || ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">CA Curriculum Level</label>
+              <select id="edit-st-level" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-800 bg-white">
+                <option value="CA FOUNDATION" ${(student.caLevel || '').toUpperCase().includes('FOUNDATION') ? 'selected' : ''}>CA FOUNDATION</option>
+                <option value="CA INTER" ${(student.caLevel || '').toUpperCase().includes('INTER') ? 'selected' : ''}>CA INTER</option>
+                <option value="CA FINAL" ${(student.caLevel || '').toUpperCase().includes('FINAL') ? 'selected' : ''}>CA FINAL</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">ICAI Registration No</label>
+              <input type="text" id="edit-st-reg" value="${student.registrationNo || ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono">
+            </div>
+          </div>
+
+          <!-- Academic & Referral Performance Metrics -->
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5 grid grid-cols-3 gap-3 text-center">
+            <div>
+              <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Academic XP</span>
+              <span class="text-sm font-black text-indigo-700">${Number(student.totalXp !== undefined ? student.totalXp : (student.baseXp || 0)).toLocaleString()} XP</span>
+            </div>
+            <div>
+              <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Referral Points</span>
+              <span class="text-sm font-black text-emerald-700">${Number(student.referralPoints || 0).toLocaleString()} Pts</span>
+            </div>
+            <div>
+              <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Referrals Count</span>
+              <span class="text-sm font-black text-blue-700">${student.referralCount || 0} Students</span>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+            <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+            <button type="submit" class="px-6 py-2 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">Save Changes</button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    window.app.openModal('admin-generic-modal');
+  }
+
+  saveEditStudent(e, studentId) {
+    e.preventDefault();
+    const student = window.store.getUserById(studentId);
+    if (!student) return;
+
+    const name = document.getElementById('edit-st-name').value.trim();
+    const rawUsername = document.getElementById('edit-st-username').value.trim().replace(/^@+/, '');
+    const email = document.getElementById('edit-st-email').value.trim();
+    const phone = document.getElementById('edit-st-phone').value.trim();
+    const caLevel = document.getElementById('edit-st-level').value;
+    const registrationNo = document.getElementById('edit-st-reg').value.trim();
+
+    // Check for duplicate username across other users
+    if (rawUsername) {
+      const users = window.store.getUsers();
+      const duplicate = users.find(u => u.id !== studentId && u.username && u.username.toLowerCase() === rawUsername.toLowerCase());
+      if (duplicate) {
+        window.app.showToast(`Username "@${rawUsername}" is already taken by another student.`, 'error');
+        return;
+      }
+    }
+
+    student.name = name;
+    student.username = rawUsername || student.username || 'Not set';
+    student.email = email;
+    student.phone = phone;
+    student.caLevel = caLevel;
+    student.registrationNo = registrationNo;
+
+    window.store.updateUser(student);
+    if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
+      window.firebaseSync.saveUser(student);
+    }
+
+    window.app.closeModal('admin-generic-modal');
+    window.app.showToast(`Student details updated successfully for ${student.name}.`, 'success');
+    this.renderStudents();
   }
 
   openResetPasswordModal(studentId) {
@@ -4745,7 +4896,9 @@ This will remove the question paper, attached answer keys, and student submissio
                   <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Prev XP</th>
                   <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Change</th>
                   <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">New XP</th>
-                  <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Date</th>
+                  <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Admin</th>
+                  <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Reason</th>
+                  <th class="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Date & Time</th>
                 </tr>
               </thead>
               <tbody id="admin-xp-history-tbody">
@@ -4761,39 +4914,48 @@ This will remove the question paper, attached answer keys, and student submissio
   }
 
   _renderXpAuditRows() {
-    const allTx = [];
-    const users = window.store.getStudents ? window.store.getStudents() : [];
-    users.forEach(u => {
-      const txs = window.store.getXpTransactions ? window.store.getXpTransactions(u.id) : [];
-      txs.filter(t => t.source && t.source.startsWith('admin_')).forEach(t => {
-        allTx.push({ ...t, username: u.username || u.name, userId: u.id });
-      });
-    });
-    allTx.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-    const recent = allTx.slice(0, 30);
+    const txs = window.store && window.store.getXpTransactions ? window.store.getXpTransactions() : [];
+    const adminTxs = txs.filter(t => 
+      t.sourceType === 'admin_adjustment' || 
+      (t.source && t.source.startsWith('admin_'))
+    );
+    adminTxs.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    const recent = adminTxs.slice(0, 50);
     if (recent.length === 0) {
-      return `<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400 text-sm">No XP adjustments yet. Use the search above to modify a student's XP.</td></tr>`;
+      return `<tr><td colspan="8" class="px-4 py-8 text-center text-slate-400 text-sm">No XP adjustments recorded yet. Use the student search above to modify XP.</td></tr>`;
     }
     return recent.map(t => {
-      const action = (t.source || '').replace('admin_', '');
-      const change = Number(t.points || 0);
+      const action = (t.action || (t.source || '').replace('admin_', '') || (t.metadata && t.metadata.action) || 'add').toLowerCase();
+      const change = Number(t.points !== undefined ? t.points : (t.metadata ? (t.metadata.newXp - t.metadata.previousXp) : 0));
       const colorCls = change > 0 ? 'text-emerald-700' : (change < 0 ? 'text-rose-700' : 'text-slate-600');
       const prefix = change > 0 ? '+' : '';
+      const prevXp = Number(t.previousXp !== undefined ? t.previousXp : (t.metadata ? t.metadata.previousXp : 0));
+      const newXp = Number(t.newXp !== undefined ? t.newXp : (t.metadata ? t.metadata.newXp : prevXp + change));
       const dateStr = t.createdAt ? new Date(t.createdAt).toLocaleString('en-IN') : '—';
+      const studentName = t.studentName || t.name || 'Student';
+      const studentUname = (t.studentUsername || t.username || 'Not set').replace(/^@+/, '');
+      const adminName = t.adminUser || (t.metadata ? (t.metadata.adminName || t.metadata.adminUsername) : 'Administrator');
+      const reasonStr = t.reason || t.description || (t.metadata ? t.metadata.reason : '') || '—';
+
       return `
-        <tr class="border-b border-slate-50 hover:bg-slate-50">
-          <td class="px-4 py-2.5 font-mono text-xs text-blue-700">${t.username || t.userId || '—'}</td>
+        <tr class="border-b border-slate-50 hover:bg-slate-50 transition-colors">
           <td class="px-4 py-2.5">
-            <span class="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${
-              action === 'add' ? 'bg-emerald-100 text-emerald-700' :
-              action === 'remove' ? 'bg-rose-100 text-rose-700' :
-              'bg-blue-100 text-blue-700'
-            }">${action}</span>
+            <span class="font-bold text-slate-900 text-xs block">${studentName}</span>
+            <span class="font-mono text-[11px] text-blue-600 font-semibold block">@${studentUname}</span>
           </td>
-          <td class="px-4 py-2.5 text-xs text-slate-500">${Number(t.previousXp || 0).toLocaleString()}</td>
-          <td class="px-4 py-2.5 text-xs font-bold ${colorCls}">${prefix}${change.toLocaleString()}</td>
-          <td class="px-4 py-2.5 text-xs font-bold text-slate-900">${Number(t.newXp !== undefined ? t.newXp : (Number(t.previousXp || 0) + change)).toLocaleString()}</td>
-          <td class="px-4 py-2.5 text-[11px] text-slate-400">${dateStr}</td>
+          <td class="px-4 py-2.5">
+            <span class="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${
+              action === 'add' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
+              action === 'remove' ? 'bg-rose-100 text-rose-800 border border-rose-200' :
+              'bg-blue-100 text-blue-800 border border-blue-200'
+            }">${action === 'remove' ? 'DELETE' : action.toUpperCase()}</span>
+          </td>
+          <td class="px-4 py-2.5 text-xs text-slate-500 font-mono">${prevXp.toLocaleString()} XP</td>
+          <td class="px-4 py-2.5 text-xs font-bold font-mono ${colorCls}">${prefix}${change.toLocaleString()} XP</td>
+          <td class="px-4 py-2.5 text-xs font-black font-mono text-slate-900">${newXp.toLocaleString()} XP</td>
+          <td class="px-4 py-2.5 text-xs text-slate-600 font-medium">${adminName}</td>
+          <td class="px-4 py-2.5 text-xs text-slate-500 max-w-xs truncate" title="${reasonStr}">${reasonStr}</td>
+          <td class="px-4 py-2.5 text-[11px] text-slate-400 whitespace-nowrap">${dateStr}</td>
         </tr>
       `;
     }).join('');
@@ -4926,7 +5088,14 @@ This will remove the question paper, attached answer keys, and student submissio
     const settings = window.store.getXpResetSettings ? window.store.getXpResetSettings() : { enabled: false, scheduledTime: '', interval: 'once', nextReset: null, lastReset: null };
     const history = window.store.getXpResetHistory ? window.store.getXpResetHistory() : [];
 
-    const fmtDate = (iso) => iso ? new Date(iso).toLocaleString('en-IN') : '—';
+    const fmtDate = (iso) => {
+      if (!iso) return '—';
+      try {
+        return new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }) + ' IST';
+      } catch (e) {
+        return new Date(iso).toLocaleString('en-IN') + ' IST';
+      }
+    };
 
     container.innerHTML = `
       <div class="space-y-6">
@@ -5077,9 +5246,28 @@ This will remove the question paper, attached answer keys, and student submissio
     const interval = intervalEl ? intervalEl.value : 'once';
     const nextReset = (enabled && scheduledTime) ? new Date(scheduledTime).toISOString() : null;
 
-    const settings = window.store.saveXpResetSettings ? window.store.saveXpResetSettings({ enabled, scheduledTime, interval, nextReset, lastReset: (window.store.getXpResetSettings ? window.store.getXpResetSettings().lastReset : null) }) : null;
+    const existingSettings = window.store.getXpResetSettings ? window.store.getXpResetSettings() : {};
+    const updatedSettings = {
+      ...existingSettings,
+      enabled,
+      scheduledTime,
+      interval,
+      nextReset,
+      lastReset: existingSettings.lastReset || null
+    };
 
-    if (nextDisplayEl) nextDisplayEl.textContent = nextReset ? new Date(nextReset).toLocaleString('en-IN') : 'Not scheduled';
+    if (window.store.saveXpResetSettings) {
+      window.store.saveXpResetSettings(updatedSettings);
+    }
+    if (window.firebaseSync && typeof window.firebaseSync.saveXpResetSettings === 'function') {
+      window.firebaseSync.saveXpResetSettings(updatedSettings);
+    }
+
+    if (nextDisplayEl) {
+      nextDisplayEl.textContent = nextReset 
+        ? new Date(nextReset).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }) + ' IST'
+        : 'Not scheduled';
+    }
 
     // Also persist to backend
     const adminUser = window.auth ? window.auth.getCurrentUser() : null;
@@ -5092,7 +5280,12 @@ This will remove the question paper, attached answer keys, and student submissio
       }).catch(() => {});
     }
 
-    window.app.showToast(enabled ? `✅ XP Reset scheduled for ${new Date(scheduledTime).toLocaleString('en-IN')}` : '✅ Auto-reset disabled. Settings saved.', 'success');
+    const toastMsg = enabled
+      ? `✅ Auto XP Reset scheduled for ${new Date(scheduledTime).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST`
+      : '✅ Auto-reset disabled. Settings saved.';
+    if (window.app && typeof window.app.showToast === 'function') {
+      window.app.showToast(toastMsg, 'success');
+    }
   }
 
   _manualXpReset() {
@@ -5107,22 +5300,34 @@ This will remove the question paper, attached answer keys, and student submissio
       s.totalXp = 0;
       s.baseXp = 0;
       window.store.updateUser(s);
+      if (window.firebaseSync && window.firebaseSync.db) {
+        window.firebaseSync.db.ref('users/' + s.id).update({ totalXp: 0, baseXp: 0 }).catch(() => {});
+      }
       resetCount++;
     });
 
     const adminUser = window.auth ? window.auth.getCurrentUser() : null;
+    const nowIso = new Date().toISOString();
     const resetEvent = {
+      id: `xpreset-${Date.now()}`,
       triggeredBy: 'admin',
       adminUser: adminUser ? (adminUser.username || adminUser.name) : 'admin',
       studentsReset: resetCount,
-      resetAt: new Date().toISOString(),
+      resetAt: nowIso,
       notes: 'Manual reset triggered from Admin Panel'
     };
     if (window.store.recordXpResetEvent) window.store.recordXpResetEvent(resetEvent);
+    if (window.firebaseSync && typeof window.firebaseSync.saveXpResetEvent === 'function') {
+      window.firebaseSync.saveXpResetEvent(resetEvent);
+    }
 
     // Update lastReset in settings
     const currentSettings = window.store.getXpResetSettings ? window.store.getXpResetSettings() : {};
-    if (window.store.saveXpResetSettings) window.store.saveXpResetSettings({ ...currentSettings, lastReset: resetEvent.resetAt });
+    const updatedSettings = { ...currentSettings, lastReset: resetEvent.resetAt };
+    if (window.store.saveXpResetSettings) window.store.saveXpResetSettings(updatedSettings);
+    if (window.firebaseSync && typeof window.firebaseSync.saveXpResetSettings === 'function') {
+      window.firebaseSync.saveXpResetSettings(updatedSettings);
+    }
 
     // Call backend to reset server-side too
     const token = adminUser ? (adminUser.token || adminUser.email) : '';
@@ -5134,7 +5339,14 @@ This will remove the question paper, attached answer keys, and student submissio
       }).catch(() => {});
     }
 
-    window.app.showToast(`✅ XP Reset complete: ${resetCount} students' XP reset to 0`, 'success');
+    // Recalculate leaderboard rankings immediately
+    if (window.leaderboardManager && typeof window.leaderboardManager.calculateAllStandings === 'function') {
+      window.leaderboardManager.calculateAllStandings();
+    }
+
+    if (window.app && typeof window.app.showToast === 'function') {
+      window.app.showToast(`✅ XP Reset complete: ${resetCount} students' XP reset to 0`, 'success');
+    }
     this.renderXpResetSettings();
   }
 
