@@ -382,63 +382,64 @@ class AssignmentPortal {
   }
 
   renderSubjectFilters() {
-    const filterContainer = document.getElementById('assignment-subject-filters');
-    if (!filterContainer) return;
+    const levelContainer = document.getElementById('assignment-level-pills');
+    const subjectContainer = document.getElementById('assignment-subject-pills') || document.getElementById('assignment-subject-filters');
+    if (!subjectContainer && !levelContainer) return;
 
     const allAssignments = window.store.getAssignments();
     const subjects = window.store.getSubjects();
     const user = window.auth ? window.auth.getCurrentUser() : null;
     const bmCount = user && window.store && window.store.getBookmarks ? window.store.getBookmarks(user.id).filter(b => b.itemType === 'paper' || allAssignments.some(a => a.id === b.itemId)).length : 0;
-
     const examLevels = ['all', 'CA Foundation', 'CA Intermediate', 'CA Final'];
 
-    filterContainer.innerHTML = `
-      <!-- Exam Level Tabs -->
-      <div class="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl w-fit flex-wrap">
-        ${examLevels.map(lvl => {
-          const isActive = this.selectedLevel === lvl;
-          const label = lvl === 'all' ? 'All Levels' : lvl;
-          return `
-            <button 
-              type="button"
-              onclick="window.assignmentPortal.filterLevel('${lvl}')"
-              class="px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                isActive ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-              }"
-            >
-              ${label}
-            </button>
-          `;
-        }).join('')}
-      </div>
+    if (levelContainer) {
+      levelContainer.innerHTML = examLevels.map(lvl => {
+        const isActive = this.selectedLevel === lvl;
+        const label = lvl === 'all' ? 'All Levels' : lvl;
+        return `
+          <button 
+            type="button"
+            onclick="window.assignmentPortal.filterLevel('${lvl}')"
+            class="px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer ${
+              isActive ? 'bg-slate-900 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }"
+          >
+            ${label}
+          </button>
+        `;
+      }).join('');
+    }
 
-      <!-- Bookmarked Filter Button -->
-      <button 
-        type="button"
-        onclick="window.assignmentPortal.toggleBookmarkedFilter()"
-        class="px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
-          this.filterBookmarkedOnly 
-            ? 'bg-amber-500 text-white shadow-sm font-bold' 
-            : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
-        }"
-      >
-        <i data-lucide="bookmark" class="w-3.5 h-3.5 ${this.filterBookmarkedOnly ? 'fill-current' : ''}"></i>
-        Bookmarked (${bmCount})
-      </button>
-
-      <!-- Dynamic Subject Pills -->
-      <div class="flex items-center gap-2 flex-wrap">
+    if (subjectContainer) {
+      subjectContainer.innerHTML = `
         <button 
           type="button"
           onclick="window.assignmentPortal.filterSubject('all')"
-          class="px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+          class="px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 shrink-0 ${
             this.selectedSubject === 'all' && !this.filterBookmarkedOnly
-              ? 'bg-blue-600 text-white shadow-sm font-bold' 
+              ? 'bg-blue-600 text-white shadow-sm' 
               : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
           }"
         >
-          All Test Papers (${allAssignments.length})
+          <span>All Test Papers</span>
+          <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono ${this.selectedSubject === 'all' && !this.filterBookmarkedOnly ? 'bg-blue-700/90 text-white' : 'bg-slate-100 text-slate-600'}">${allAssignments.length}</span>
         </button>
+
+        <!-- Bookmarked Filter Button -->
+        <button 
+          type="button"
+          onclick="window.assignmentPortal.toggleBookmarkedFilter()"
+          class="px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 shrink-0 ${
+            this.filterBookmarkedOnly 
+              ? 'bg-amber-600 text-white shadow-sm' 
+              : 'bg-white text-amber-800 border border-amber-200 hover:bg-amber-50'
+          }"
+        >
+          <i data-lucide="bookmark" class="w-3.5 h-3.5 ${this.filterBookmarkedOnly ? 'fill-current' : ''}"></i>
+          <span>Bookmarked</span>
+          <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono ${this.filterBookmarkedOnly ? 'bg-amber-700 text-white' : 'bg-amber-100 text-amber-800'}">${bmCount}</span>
+        </button>
+
         ${subjects.map(s => {
           const count = allAssignments.filter(a => a.subjectId === s.id || a.subject === s.name).length;
           const isActive = this.selectedSubject === s.id && !this.filterBookmarkedOnly;
@@ -446,18 +447,19 @@ class AssignmentPortal {
             <button 
               type="button"
               onclick="window.assignmentPortal.filterSubject('${s.id}')"
-              class="px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+              class="px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 shrink-0 ${
                 isActive 
-                  ? 'bg-blue-600 text-white shadow-sm font-bold' 
+                  ? 'bg-blue-600 text-white shadow-sm' 
                   : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
               }"
             >
-              ${s.name} (${count})
+              <span>${s.name}</span>
+              <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono ${isActive ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-600'}">${count}</span>
             </button>
           `;
         }).join('')}
-      </div>
-    `;
+      `;
+    }
 
     if (window.lucide) window.lucide.createIcons();
   }

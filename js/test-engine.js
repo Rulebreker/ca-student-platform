@@ -54,8 +54,9 @@ class TestEngine {
   }
 
   renderSubjectFilters() {
-    const filterContainer = document.getElementById('test-subject-filters');
-    if (!filterContainer) return;
+    const levelContainer = document.getElementById('test-level-pills');
+    const subjectContainer = document.getElementById('test-subject-pills') || document.getElementById('test-subject-filters');
+    if (!subjectContainer && !levelContainer) return;
 
     const allPublishedTests = window.store.getTests().filter(t => t.isPublished || t.status === 'Published' || t.status === 'Live');
     const subjects = window.store.getSubjects ? window.store.getSubjects() : [];
@@ -63,55 +64,54 @@ class TestEngine {
     const bookmarkedCount = user && window.store ? window.store.getBookmarks(user.id).filter(b => b.itemType === 'test' || !b.itemType).length : 0;
     const levels = ['all', 'CA Foundation', 'CA Intermediate', 'CA Final'];
 
-    filterContainer.innerHTML = `
-      <!-- Exam Level Pills -->
-      <div class="flex items-center gap-1.5 overflow-x-auto pb-2 w-full border-b border-slate-200 mb-2">
-        <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0 mr-1">Level:</span>
-        ${levels.map(lvl => {
-          const isLvlActive = this.selectedLevel === lvl;
-          const label = lvl === 'all' ? 'All Levels' : lvl;
-          return `
-            <button 
-              type="button"
-              onclick="window.testEngine.filterLevel('${lvl}')"
-              class="px-3 py-1 text-xs font-bold rounded-full transition-all whitespace-nowrap cursor-pointer ${
-                isLvlActive
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }"
-            >
-              ${label}
-            </button>
-          `;
-        }).join('')}
-      </div>
+    if (levelContainer) {
+      levelContainer.innerHTML = levels.map(lvl => {
+        const isLvlActive = this.selectedLevel === lvl;
+        const label = lvl === 'all' ? 'All Levels' : lvl;
+        return `
+          <button 
+            type="button"
+            onclick="window.testEngine.filterLevel('${lvl}')"
+            class="px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer ${
+              isLvlActive
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }"
+          >
+            ${label}
+          </button>
+        `;
+      }).join('');
+    }
 
-      <!-- Subject & Bookmark Pills -->
-      <div class="flex items-center gap-1.5 overflow-x-auto w-full">
+    if (subjectContainer) {
+      subjectContainer.innerHTML = `
         <button 
           type="button"
           onclick="window.testEngine.filterSubject('all')"
-          class="px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+          class="px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 shrink-0 ${
             this.selectedSubject === 'all' && !this.filterBookmarkedOnly
-              ? 'bg-blue-600 text-white shadow-sm font-bold' 
+              ? 'bg-blue-600 text-white shadow-sm' 
               : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
           }"
         >
-          All Subjects (${allPublishedTests.length})
+          <span>All Tests</span>
+          <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono ${this.selectedSubject === 'all' && !this.filterBookmarkedOnly ? 'bg-blue-700/90 text-white' : 'bg-slate-100 text-slate-600'}">${allPublishedTests.length}</span>
         </button>
 
         <!-- Bookmarked Filter Pill -->
         <button 
           type="button"
           onclick="window.testEngine.toggleBookmarkedFilter()"
-          class="px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+          class="px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 shrink-0 ${
             this.filterBookmarkedOnly
-              ? 'bg-amber-600 text-white shadow-sm font-bold' 
-              : 'bg-white text-amber-700 border border-amber-200 hover:bg-amber-50'
+              ? 'bg-amber-600 text-white shadow-sm' 
+              : 'bg-white text-amber-800 border border-amber-200 hover:bg-amber-50'
           }"
         >
           <i data-lucide="bookmark" class="w-3.5 h-3.5 ${this.filterBookmarkedOnly ? 'fill-current' : ''}"></i>
-          Bookmarked (${bookmarkedCount})
+          <span>Bookmarked</span>
+          <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono ${this.filterBookmarkedOnly ? 'bg-amber-700 text-white' : 'bg-amber-100 text-amber-800'}">${bookmarkedCount}</span>
         </button>
 
         ${subjects.map(s => {
@@ -121,18 +121,19 @@ class TestEngine {
             <button 
               type="button"
               onclick="window.testEngine.filterSubject('${s.id}')"
-              class="px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+              class="px-3.5 py-2 text-xs font-bold rounded-xl transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 shrink-0 ${
                 isActive 
-                  ? 'bg-blue-600 text-white shadow-sm font-bold' 
+                  ? 'bg-blue-600 text-white shadow-sm' 
                   : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
               }"
             >
-              ${s.name} (${count})
+              <span>${s.name}</span>
+              <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono ${isActive ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-600'}">${count}</span>
             </button>
           `;
         }).join('')}
-      </div>
-    `;
+      `;
+    }
 
     if (window.lucide) window.lucide.createIcons();
   }
@@ -1034,12 +1035,14 @@ class TestEngine {
       startedAt: new Date(Date.now() - (timeTakenSeconds * 1000)).toISOString(),
       submittedAt: new Date().toISOString(),
       timeTakenSeconds: timeTakenSeconds,
+      totalQuestions: questionsWithKeys.length,
       correctCount: correctCount,
       wrongCount: wrongCount,
       unattemptedCount: unattemptedCount,
       grossMarks: grossMarks,
       negativePenalty: negativePenalty,
       finalScore: finalScore,
+      totalMarks: totalPossibleMarks,
       earnedPoints: earnedPoints,
       percentage: percentage,
       userAnswers: { ...this.userAnswers }
@@ -1048,8 +1051,35 @@ class TestEngine {
     if (attemptRecord.earnedPoints === undefined) {
       attemptRecord.earnedPoints = earnedPoints;
     }
+    if (attemptRecord.totalMarks === undefined) {
+      attemptRecord.totalMarks = totalPossibleMarks;
+    }
 
     window.store.recordAttempt(attemptRecord);
+
+    // Record Authoritative XP Transaction for Student
+    if (user && user.role === 'student' && earnedPoints > 0) {
+      const oldTotalXp = window.store.getUserTotalXp ? window.store.getUserTotalXp(user.id) : (user.totalXp || 0);
+      window.store.recordXpTransaction({
+        idempotencyKey: `mcq_attempt_${attemptRecord.id}`,
+        userId: user.id,
+        sourceType: 'mcq_test',
+        sourceId: test.id,
+        activityName: `MCQ: ${test.title}`,
+        points: earnedPoints,
+        resultStatus: finalScore >= (totalPossibleMarks * 0.4) ? 'Passed' : 'Completed',
+        metadata: {
+          score: finalScore,
+          totalMarks: totalPossibleMarks,
+          correct: correctCount,
+          wrong: wrongCount
+        }
+      });
+      const newTotalXp = window.store.getUserTotalXp ? window.store.getUserTotalXp(user.id) : (oldTotalXp + earnedPoints);
+      if (window.leaderboardManager && typeof window.leaderboardManager.triggerRankUpIfEligible === 'function') {
+        window.leaderboardManager.triggerRankUpIfEligible(user.id, oldTotalXp, newTotalXp);
+      }
+    }
 
     // Notify student about score and earned platform points
     if (user && window.store && typeof window.store.addNotification === 'function') {
@@ -1084,10 +1114,20 @@ class TestEngine {
     const minutes = Math.floor(attempt.timeTakenSeconds / 60);
     const seconds = attempt.timeTakenSeconds % 60;
     const timeFormatted = `${minutes}m ${seconds}s`;
-    const pos = test ? (test.marksPerCorrect || 2.0) : 2.0;
-    const neg = test ? (test.negativeMarksPerWrong || 0.5) : 0.5;
-    const totalMarks = questions.reduce((sum, q) => sum + (typeof q.marks === 'number' && q.marks > 0 ? q.marks : pos), 0) || (test ? test.maximumMarks : (questions.length * 2));
-    const pointsEarned = attempt.earnedPoints !== undefined ? attempt.earnedPoints : (attempt.correctCount * (test ? (test.pointsPerCorrect || 10) : 10));
+    const pos = test ? (Number(test.marksPerCorrect) || 2.0) : 2.0;
+    const neg = test ? (Number(test.negativeMarksPerWrong) || 0.5) : 0.5;
+
+    const qSum = (questions && questions.length > 0)
+      ? questions.reduce((sum, q) => sum + ((typeof q.marks === 'number' && q.marks > 0) ? q.marks : pos), 0)
+      : 0;
+    const attemptSavedMarks = attempt.totalMarks ? Number(attempt.totalMarks) : 0;
+    const testMaxMarks = test && test.maximumMarks ? Number(test.maximumMarks) : 0;
+    const totalMarks = Math.max(qSum, attemptSavedMarks, testMaxMarks, (questions && questions.length > 0 ? questions.length * pos : 0), 1);
+
+    const percentage = Math.min(100, Math.max(0, totalMarks > 0 ? (attempt.finalScore / totalMarks) * 100 : (attempt.percentage || 0)));
+    const totalAttempted = (attempt.correctCount || 0) + (attempt.wrongCount || 0);
+    const accuracy = totalAttempted > 0 ? Math.round(((attempt.correctCount || 0) / totalAttempted) * 100) : 0;
+    const pointsEarned = attempt.earnedPoints !== undefined ? attempt.earnedPoints : ((attempt.correctCount || 0) * (test ? (test.pointsPerCorrect || 10) : 10));
 
     const modalContent = document.getElementById('result-modal-content');
     if (!modalContent) return;
@@ -1102,8 +1142,8 @@ class TestEngine {
         ` : ''}
 
         <div class="text-center pb-6 border-b border-slate-100">
-          <div class="w-16 h-16 rounded-full ${attempt.percentage >= 60 ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'} mx-auto flex items-center justify-center mb-3">
-            <i data-lucide="${attempt.percentage >= 60 ? 'trophy' : 'award'}" class="w-8 h-8"></i>
+          <div class="w-16 h-16 rounded-full ${percentage >= 50 ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'} mx-auto flex items-center justify-center mb-3">
+            <i data-lucide="${percentage >= 50 ? 'trophy' : 'award'}" class="w-8 h-8"></i>
           </div>
           <h3 class="text-lg sm:text-xl font-bold text-slate-900">${test ? test.title : 'Assessment Report'}</h3>
           <p class="text-xs text-slate-500 mt-1">
@@ -1125,18 +1165,18 @@ class TestEngine {
           </div>
           <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 sm:p-4 text-center">
             <span class="text-[10px] sm:text-[11px] font-bold text-emerald-700 uppercase tracking-wider block">Percentage</span>
-            <span class="text-xl sm:text-2xl font-black text-emerald-900">${Math.round(attempt.percentage)}%</span>
-            <span class="text-[11px] sm:text-xs text-emerald-600 block">${attempt.percentage >= 50 ? 'Passed' : 'Needs Practice'}</span>
+            <span class="text-xl sm:text-2xl font-black text-emerald-900">${Math.round(percentage)}%</span>
+            <span class="text-[11px] sm:text-xs text-emerald-600 block">${percentage >= 50 ? 'Passed' : 'Needs Practice'}</span>
           </div>
           <div class="bg-purple-50 border border-purple-200 rounded-xl p-3 sm:p-4 text-center">
-            <span class="text-[10px] sm:text-[11px] font-bold text-purple-700 uppercase tracking-wider block">Test Rank</span>
-            <span class="text-xl sm:text-2xl font-black text-purple-900">#${testRank}</span>
-            <span class="text-[11px] sm:text-xs text-purple-600 block">of ${Math.max(1, allAttemptsForTest.length)} candidate(s)</span>
+            <span class="text-[10px] sm:text-[11px] font-bold text-purple-700 uppercase tracking-wider block">Accuracy</span>
+            <span class="text-xl sm:text-2xl font-black text-purple-900">${accuracy}%</span>
+            <span class="text-[11px] sm:text-xs text-purple-600 block">${attempt.correctCount || 0}/${totalAttempted} Attempted</span>
           </div>
-          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 sm:p-4 text-center">
-            <span class="text-[10px] sm:text-[11px] font-bold text-slate-700 uppercase tracking-wider block">Time Taken</span>
-            <span class="text-xl sm:text-2xl font-black text-slate-900">${timeFormatted}</span>
-            <span class="text-[11px] sm:text-xs text-slate-500 block">Duration</span>
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 sm:p-4 text-center col-span-2 sm:col-span-1">
+            <span class="text-[10px] sm:text-[11px] font-bold text-slate-700 uppercase tracking-wider block">Rank & Time</span>
+            <span class="text-xl sm:text-2xl font-black text-slate-900">#${testRank}</span>
+            <span class="text-[11px] sm:text-xs text-slate-500 block">${timeFormatted}</span>
           </div>
         </div>
 
@@ -1144,18 +1184,17 @@ class TestEngine {
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 bg-slate-50 p-3 sm:p-4 rounded-xl text-center mb-6 sm:mb-8 border border-slate-200">
           <div class="p-2 sm:p-0">
             <span class="text-xs text-slate-500 block">Correct Answers</span>
-            <span class="text-base sm:text-lg font-bold text-emerald-600">${attempt.correctCount} (+${attempt.grossMarks.toFixed(1)})</span>
+            <span class="text-base sm:text-lg font-bold text-emerald-600">${attempt.correctCount} (+${attempt.grossMarks.toFixed(1)} Marks)</span>
           </div>
           <div class="p-2 sm:p-0 border-t sm:border-t-0 sm:border-l sm:border-r border-slate-200">
             <span class="text-xs text-slate-500 block">Incorrect Answers</span>
-            <span class="text-base sm:text-lg font-bold text-rose-600">${attempt.wrongCount} (-${attempt.negativePenalty.toFixed(1)})</span>
+            <span class="text-base sm:text-lg font-bold text-rose-600">${attempt.wrongCount} (-${attempt.negativePenalty.toFixed(1)} Marks)</span>
           </div>
           <div class="p-2 sm:p-0 border-t sm:border-t-0 border-slate-200">
             <span class="text-xs text-slate-500 block">Unattempted</span>
-            <span class="text-base sm:text-lg font-bold text-slate-500">${attempt.unattemptedCount}</span>
+            <span class="text-base sm:text-lg font-bold text-slate-500">${attempt.unattemptedCount} (0 Marks)</span>
           </div>
         </div>
-
 
         <!-- Solutions & Explanations Header -->
         <div class="border-t border-slate-200 pt-6">
@@ -1169,14 +1208,16 @@ class TestEngine {
               const studentChoice = attempt.userAnswers ? attempt.userAnswers[q.id] : null;
               const isCorrect = studentChoice === q.correctOption;
               const isSkipped = !studentChoice;
+              const qPos = (typeof q.marks === 'number' && q.marks > 0) ? q.marks : pos;
+              const qNeg = (typeof q.negativeMarks === 'number' && q.negativeMarks >= 0) ? q.negativeMarks : neg;
 
               let statusBadge = '';
               if (isSkipped) {
-                statusBadge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200">Unattempted (0 Marks)</span>';
+                statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200">Unattempted (0 / ${qPos} Marks)</span>`;
               } else if (isCorrect) {
-                statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">Correct (+${pos})</span>`;
+                statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">Correct (+${qPos} / ${qPos} Marks)</span>`;
               } else {
-                statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 border border-rose-200">Incorrect (-${neg})</span>`;
+                statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 border border-rose-200">Incorrect (-${qNeg} / ${qPos} Marks)</span>`;
               }
 
               return `

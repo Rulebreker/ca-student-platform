@@ -126,9 +126,15 @@
                   <span class="font-bold text-xs text-slate-800">Live Alerts</span>
                   <span id="notification-panel-count-badge" class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-100 text-blue-800">0 New</span>
                 </div>
-                <button onclick="window.app.markAllNotificationsRead()" class="text-[11px] font-semibold text-blue-600 hover:underline cursor-pointer">
-                  Mark all as read
-                </button>
+                <div class="flex items-center gap-2.5">
+                  <button onclick="window.app.markAllNotificationsRead()" class="text-[11px] font-semibold text-blue-600 hover:underline cursor-pointer">
+                    Mark read
+                  </button>
+                  <span class="text-slate-300">•</span>
+                  <button onclick="window.app.clearAllNotifications()" class="text-[11px] font-semibold text-rose-600 hover:underline cursor-pointer">
+                    Clear all
+                  </button>
+                </div>
               </div>
               <div id="nav-notification-list" class="max-h-80 overflow-y-auto divide-y divide-slate-100 text-xs">
                 <!-- Notifications rendered dynamically -->
@@ -380,8 +386,30 @@
         </div>
       </div>
 
-      <!-- Key Performance Metrics (4 Cards) -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
+      <!-- Key Performance Metrics (5 Cards) -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+        <div class="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs flex items-center gap-4">
+          <div class="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center flex-shrink-0">
+            <i data-lucide="zap" class="w-6 h-6 text-amber-500 fill-amber-500"></i>
+          </div>
+          <div>
+            <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Total Points / XP</span>
+            <span id="metric-total-xp" class="text-2xl font-black text-indigo-900">0</span>
+            <button onclick="window.app.navigate('profile')" class="text-[11px] text-indigo-600 font-semibold hover:underline block cursor-pointer">XP Ledger →</button>
+          </div>
+        </div>
+
+        <div class="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs flex items-center gap-4">
+          <div class="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center flex-shrink-0">
+            <i data-lucide="award" class="w-6 h-6"></i>
+          </div>
+          <div>
+            <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Leaderboard Rank</span>
+            <span id="metric-current-rank" class="text-2xl font-black text-purple-700">#--</span>
+            <button onclick="window.app.navigate('leaderboard')" class="text-[11px] text-purple-600 font-semibold hover:underline block cursor-pointer">View rankings →</button>
+          </div>
+        </div>
+
         <div class="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs flex items-center gap-4">
           <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
             <i data-lucide="check-circle-2" class="w-6 h-6"></i>
@@ -412,17 +440,6 @@
             <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Best Score</span>
             <span id="metric-best-score" class="text-2xl font-black text-slate-900">0%</span>
             <span class="text-[11px] text-slate-400 block">Peak percentage</span>
-          </div>
-        </div>
-
-        <div class="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs flex items-center gap-4">
-          <div class="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center flex-shrink-0">
-            <i data-lucide="award" class="w-6 h-6"></i>
-          </div>
-          <div>
-            <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Leaderboard Rank</span>
-            <span id="metric-current-rank" class="text-2xl font-black text-purple-700">#--</span>
-            <button onclick="window.app.navigate('leaderboard')" class="text-[11px] text-purple-600 font-semibold hover:underline block cursor-pointer">View rankings →</button>
           </div>
         </div>
       </div>
@@ -516,50 +533,66 @@
         <p class="text-xs text-slate-500 mt-1">Practice under authentic timed conditions with negative marking and question palette</p>
       </div>
 
-      <!-- Subject Filters (Horizontally scrollable on mobile/tablet) -->
-      <div class="overflow-x-auto pb-1 -mb-1 scrollbar-none">
-        <div id="test-subject-filters" class="flex items-center gap-2 min-w-max">
-          <!-- Populated by test-engine.js -->
-        </div>
-      </div>
-
-      <!-- Search Bar & Sort/Filter Controls -->
-      <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
-        <!-- Search Bar -->
-        <div class="relative flex-1">
-          <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
-          <input 
-            type="text" 
-            id="test-search-input" 
-            placeholder="Search MCQ papers..." 
-            oninput="window.testEngine.handleSearch(this.value)"
-            class="w-full pl-9 pr-8 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50/60 hover:bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 placeholder-slate-400 transition-all"
-          >
+      <!-- Unified MCQ Filter Toolbar -->
+      <div class="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
+        <!-- Row 1: Exam Level Segmented Controls & Clear Action -->
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div id="test-level-pills" class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none w-full sm:w-auto">
+            <!-- Populated by test-engine.js -->
+          </div>
           <button 
             type="button" 
-            id="test-search-clear-btn" 
-            onclick="window.testEngine.clearSearch()" 
-            class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
-            title="Clear search"
+            onclick="window.testEngine.resetFilters()"
+            class="text-xs text-slate-500 hover:text-rose-600 font-bold flex items-center gap-1 cursor-pointer transition-colors ml-auto shrink-0"
+            title="Reset filters"
           >
-            <i data-lucide="x" class="w-3.5 h-3.5"></i>
+            <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> Clear Filters
           </button>
         </div>
 
-        <!-- Sort Option -->
-        <div class="flex items-center gap-2 self-end sm:self-auto flex-shrink-0">
-          <label for="test-sort-select" class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 whitespace-nowrap">
-            <i data-lucide="arrow-up-down" class="w-3.5 h-3.5 text-slate-400"></i> Sort:
-          </label>
-          <select 
-            id="test-sort-select" 
-            onchange="window.testEngine.handleSort(this.value)"
-            class="px-3 py-2 text-xs font-semibold border border-slate-200 rounded-lg bg-white text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer"
-          >
-            <option value="new">New</option>
-            <option value="old">Old</option>
-            <option value="popular">Popular</option>
-          </select>
+        <!-- Row 2: Subject & Bookmarked Scrollable Pills -->
+        <div class="overflow-x-auto pb-1 scrollbar-none -mx-1 px-1">
+          <div id="test-subject-pills" class="flex items-center gap-2 min-w-max">
+            <!-- Populated by test-engine.js -->
+          </div>
+        </div>
+
+        <!-- Row 3: Search Bar & Sort Dropdown -->
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-3 border-t border-slate-100 items-center">
+          <div class="sm:col-span-8 relative">
+            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+            <input 
+              type="text" 
+              id="test-search-input" 
+              placeholder="Search MCQ papers by title, topic..." 
+              oninput="window.testEngine.handleSearch(this.value)"
+              class="w-full pl-10 pr-9 py-2.5 text-xs font-medium border border-slate-200 rounded-xl bg-slate-50/70 hover:bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-800 placeholder-slate-400"
+            >
+            <button 
+              type="button" 
+              id="test-search-clear-btn" 
+              onclick="window.testEngine.clearSearch()" 
+              class="hidden absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+              title="Clear search"
+            >
+              <i data-lucide="x" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+
+          <div class="sm:col-span-4 flex items-center gap-2">
+            <label for="test-sort-select" class="text-xs font-bold text-slate-500 uppercase tracking-wider shrink-0 flex items-center gap-1">
+              <i data-lucide="arrow-up-down" class="w-3.5 h-3.5"></i> Sort:
+            </label>
+            <select 
+              id="test-sort-select" 
+              onchange="window.testEngine.handleSort(this.value)"
+              class="w-full py-2 px-3 text-xs font-bold border border-slate-200 rounded-xl bg-slate-50/70 hover:bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors cursor-pointer"
+            >
+              <option value="new">Newest First</option>
+              <option value="old">Oldest First</option>
+              <option value="popular">Most Popular</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -578,70 +611,88 @@
     </section>
 
     <!-- VIEW 5: ASSIGNMENT SYSTEM & PDF UPLOADER -->
-    <section id="view-assignments" class="hidden space-y-8">
+    <section id="view-assignments" class="hidden space-y-6">
       <div>
         <h2 class="text-xl font-bold text-slate-900">Practical Assignments & Computations</h2>
         <p class="text-xs text-slate-500 mt-1">Download case problems, prepare your solution, and submit as a PDF for grading</p>
       </div>
 
-      <!-- Subject Filters (Horizontally scrollable on mobile/tablet) -->
-      <div class="overflow-x-auto pb-1 -mb-1 scrollbar-none">
-        <div id="assignment-subject-filters" class="flex items-center gap-2 min-w-max">
-          <!-- Populated by assignment-portal.js -->
-        </div>
-      </div>
-
-      <!-- Search Bar & Sort/Filter Controls -->
-      <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
-        <!-- Search Bar -->
-        <div class="relative flex-1">
-          <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
-          <input 
-            type="text" 
-            id="assignment-search-input" 
-            placeholder="Search test papers by title, topic, subject..." 
-            oninput="window.assignmentPortal.handleSearch(this.value)"
-            class="w-full pl-9 pr-8 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50/60 hover:bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 placeholder-slate-400 transition-all"
-          >
+      <!-- Unified Test Papers Filter Toolbar -->
+      <div class="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
+        <!-- Row 1: Exam Level Segmented Controls & Clear Action -->
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div id="assignment-level-pills" class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none w-full sm:w-auto">
+            <!-- Populated by assignment-portal.js -->
+          </div>
           <button 
             type="button" 
-            id="assignment-search-clear-btn" 
-            onclick="window.assignmentPortal.clearSearch()" 
-            class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
-            title="Clear search"
+            onclick="window.assignmentPortal.resetFilters()"
+            class="text-xs text-slate-500 hover:text-rose-600 font-bold flex items-center gap-1 cursor-pointer transition-colors ml-auto shrink-0"
+            title="Reset filters"
           >
-            <i data-lucide="x" class="w-3.5 h-3.5"></i>
+            <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> Clear Filters
           </button>
         </div>
 
-        <!-- Filter and Sort Controls -->
-        <div class="flex flex-wrap items-center gap-2 self-end sm:self-auto flex-shrink-0">
-          <label for="assignment-status-select" class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 whitespace-nowrap">
-            <i data-lucide="filter" class="w-3.5 h-3.5 text-slate-400"></i> Status:
-          </label>
-          <select 
-            id="assignment-status-select" 
-            onchange="window.assignmentPortal.handleStatusFilter(this.value)"
-            class="px-3 py-2 text-xs font-semibold border border-slate-200 rounded-lg bg-white text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer"
-          >
-            <option value="all">All Status</option>
-            <option value="pending">Pending Attempt</option>
-            <option value="submitted">Submitted</option>
-            <option value="evaluated">Checked / Evaluated</option>
-          </select>
+        <!-- Row 2: Subject & Bookmarked Scrollable Pills -->
+        <div class="overflow-x-auto pb-1 scrollbar-none -mx-1 px-1">
+          <div id="assignment-subject-pills" class="flex items-center gap-2 min-w-max">
+            <!-- Populated by assignment-portal.js -->
+          </div>
+        </div>
 
-          <label for="assignment-sort-select" class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 whitespace-nowrap ml-1">
-            <i data-lucide="arrow-up-down" class="w-3.5 h-3.5 text-slate-400"></i> Sort:
-          </label>
-          <select 
-            id="assignment-sort-select" 
-            onchange="window.assignmentPortal.handleSort(this.value)"
-            class="px-3 py-2 text-xs font-semibold border border-slate-200 rounded-lg bg-white text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer"
-          >
-            <option value="new">Newest First</option>
-            <option value="old">Oldest First</option>
-            <option value="marks">Highest Marks</option>
-          </select>
+        <!-- Row 3: Search Bar + Status Filter + Sort Dropdown -->
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-3 border-t border-slate-100 items-center">
+          <div class="sm:col-span-6 relative">
+            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+            <input 
+              type="text" 
+              id="assignment-search-input" 
+              placeholder="Search test papers by title, topic, subject..." 
+              oninput="window.assignmentPortal.handleSearch(this.value)"
+              class="w-full pl-10 pr-9 py-2.5 text-xs font-medium border border-slate-200 rounded-xl bg-slate-50/70 hover:bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-800 placeholder-slate-400"
+            >
+            <button 
+              type="button" 
+              id="assignment-search-clear-btn" 
+              onclick="window.assignmentPortal.clearSearch()" 
+              class="hidden absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+              title="Clear search"
+            >
+              <i data-lucide="x" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+
+          <div class="sm:col-span-3 flex items-center gap-2">
+            <label for="assignment-status-select" class="text-xs font-bold text-slate-500 uppercase tracking-wider shrink-0 flex items-center gap-1">
+              <i data-lucide="filter" class="w-3.5 h-3.5"></i> Status:
+            </label>
+            <select 
+              id="assignment-status-select" 
+              onchange="window.assignmentPortal.handleStatusFilter(this.value)"
+              class="w-full py-2 px-3 text-xs font-bold border border-slate-200 rounded-xl bg-slate-50/70 hover:bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors cursor-pointer"
+            >
+              <option value="all">All Status</option>
+              <option value="pending">Pending Attempt</option>
+              <option value="submitted">Submitted</option>
+              <option value="evaluated">Checked / Evaluated</option>
+            </select>
+          </div>
+
+          <div class="sm:col-span-3 flex items-center gap-2">
+            <label for="assignment-sort-select" class="text-xs font-bold text-slate-500 uppercase tracking-wider shrink-0 flex items-center gap-1">
+              <i data-lucide="arrow-up-down" class="w-3.5 h-3.5"></i> Sort:
+            </label>
+            <select 
+              id="assignment-sort-select" 
+              onchange="window.assignmentPortal.handleSort(this.value)"
+              class="w-full py-2 px-3 text-xs font-bold border border-slate-200 rounded-xl bg-slate-50/70 hover:bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors cursor-pointer"
+            >
+              <option value="new">Newest First</option>
+              <option value="old">Oldest First</option>
+              <option value="marks">Highest Marks</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -964,6 +1015,40 @@
             <p class="text-[11px] text-slate-500 mt-3 pt-3 border-t border-indigo-100/80 leading-relaxed">
               Your platform rank and performance standings are private and never shown to other students on the public leaderboard.
             </p>
+          </div>
+
+          <!-- 1b. AUTHORITATIVE XP & REWARD POINTS ACTIVITY LEDGER -->
+          <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+              <div>
+                <h3 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <i data-lucide="history" class="w-4 h-4 text-amber-500"></i> Points & XP Activity Ledger
+                </h3>
+                <p class="text-xs text-slate-500">Authoritative audit trail of earned points across mock tests, evaluated papers, and referrals</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <span id="profile-xp-total-pill" class="px-3 py-1 bg-amber-50 border border-amber-200 text-amber-900 rounded-full text-xs font-black">
+                  0 Total XP
+                </span>
+              </div>
+            </div>
+
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs">
+                <thead>
+                  <tr class="border-b border-slate-200 bg-slate-50/70 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    <th class="py-2.5 px-3">Date & Time</th>
+                    <th class="py-2.5 px-3">Activity</th>
+                    <th class="py-2.5 px-3">Source</th>
+                    <th class="py-2.5 px-3">Result / Status</th>
+                    <th class="py-2.5 px-3 text-right">Points Earned</th>
+                  </tr>
+                </thead>
+                <tbody id="profile-xp-history-tbody" class="divide-y divide-slate-100 font-medium">
+                  <!-- Rendered dynamically by app.js -->
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <!-- 2. EDIT PROFILE FORM -->

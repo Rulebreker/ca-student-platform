@@ -107,6 +107,140 @@ INITIAL_PAPERS = [
     }
 ]
 
+def update_user_total_xp(data, user_id, diff):
+    if not user_id:
+        return
+    for u in data.get('users', {}).values():
+        if u.get('id') == user_id:
+            u['totalXp'] = max(0, int(u.get('totalXp', 0)) + int(diff))
+            break
+
+def award_xp_transaction(data, user_id, source_type, source_id, activity_name, points, result_status='', idempotency_key=None, metadata=None, created_at=None):
+    if 'xp_transactions' not in data:
+        data['xp_transactions'] = []
+    
+    if idempotency_key:
+        existing = next((tx for tx in data['xp_transactions'] if tx.get('idempotencyKey') == idempotency_key), None)
+        if existing:
+            old_pts = int(existing.get('points', 0))
+            new_pts = int(points)
+            if old_pts != new_pts:
+                diff = new_pts - old_pts
+                existing['points'] = new_pts
+                existing['resultStatus'] = str(result_status or '')
+                if metadata:
+                    existing['metadata'] = metadata
+                update_user_total_xp(data, user_id, diff)
+            return existing, False
+
+    tx_id = f"tx-{int(datetime.now().timestamp() * 1000)}-{uuid.uuid4().hex[:6]}"
+    tx = {
+        'id': tx_id,
+        'idempotencyKey': idempotency_key or tx_id,
+        'userId': user_id,
+        'sourceType': source_type,
+        'sourceId': source_id or '',
+        'activityName': activity_name or 'Platform Activity',
+        'points': int(points),
+        'resultStatus': str(result_status or ''),
+        'metadata': metadata or {},
+        'createdAt': created_at or datetime.now(timezone.utc).isoformat()
+    }
+    data['xp_transactions'].insert(0, tx)
+    update_user_total_xp(data, user_id, int(points))
+    return tx, True
+
+def sync_historical_xp(d):
+    if 'xp_transactions' not in d:
+        d['xp_transactions'] = []
+    
+    existing_keys = {tx.get('idempotencyKey') for tx in d['xp_transactions'] if tx.get('idempotencyKey')}
+    dirty = False
+
+    # 1. Backfill past completed MCQ attempts
+    tests_map = {t.get('id'): t for t in d.get('tests', [])}
+    for att in d.get('test_attempts', []):
+        att_id = att.get('id')
+        user_id = att.get('userId')
+        if not att_id or not user_id:
+            continue
+        key = f"mcq_attempt_{att_id}"
+        if key not in existing_keys:
+            correct = att.get('correctCount', 0)
+            tst = tests_map.get(att.get('testId'), {})
+            pos = float(tst.get('marksPerCorrect', 2.0))
+            pts_per_correct = float(tst.get('pointsPerCorrect', pos if pos > 0 else 10))
+            earned_pts = att.get('earnedPoints')
+            if earned_pts is None:
+                earned_pts = int(correct * pts_per_correct)
+                att['earnedPoints'] = earned_pts
+                dirty = True
+
+            if earned_pts > 0:
+                tx_id = f"tx-mcq-{att_id}"
+                tx = {
+                    'id': tx_id,
+                    'idempotencyKey': key,
+                    'userId': user_id,
+                    'sourceType': 'mcq_test',
+                    'sourceId': att.get('testId', ''),
+                    'activityName': att.get('testTitle') or tst.get('title') or 'MCQ Mock Test',
+                    'points': int(earned_pts),
+                    'resultStatus': f"{correct} Correct ({round(float(att.get('percentage', 0)))}%)",
+                    'metadata': {'correctCount': correct, 'percentage': att.get('percentage', 0)},
+                    'createdAt': att.get('submittedAt') or att.get('startedAt') or datetime.now(timezone.utc).isoformat()
+                }
+                d['xp_transactions'].append(tx)
+                existing_keys.add(key)
+                dirty = True
+
+    # 2. Backfill evaluated paper submissions
+    papers_map = {p.get('id'): p for p in d.get('papers', [])}
+    for sub in d.get('submissions', []):
+        sub_id = sub.get('id')
+        user_id = sub.get('studentId')
+        if not sub_id or not user_id:
+            continue
+        key = f"paper_submission_{sub_id}"
+        if key not in existing_keys:
+            pts = sub.get('pointsAwarded')
+            if pts is not None and int(pts) > 0:
+                p_id = sub.get('assignmentId') or sub.get('paperId')
+                pap = papers_map.get(p_id, {})
+                tx_id = f"tx-paper-{sub_id}"
+                tx = {
+                    'id': tx_id,
+                    'idempotencyKey': key,
+                    'userId': user_id,
+                    'sourceType': 'paper_submission',
+                    'sourceId': p_id or '',
+                    'activityName': pap.get('title') or 'Test Paper Evaluation',
+                    'points': int(pts),
+                    'resultStatus': f"Score: {sub.get('marksObtained', 0)}/{pap.get('maximumMarks', 100)} M",
+                    'metadata': {'marksObtained': sub.get('marksObtained', 0)},
+                    'createdAt': sub.get('evaluatedAt') or sub.get('submittedAt') or datetime.now(timezone.utc).isoformat()
+                }
+                d['xp_transactions'].append(tx)
+                existing_keys.add(key)
+                dirty = True
+
+    # 3. Synchronize user totalXp to strictly match the sum of transactions
+    user_totals = {}
+    for tx in d['xp_transactions']:
+        uid = tx.get('userId')
+        if uid:
+            user_totals[uid] = user_totals.get(uid, 0) + int(tx.get('points', 0))
+
+    for u in d.get('users', {}).values():
+        uid = u.get('id')
+        calc_xp = user_totals.get(uid, 0)
+        if u.get('totalXp') != calc_xp:
+            u['totalXp'] = calc_xp
+            dirty = True
+
+    if dirty:
+        save_backend_data(d)
+
 def load_backend_data():
     if os.path.exists(DATA_STORE_FILE):
         try:
@@ -115,6 +249,12 @@ def load_backend_data():
                 if 'tests' not in d: d['tests'] = []
                 if 'questions' not in d: d['questions'] = []
                 if 'test_attempts' not in d: d['test_attempts'] = []
+                if 'submissions' not in d: d['submissions'] = []
+                if 'papers' not in d: d['papers'] = []
+                if 'xp_transactions' not in d: d['xp_transactions'] = []
+                if 'notifications' not in d: d['notifications'] = []
+                if 'bookmarks' not in d: d['bookmarks'] = []
+                if 'subjects' not in d: d['subjects'] = []
                 # Sync seed users and hashed passwords
                 for email, init_u in INITIAL_USERS.items():
                     if email not in d.get('users', {}):
@@ -127,6 +267,7 @@ def load_backend_data():
                             u['username'] = init_u['username']
                         if not u.get('token') and init_u.get('token'):
                             u['token'] = init_u['token']
+                sync_historical_xp(d)
                 return d
         except Exception:
             pass
@@ -136,8 +277,13 @@ def load_backend_data():
         'submissions': [],
         'tests': [],
         'questions': [],
-        'test_attempts': []
+        'test_attempts': [],
+        'xp_transactions': [],
+        'notifications': [],
+        'bookmarks': [],
+        'subjects': []
     }
+    sync_historical_xp(data)
     save_backend_data(data)
     return data
 
@@ -604,6 +750,44 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json(200, {'success': True, 'bookmarks': user_bookmarks})
             return
 
+        # XP Transactions & History Log
+        if path == '/api/xp/transactions':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            userId = query.get('userId', [None])[0] or (user.get('id') if user else None)
+            data = load_backend_data()
+            txs = data.get('xp_transactions', [])
+            if userId:
+                txs = [t for t in txs if t.get('userId') == userId]
+            txs.sort(key=lambda x: x.get('createdAt', ''), reverse=True)
+            self.send_json(200, {'success': True, 'transactions': txs, 'totalCount': len(txs)})
+            return
+
+        # XP Balance & Breakdown
+        if path == '/api/xp/balance':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            userId = query.get('userId', [None])[0] or (user.get('id') if user else None)
+            if not userId:
+                self.send_json(401, {'error': 'Authentication required', 'code': 401})
+                return
+            data = load_backend_data()
+            txs = [t for t in data.get('xp_transactions', []) if t.get('userId') == userId]
+            total_xp = sum(int(t.get('points', 0)) for t in txs)
+            mcq_xp = sum(int(t.get('points', 0)) for t in txs if t.get('sourceType') == 'mcq_test')
+            descriptive_xp = sum(int(t.get('points', 0)) for t in txs if t.get('sourceType') == 'paper_submission')
+            referral_xp = sum(int(t.get('points', 0)) for t in txs if t.get('sourceType') == 'referral')
+            self.send_json(200, {
+                'success': True,
+                'userId': userId,
+                'totalXp': total_xp,
+                'mcqXp': mcq_xp,
+                'descriptiveXp': descriptive_xp,
+                'referralXp': referral_xp,
+                'transactionsCount': len(txs)
+            })
+            return
+
         # File Download (PDF)
         if path == '/api/files/download':
             token = self.get_auth_token()
@@ -849,6 +1033,33 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 users_dict[raw_email] = new_user
                 data['users'] = users_dict
+
+                # Referral Reward Engine (100 Points to Referrer)
+                raw_ref = str(post_data.get('referralCode') or post_data.get('ref') or '').strip().lstrip('@').lower()
+                if raw_ref:
+                    referrer = next((u for u in users_dict.values() if (u.get('username') or '').lower() == raw_ref or (u.get('email') or '').lower() == raw_ref or u.get('id') == raw_ref), None)
+                    if referrer and referrer.get('id') != user_id:
+                        award_xp_transaction(
+                            data, referrer.get('id'), 'referral', user_id,
+                            f"Referral: {new_user.get('name')}", 100,
+                            "New Student Enrolled",
+                            idempotency_key=f"referral_{user_id}",
+                            metadata={'referredUserId': user_id, 'referredName': new_user.get('name')}
+                        )
+                        notifs = data.get('notifications', [])
+                        notifs.insert(0, {
+                            'id': f"notif-{int(datetime.now().timestamp() * 1000)}",
+                            'userId': referrer.get('id'),
+                            'type': 'referral',
+                            'title': 'Referral Bonus Credited! 🎉',
+                            'message': f"{new_user.get('name')} registered using your code! +100 Platform Points credited.",
+                            'link': 'profile',
+                            'read': False,
+                            'metadata': {'points': 100, 'referredId': user_id},
+                            'createdAt': datetime.now(timezone.utc).isoformat()
+                        })
+                        data['notifications'] = notifs
+
                 save_backend_data(data)
 
                 sanitized = dict(new_user)
@@ -1090,6 +1301,98 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(500, {'error': f'Notification read error: {str(e)}', 'code': 500})
                 return
 
+        # 2c-ii. Delete Individual Notification
+        if path == '/api/notifications/delete':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+                notif_id = req_data.get('id')
+                user_id = req_data.get('userId') or (user.get('id') if user else None)
+                if not notif_id:
+                    self.send_json(400, {'error': 'Notification ID required', 'code': 400})
+                    return
+                data = load_backend_data()
+                notifs = data.get('notifications', [])
+                initial_len = len(notifs)
+                notifs = [n for n in notifs if not (n.get('id') == notif_id and (not user_id or n.get('userId') == user_id))]
+                data['notifications'] = notifs
+                save_backend_data(data)
+                self.send_json(200, {'success': True, 'deleted': initial_len > len(notifs), 'id': notif_id})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Notification delete error: {str(e)}', 'code': 500})
+                return
+
+        # 2c-iii. Clear All Notifications For User
+        if path == '/api/notifications/clear':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+                user_id = req_data.get('userId') or (user.get('id') if user else None)
+                if not user_id:
+                    self.send_json(400, {'error': 'User ID required to clear notifications', 'code': 400})
+                    return
+                data = load_backend_data()
+                notifs = data.get('notifications', [])
+                before_count = len(notifs)
+                notifs = [n for n in notifs if n.get('userId') != user_id]
+                cleared_count = before_count - len(notifs)
+                data['notifications'] = notifs
+                save_backend_data(data)
+                self.send_json(200, {'success': True, 'clearedCount': cleared_count})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Notification clear error: {str(e)}', 'code': 500})
+                return
+
+        # 2c-iv. Authoritative XP Award & Ledger Transaction
+        if path == '/api/xp/award':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user:
+                self.send_json(401, {'error': 'Authentication required', 'code': 401})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+                req_data = json.loads(body.decode('utf-8'))
+                target_user_id = req_data.get('userId') or user.get('id')
+                source_type = req_data.get('sourceType', 'general')
+                source_id = req_data.get('sourceId', '')
+                activity_name = req_data.get('activityName', 'XP Award')
+                points = int(req_data.get('points', 0))
+                result_status = req_data.get('resultStatus', '')
+                idempotency_key = req_data.get('idempotencyKey')
+                metadata = req_data.get('metadata', {})
+
+                data = load_backend_data()
+                tx, is_new = award_xp_transaction(
+                    data, target_user_id, source_type, source_id,
+                    activity_name, points, result_status,
+                    idempotency_key=idempotency_key, metadata=metadata
+                )
+                save_backend_data(data)
+
+                target_user = next((u for u in data.get('users', {}).values() if u.get('id') == target_user_id), None)
+                total_xp = target_user.get('totalXp', 0) if target_user else 0
+
+                self.send_json(200, {
+                    'success': True,
+                    'transaction': tx,
+                    'isNew': is_new,
+                    'totalXp': total_xp
+                })
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Award XP error: {str(e)}', 'code': 500})
+                return
+
         # 2d. Bookmarks Management (Toggle)
         if path == '/api/bookmarks/toggle':
             token = self.get_auth_token()
@@ -1182,6 +1485,19 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     existing_idx = next((i for i, s in enumerate(submissions) if s.get('id') == sub_id), None)
                     if existing_idx is not None:
                         submissions[existing_idx].update(sub_data)
+                        pts = sub_data.get('pointsAwarded')
+                        if pts is not None and int(pts) > 0:
+                            student_id = submissions[existing_idx].get('studentId')
+                            target_paper_id = submissions[existing_idx].get('assignmentId') or submissions[existing_idx].get('paperId') or paper_id
+                            pap = next((p for p in data.get('papers', []) if p.get('id') == target_paper_id), {})
+                            award_xp_transaction(
+                                data, student_id, 'paper_submission', target_paper_id,
+                                pap.get('title') or 'Test Paper Evaluation',
+                                int(pts),
+                                f"Score: {submissions[existing_idx].get('marksObtained', 0)}/{pap.get('maximumMarks', 100)} M",
+                                idempotency_key=f"paper_submission_{sub_id}",
+                                metadata={'marksObtained': submissions[existing_idx].get('marksObtained', 0), 'submissionId': sub_id}
+                            )
                         data['submissions'] = submissions
                         save_backend_data(data)
                         self.send_json(200, {'success': True, 'submission': submissions[existing_idx]})
@@ -1702,6 +2018,14 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 }
 
                 if earned_points > 0:
+                    tx, is_new = award_xp_transaction(
+                        data, user.get('id'), 'mcq_test', test_id,
+                        test.get('title') or 'MCQ Mock Test',
+                        int(earned_points),
+                        f"{correct_count}/{len(questions)} Correct ({round(pct)}%)",
+                        idempotency_key=f"mcq_attempt_{attempt_record['id']}",
+                        metadata={'correctCount': correct_count, 'percentage': pct, 'testId': test_id}
+                    )
                     notifs = data.get('notifications', [])
                     notifs.insert(0, {
                         'id': f"notif-{int(datetime.now().timestamp() * 1000)}",
@@ -1720,11 +2044,16 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 data['test_attempts'] = attempts
                 save_backend_data(data)
 
+                # Fetch updated user total XP
+                updated_u = next((u for u in data.get('users', {}).values() if u.get('id') == user.get('id')), {})
+
                 # Return full evaluation report WITH questions and explanations
                 self.send_json(200, {
                     'success': True,
                     'attempt': attempt_record,
-                    'questions': questions
+                    'questions': questions,
+                    'totalXp': updated_u.get('totalXp', 0),
+                    'earnedPoints': earned_points
                 })
                 return
             except Exception as e:

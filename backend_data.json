@@ -8,7 +8,8 @@
       "token": "token_admin_excellenceca_secret",
       "isActive": true,
       "password": "sha256:admin_salt_2026:02a70c1f4315ebb55dfe203f4b059605c91d133c80bd664b13c607c4a7c94296",
-      "username": "adminrulebreker@rulebrekerdothunter.com"
+      "username": "adminrulebreker@rulebrekerdothunter.com",
+      "totalXp": 0
     },
     "rohan.sharma@castudent.in": {
       "id": "usr-student-1",
@@ -18,7 +19,8 @@
       "token": "token_rohan_sharma_student",
       "isActive": true,
       "password": "sha256:rohan_salt_2026:4bc09285fc316fdb16fabcc092c15d15b9b9fbb7a19e926d55796dd509278baa",
-      "username": "rohan_sharma"
+      "username": "rohan_sharma",
+      "totalXp": 133
     },
     "priya.patel@castudent.in": {
       "id": "usr-student-2",
@@ -28,7 +30,8 @@
       "token": "token_priya_patel_student",
       "isActive": true,
       "password": "sha256:priya_salt_2026:d9d13c19c3b68e0af57d22a854944d6e0c3e42466e53cbae186bff1d054c43ce",
-      "username": "priya_patel"
+      "username": "priya_patel",
+      "totalXp": 0
     },
     "prof.sharma@excellenceca.com": {
       "id": "usr-teacher-1",
@@ -38,7 +41,8 @@
       "token": "token_prof_sharma_teacher",
       "isActive": true,
       "password": "sha256:rajesh_salt_2026:d3ac2e3fe1e52245b0f37caad135b5eb170743d2c48ab54adaebcd9e44022723",
-      "username": "prof_rajesh"
+      "username": "prof_rajesh",
+      "totalXp": 0
     }
   },
   "papers": [
@@ -2694,7 +2698,8 @@
       "userAnswers": {
         "q-1789221563698": "B",
         "q-1789221563721": "B"
-      }
+      },
+      "earnedPoints": 0
     },
     {
       "id": "att-1789221563832",
@@ -2717,7 +2722,8 @@
       "userAnswers": {
         "q-1789221563698": "A",
         "q-1789221563721": "B"
-      }
+      },
+      "earnedPoints": 1
     },
     {
       "id": "att-1789221563810",
@@ -2740,7 +2746,8 @@
       "userAnswers": {
         "q-1789221563698": "A",
         "q-1789221563721": "D"
-      }
+      },
+      "earnedPoints": 2
     },
     {
       "id": "att-1789220472919",
@@ -2763,7 +2770,8 @@
       "userAnswers": {
         "q-1789220472732": "B",
         "q-1789220472754": "B"
-      }
+      },
+      "earnedPoints": 0
     },
     {
       "id": "att-1789220472894",
@@ -2786,7 +2794,8 @@
       "userAnswers": {
         "q-1789220472732": "A",
         "q-1789220472754": "B"
-      }
+      },
+      "earnedPoints": 1
     },
     {
       "id": "att-1789220472873",
@@ -2809,7 +2818,8 @@
       "userAnswers": {
         "q-1789220472732": "A",
         "q-1789220472754": "D"
-      }
+      },
+      "earnedPoints": 2
     },
     {
       "id": "att-1789218099807",
@@ -2832,7 +2842,8 @@
       "userAnswers": {
         "q-1789218099652": "B",
         "q-1789218099674": "B"
-      }
+      },
+      "earnedPoints": 0
     },
     {
       "id": "att-1789218099787",
@@ -2855,7 +2866,8 @@
       "userAnswers": {
         "q-1789218099652": "A",
         "q-1789218099674": "B"
-      }
+      },
+      "earnedPoints": 1
     },
     {
       "id": "att-1789218099764",
@@ -2878,7 +2890,8 @@
       "userAnswers": {
         "q-1789218099652": "A",
         "q-1789218099674": "D"
-      }
+      },
+      "earnedPoints": 2
     },
     {
       "id": "att-1789215571028",
@@ -2901,7 +2914,8 @@
       "userAnswers": {
         "q-1789215570881": "B",
         "q-1789215570902": "B"
-      }
+      },
+      "earnedPoints": 0
     },
     {
       "id": "att-1789215571009",
@@ -2924,7 +2938,8 @@
       "userAnswers": {
         "q-1789215570881": "A",
         "q-1789215570902": "B"
-      }
+      },
+      "earnedPoints": 1
     },
     {
       "id": "att-1789215570989",
@@ -2947,7 +2962,8 @@
       "userAnswers": {
         "q-1789215570881": "A",
         "q-1789215570902": "D"
-      }
+      },
+      "earnedPoints": 2
     },
     {
       "id": "att-1789209334418",
@@ -2970,7 +2986,8 @@
       "userAnswers": {
         "q-1789209334273": "B",
         "q-1789209334290": "B"
-      }
+      },
+      "earnedPoints": 0
     },
     {
       "id": "att-1789209334398",
@@ -2993,7 +3010,8 @@
       "userAnswers": {
         "q-1789209334273": "A",
         "q-1789209334290": "B"
-      }
+      },
+      "earnedPoints": 1
     },
     {
       "id": "att-1789209334379",
@@ -3016,7 +3034,8 @@
       "userAnswers": {
         "q-1789209334273": "A",
         "q-1789209334290": "D"
-      }
+      },
+      "earnedPoints": 2
     },
     {
       "id": "att-1789207974553",
@@ -3039,7 +3058,8 @@
       "userAnswers": {
         "q-1789207974401": "B",
         "q-1789207974421": "B"
-      }
+      },
+      "earnedPoints": 0
     },
     {
       "id": "att-1789207974531",
@@ -3062,7 +3082,8 @@
       "userAnswers": {
         "q-1789207974401": "A",
         "q-1789207974421": "B"
-      }
+      },
+      "earnedPoints": 1
     },
     {
       "id": "att-1789207974510",
@@ -3085,7 +3106,8 @@
       "userAnswers": {
         "q-1789207974401": "A",
         "q-1789207974421": "D"
-      }
+      },
+      "earnedPoints": 2
     },
     {
       "id": "att-1789207378440",
@@ -3108,7 +3130,8 @@
       "userAnswers": {
         "q-1789207378296": "B",
         "q-1789207378315": "B"
-      }
+      },
+      "earnedPoints": 0
     },
     {
       "id": "att-1789207378423",
@@ -3131,7 +3154,8 @@
       "userAnswers": {
         "q-1789207378296": "A",
         "q-1789207378315": "B"
-      }
+      },
+      "earnedPoints": 1
     },
     {
       "id": "att-1789207378403",
@@ -3154,7 +3178,8 @@
       "userAnswers": {
         "q-1789207378296": "A",
         "q-1789207378315": "D"
-      }
+      },
+      "earnedPoints": 2
     },
     {
       "id": "att-1789207378196",
@@ -3177,7 +3202,8 @@
       "userAnswers": {
         "q-1789207341345": "B",
         "q-1789207345475": "B"
-      }
+      },
+      "earnedPoints": 0
     },
     {
       "id": "att-1789207374096",
@@ -3200,7 +3226,8 @@
       "userAnswers": {
         "q-1789207341345": "A",
         "q-1789207345475": "B"
-      }
+      },
+      "earnedPoints": 1
     },
     {
       "id": "att-1789207369997",
@@ -3223,7 +3250,8 @@
       "userAnswers": {
         "q-1789207341345": "A",
         "q-1789207345475": "D"
-      }
+      },
+      "earnedPoints": 2
     },
     {
       "id": "att-1789206249327",
@@ -3246,7 +3274,8 @@
       "userAnswers": {
         "q-1789206212487": "B",
         "q-1789206216578": "B"
-      }
+      },
+      "earnedPoints": 0
     },
     {
       "id": "att-1789206245231",
@@ -3269,7 +3298,8 @@
       "userAnswers": {
         "q-1789206212487": "A",
         "q-1789206216578": "B"
-      }
+      },
+      "earnedPoints": 1
     },
     {
       "id": "att-1789206241148",
@@ -3292,7 +3322,8 @@
       "userAnswers": {
         "q-1789206212487": "A",
         "q-1789206216578": "D"
-      }
+      },
+      "earnedPoints": 2
     },
     {
       "id": "att-1789206078004",
@@ -3315,7 +3346,8 @@
       "userAnswers": {
         "q-1789206041179": "B",
         "q-1789206045271": "B"
-      }
+      },
+      "earnedPoints": 0
     },
     {
       "id": "att-1789206073927",
@@ -3338,7 +3370,8 @@
       "userAnswers": {
         "q-1789206041179": "A",
         "q-1789206045271": "B"
-      }
+      },
+      "earnedPoints": 1
     },
     {
       "id": "att-1789206069836",
@@ -3361,7 +3394,8 @@
       "userAnswers": {
         "q-1789206041179": "A",
         "q-1789206045271": "D"
-      }
+      },
+      "earnedPoints": 2
     },
     {
       "id": "att-1789206003315",
@@ -3384,7 +3418,8 @@
       "userAnswers": {
         "q-1789205966454": "B",
         "q-1789205970537": "B"
-      }
+      },
+      "earnedPoints": 0
     },
     {
       "id": "att-1789205999212",
@@ -3407,7 +3442,8 @@
       "userAnswers": {
         "q-1789205966454": "A",
         "q-1789205970537": "B"
-      }
+      },
+      "earnedPoints": 1
     },
     {
       "id": "att-1789205995101",
@@ -3430,7 +3466,8 @@
       "userAnswers": {
         "q-1789205966454": "A",
         "q-1789205970537": "D"
-      }
+      },
+      "earnedPoints": 2
     }
   ],
   "subjects": [
@@ -3559,5 +3596,349 @@
       "createdAt": "2026-09-13T10:00:00Z"
     }
   ],
-  "bookmarks": []
+  "bookmarks": [],
+  "xp_transactions": [
+    {
+      "id": "tx-1789282612935-fee9ea",
+      "idempotencyKey": "referral_test_bonus_1",
+      "userId": "usr-student-1",
+      "sourceType": "referral",
+      "sourceId": "ref-test-1",
+      "activityName": "Friend Referral Bonus",
+      "points": 100,
+      "resultStatus": "Active Student",
+      "metadata": {},
+      "createdAt": "2026-09-13T06:56:52.935235+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789221563832",
+      "idempotencyKey": "mcq_attempt_att-1789221563832",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789221563664",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 1,
+      "resultStatus": "1 Correct (25%)",
+      "metadata": {
+        "correctCount": 1,
+        "percentage": 25.0
+      },
+      "createdAt": "2026-09-12T13:59:23.832958+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789221563810",
+      "idempotencyKey": "mcq_attempt_att-1789221563810",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789221563664",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 2,
+      "resultStatus": "2 Correct (67%)",
+      "metadata": {
+        "correctCount": 2,
+        "percentage": 66.66666666666666
+      },
+      "createdAt": "2026-09-12T13:59:23.810248+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789220472894",
+      "idempotencyKey": "mcq_attempt_att-1789220472894",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789220472693",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 1,
+      "resultStatus": "1 Correct (25%)",
+      "metadata": {
+        "correctCount": 1,
+        "percentage": 25.0
+      },
+      "createdAt": "2026-09-12T13:41:12.894014+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789220472873",
+      "idempotencyKey": "mcq_attempt_att-1789220472873",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789220472693",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 2,
+      "resultStatus": "2 Correct (67%)",
+      "metadata": {
+        "correctCount": 2,
+        "percentage": 66.66666666666666
+      },
+      "createdAt": "2026-09-12T13:41:12.873460+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789218099787",
+      "idempotencyKey": "mcq_attempt_att-1789218099787",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789218099620",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 1,
+      "resultStatus": "1 Correct (25%)",
+      "metadata": {
+        "correctCount": 1,
+        "percentage": 25.0
+      },
+      "createdAt": "2026-09-12T13:01:39.787459+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789218099764",
+      "idempotencyKey": "mcq_attempt_att-1789218099764",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789218099620",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 2,
+      "resultStatus": "2 Correct (67%)",
+      "metadata": {
+        "correctCount": 2,
+        "percentage": 66.66666666666666
+      },
+      "createdAt": "2026-09-12T13:01:39.764933+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789215571009",
+      "idempotencyKey": "mcq_attempt_att-1789215571009",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789215570847",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 1,
+      "resultStatus": "1 Correct (25%)",
+      "metadata": {
+        "correctCount": 1,
+        "percentage": 25.0
+      },
+      "createdAt": "2026-09-12T12:19:31.009883+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789215570989",
+      "idempotencyKey": "mcq_attempt_att-1789215570989",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789215570847",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 2,
+      "resultStatus": "2 Correct (67%)",
+      "metadata": {
+        "correctCount": 2,
+        "percentage": 66.66666666666666
+      },
+      "createdAt": "2026-09-12T12:19:30.989467+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789209334398",
+      "idempotencyKey": "mcq_attempt_att-1789209334398",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789209334237",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 1,
+      "resultStatus": "1 Correct (25%)",
+      "metadata": {
+        "correctCount": 1,
+        "percentage": 25.0
+      },
+      "createdAt": "2026-09-12T10:35:34.398313+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789209334379",
+      "idempotencyKey": "mcq_attempt_att-1789209334379",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789209334237",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 2,
+      "resultStatus": "2 Correct (67%)",
+      "metadata": {
+        "correctCount": 2,
+        "percentage": 66.66666666666666
+      },
+      "createdAt": "2026-09-12T10:35:34.379442+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789207974531",
+      "idempotencyKey": "mcq_attempt_att-1789207974531",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789207974369",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 1,
+      "resultStatus": "1 Correct (25%)",
+      "metadata": {
+        "correctCount": 1,
+        "percentage": 25.0
+      },
+      "createdAt": "2026-09-12T10:12:54.531947+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789207974510",
+      "idempotencyKey": "mcq_attempt_att-1789207974510",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789207974369",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 2,
+      "resultStatus": "2 Correct (67%)",
+      "metadata": {
+        "correctCount": 2,
+        "percentage": 66.66666666666666
+      },
+      "createdAt": "2026-09-12T10:12:54.510806+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789207378423",
+      "idempotencyKey": "mcq_attempt_att-1789207378423",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789207378258",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 1,
+      "resultStatus": "1 Correct (25%)",
+      "metadata": {
+        "correctCount": 1,
+        "percentage": 25.0
+      },
+      "createdAt": "2026-09-12T10:02:58.423700+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789207378403",
+      "idempotencyKey": "mcq_attempt_att-1789207378403",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789207378258",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 2,
+      "resultStatus": "2 Correct (67%)",
+      "metadata": {
+        "correctCount": 2,
+        "percentage": 66.66666666666666
+      },
+      "createdAt": "2026-09-12T10:02:58.403661+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789207374096",
+      "idempotencyKey": "mcq_attempt_att-1789207374096",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789207337227",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 1,
+      "resultStatus": "1 Correct (25%)",
+      "metadata": {
+        "correctCount": 1,
+        "percentage": 25.0
+      },
+      "createdAt": "2026-09-12T10:02:54.096250+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789207369997",
+      "idempotencyKey": "mcq_attempt_att-1789207369997",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789207337227",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 2,
+      "resultStatus": "2 Correct (67%)",
+      "metadata": {
+        "correctCount": 2,
+        "percentage": 66.66666666666666
+      },
+      "createdAt": "2026-09-12T10:02:49.997258+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789206245231",
+      "idempotencyKey": "mcq_attempt_att-1789206245231",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789206208386",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 1,
+      "resultStatus": "1 Correct (25%)",
+      "metadata": {
+        "correctCount": 1,
+        "percentage": 25.0
+      },
+      "createdAt": "2026-09-12T09:44:05.231028+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789206241148",
+      "idempotencyKey": "mcq_attempt_att-1789206241148",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789206208386",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 2,
+      "resultStatus": "2 Correct (67%)",
+      "metadata": {
+        "correctCount": 2,
+        "percentage": 66.66666666666666
+      },
+      "createdAt": "2026-09-12T09:44:01.148848+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789206073927",
+      "idempotencyKey": "mcq_attempt_att-1789206073927",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789206037058",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 1,
+      "resultStatus": "1 Correct (25%)",
+      "metadata": {
+        "correctCount": 1,
+        "percentage": 25.0
+      },
+      "createdAt": "2026-09-12T09:41:13.927514+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789206069836",
+      "idempotencyKey": "mcq_attempt_att-1789206069836",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789206037058",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 2,
+      "resultStatus": "2 Correct (67%)",
+      "metadata": {
+        "correctCount": 2,
+        "percentage": 66.66666666666666
+      },
+      "createdAt": "2026-09-12T09:41:09.836102+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789205999212",
+      "idempotencyKey": "mcq_attempt_att-1789205999212",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789205962316",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 1,
+      "resultStatus": "1 Correct (25%)",
+      "metadata": {
+        "correctCount": 1,
+        "percentage": 25.0
+      },
+      "createdAt": "2026-09-12T09:39:59.212259+00:00"
+    },
+    {
+      "id": "tx-mcq-att-1789205995101",
+      "idempotencyKey": "mcq_attempt_att-1789205995101",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789205962316",
+      "activityName": "Test 1: Law of Contract Speed Test",
+      "points": 2,
+      "resultStatus": "2 Correct (67%)",
+      "metadata": {
+        "correctCount": 2,
+        "percentage": 66.66666666666666
+      },
+      "createdAt": "2026-09-12T09:39:55.101241+00:00"
+    }
+  ]
 }

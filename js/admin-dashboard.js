@@ -229,17 +229,23 @@ class AdminDashboard {
   }
 
   // --- 2. STUDENT MANAGEMENT WITH PASSWORDS & ACTIVATION ---
-  renderStudents() {
+  renderStudents(forceFullRender = false) {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
 
-    // Synchronize backend users every time Students tab is opened
+    // Fast path: If the student search input and table container already exist in the DOM,
+    // only update the table and counters without destroying the input element or losing focus!
+    if (!forceFullRender && document.getElementById('admin-student-table-container') && document.getElementById('student-search-input')) {
+      this.renderStudentTableOnly();
+      return;
+    }
+
+    // Synchronize backend users when Students tab is initially opened
     this.syncBackendUsers(() => {
-      if (this.currentTab === 'students') this.renderStudents();
+      if (this.currentTab === 'students') this.renderStudentTableOnly();
     });
 
     const allStudents = window.store.getStudents();
-    // Sort by newest registration first so new students appear on page 1
     allStudents.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
     const attempts = window.store.getAttempts();
     const submissions = window.store.getSubmissions();
@@ -253,17 +259,12 @@ class AdminDashboard {
     const query = this.studentSearch.trim().toLowerCase();
 
     const filtered = allStudents.filter(st => {
-      // Status filter
       if (this.studentStatusFilter === 'active' && st.isActive === false) return false;
       if (this.studentStatusFilter === 'deactivated' && st.isActive !== false) return false;
-
-      // Level filter
       if (this.studentLevelFilter !== 'all') {
         const lvl = (st.caLevel || '').toUpperCase();
         if (!lvl.includes(this.studentLevelFilter.toUpperCase())) return false;
       }
-
-      // Search query (Name, Email, Username, Phone, Registration No, Exam Level)
       if (query) {
         const n = (st.name || '').toLowerCase();
         const em = (st.email || '').toLowerCase();
@@ -280,7 +281,7 @@ class AdminDashboard {
 
     const totalStudents = allStudents.length;
     const totalFiltered = filtered.length;
-    const pageSize = this.studentPageSize; // 0 = all
+    const pageSize = this.studentPageSize;
     const totalPages = pageSize === 0 ? 1 : (Math.ceil(totalFiltered / pageSize) || 1);
 
     if (this.studentPage > totalPages) this.studentPage = totalPages;
@@ -299,14 +300,14 @@ class AdminDashboard {
         <div class="flex items-center gap-2">
           <button 
             onclick="window.adminDashboard.togglePasswordVisibility()"
-            class="px-3 py-2 text-xs font-semibold rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-1.5"
+            class="px-3 py-2 text-xs font-semibold rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-1.5 cursor-pointer"
           >
             <i data-lucide="${this.showStudentPasswords ? 'eye-off' : 'eye'}" class="w-4 h-4"></i>
             ${this.showStudentPasswords ? 'Hide Passwords' : 'Show Passwords'}
           </button>
           <button 
             onclick="window.adminDashboard.openAddStudentModal()"
-            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
           >
             <i data-lucide="user-plus" class="w-4 h-4"></i> Add New Student
           </button>
@@ -329,15 +330,14 @@ class AdminDashboard {
               placeholder="Search all students by name, email, username, phone, or reg no..."
               class="w-full pl-9 pr-8 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            ${this.studentSearch ? `
-              <button 
-                onclick="window.adminDashboard.clearStudentSearch()"
-                class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
-                title="Clear search"
-              >
-                <i data-lucide="x" class="w-3.5 h-3.5"></i>
-              </button>
-            ` : ''}
+            <button 
+              id="student-search-clear-btn"
+              onclick="window.adminDashboard.clearStudentSearch()"
+              class="${this.studentSearch ? '' : 'hidden '}absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+              title="Clear search"
+            >
+              <i data-lucide="x" class="w-3.5 h-3.5"></i>
+            </button>
           </div>
 
           <!-- Status filter -->
@@ -345,11 +345,11 @@ class AdminDashboard {
             <select 
               id="student-status-filter"
               onchange="window.adminDashboard.handleStudentStatusFilter(this.value)"
-              class="w-full py-2 px-3 text-xs border border-slate-300 rounded-lg bg-white text-slate-700 font-medium"
+              class="w-full py-2 px-3 text-xs border border-slate-300 rounded-lg bg-white text-slate-700 font-medium cursor-pointer"
             >
               <option value="all" ${this.studentStatusFilter === 'all' ? 'selected' : ''}>Status: All Accounts</option>
-              <option value="active" ${this.studentStatusFilter === 'active' ? 'selected' : ''}>Status: Active Only</option>
-              <option value="deactivated" ${this.studentStatusFilter === 'deactivated' ? 'selected' : ''}>Status: Deactivated Only</option>
+              <option value="active" ${this.studentStatusFilter === 'active' ? 'selected' : ''}>Active Accounts</option>
+              <option value="deactivated" ${this.studentStatusFilter === 'deactivated' ? 'selected' : ''}>Deactivated Accounts</option>
             </select>
           </div>
 
@@ -358,7 +358,7 @@ class AdminDashboard {
             <select 
               id="student-level-filter"
               onchange="window.adminDashboard.handleStudentLevelFilter(this.value)"
-              class="w-full py-2 px-3 text-xs border border-slate-300 rounded-lg bg-white text-slate-700 font-medium"
+              class="w-full py-2 px-3 text-xs border border-slate-300 rounded-lg bg-white text-slate-700 font-medium cursor-pointer"
             >
               <option value="all" ${this.studentLevelFilter === 'all' ? 'selected' : ''}>Level: All CA Levels</option>
               <option value="FOUNDATION" ${this.studentLevelFilter === 'FOUNDATION' ? 'selected' : ''}>CA Foundation</option>
@@ -370,7 +370,7 @@ class AdminDashboard {
 
         <!-- Meta info & Page size -->
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs text-slate-500">
-          <div class="flex items-center gap-2">
+          <div id="admin-student-meta-counts" class="flex items-center gap-2">
             <span class="font-semibold text-slate-700">Total Registered Students:</span>
             <span class="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold font-mono">${totalStudents}</span>
             ${totalFiltered !== totalStudents ? `
@@ -383,7 +383,7 @@ class AdminDashboard {
             <label class="text-slate-600 font-medium">Rows per page:</label>
             <select 
               onchange="window.adminDashboard.handleStudentPageSize(this.value)"
-              class="py-1 px-2 text-xs border border-slate-300 rounded bg-white font-mono"
+              class="py-1 px-2 text-xs border border-slate-300 rounded bg-white font-mono cursor-pointer"
             >
               <option value="10" ${pageSize === 10 ? 'selected' : ''}>10</option>
               <option value="25" ${pageSize === 25 ? 'selected' : ''}>25</option>
@@ -394,7 +394,93 @@ class AdminDashboard {
         </div>
       </div>
 
-      <!-- Students Table -->
+      <!-- Students Table Container (Preserves search focus) -->
+      <div id="admin-student-table-container">
+        ${this.renderStudentTableHtml(paginated, attempts, submissions, totalFiltered, totalPages, pageSize, startIndex, endIndex)}
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  renderStudentTableOnly() {
+    const tableContainer = document.getElementById('admin-student-table-container');
+    if (!tableContainer) {
+      this.renderStudents(true);
+      return;
+    }
+
+    const allStudents = window.store.getStudents();
+    allStudents.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    const attempts = window.store.getAttempts();
+    const submissions = window.store.getSubmissions();
+
+    this.studentSearch = this.studentSearch !== undefined ? this.studentSearch : '';
+    this.studentStatusFilter = this.studentStatusFilter || 'all';
+    this.studentLevelFilter = this.studentLevelFilter || 'all';
+    this.studentPage = this.studentPage || 1;
+    this.studentPageSize = this.studentPageSize !== undefined ? this.studentPageSize : 10;
+
+    const query = this.studentSearch.trim().toLowerCase();
+
+    const filtered = allStudents.filter(st => {
+      if (this.studentStatusFilter === 'active' && st.isActive === false) return false;
+      if (this.studentStatusFilter === 'deactivated' && st.isActive !== false) return false;
+      if (this.studentLevelFilter !== 'all') {
+        const lvl = (st.caLevel || '').toUpperCase();
+        if (!lvl.includes(this.studentLevelFilter.toUpperCase())) return false;
+      }
+      if (query) {
+        const n = (st.name || '').toLowerCase();
+        const em = (st.email || '').toLowerCase();
+        const un = (st.username || '').toLowerCase();
+        const ph = (st.phone || '').toLowerCase();
+        const rg = (st.registrationNo || '').toLowerCase();
+        const lv = (st.caLevel || '').toLowerCase();
+        if (!n.includes(query) && !em.includes(query) && !un.includes(query) && !ph.includes(query) && !rg.includes(query) && !lv.includes(query)) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    const totalStudents = allStudents.length;
+    const totalFiltered = filtered.length;
+    const pageSize = this.studentPageSize;
+    const totalPages = pageSize === 0 ? 1 : (Math.ceil(totalFiltered / pageSize) || 1);
+
+    if (this.studentPage > totalPages) this.studentPage = totalPages;
+    if (this.studentPage < 1) this.studentPage = 1;
+
+    const startIndex = pageSize === 0 ? 0 : (this.studentPage - 1) * pageSize;
+    const endIndex = pageSize === 0 ? totalFiltered : Math.min(startIndex + pageSize, totalFiltered);
+    const paginated = pageSize === 0 ? filtered : filtered.slice(startIndex, startIndex + pageSize);
+
+    tableContainer.innerHTML = this.renderStudentTableHtml(paginated, attempts, submissions, totalFiltered, totalPages, pageSize, startIndex, endIndex);
+
+    const countsEl = document.getElementById('admin-student-meta-counts');
+    if (countsEl) {
+      countsEl.innerHTML = `
+        <span class="font-semibold text-slate-700">Total Registered Students:</span>
+        <span class="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-bold font-mono">${totalStudents}</span>
+        ${totalFiltered !== totalStudents ? `
+          <span class="text-slate-400">|</span>
+          <span>Matching Filter: <strong class="text-slate-800">${totalFiltered}</strong></span>
+        ` : ''}
+      `;
+    }
+
+    const clearBtn = document.getElementById('student-search-clear-btn');
+    if (clearBtn) {
+      if (this.studentSearch) clearBtn.classList.remove('hidden');
+      else clearBtn.classList.add('hidden');
+    }
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  renderStudentTableHtml(paginated, attempts, submissions, totalFiltered, totalPages, pageSize, startIndex, endIndex) {
+    return `
       <div class="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
         <table class="w-full text-left text-sm">
           <thead>
@@ -418,65 +504,93 @@ class AdminDashboard {
             ` : paginated.map(st => {
               const studentAttempts = attempts.filter(a => a.userId === st.id).length;
               const studentSubs = submissions.filter(s => s.studentId === st.id).length;
-              const isActive = st.isActive !== false;
-              const isHashed = st.password && String(st.password).startsWith('sha256:');
+              const plainPwd = st.password || '••••••••';
+              const isDeactivated = st.isActive === false;
 
               return `
-                <tr class="hover:bg-slate-50 transition-colors ${!isActive ? 'bg-rose-50/30' : ''}">
-                  <td class="py-3 px-4">
+                <tr class="hover:bg-slate-50/80 transition-colors ${isDeactivated ? 'bg-slate-50/50 opacity-70' : ''}">
+                  <!-- Student Info -->
+                  <td class="py-3.5 px-4">
                     <div class="flex items-center gap-3">
-                      <img src="${st.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120'}" class="w-8 h-8 rounded-full object-cover border border-slate-200">
+                      <img 
+                        src="${st.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}" 
+                        alt="${st.name}" 
+                        class="w-9 h-9 rounded-full object-cover border border-slate-200 flex-shrink-0"
+                      />
                       <div>
                         <span class="font-bold text-slate-900 text-xs block">${st.name}</span>
-                        <span class="text-[11px] text-slate-500 font-mono flex items-center gap-1">
-                          <i data-lucide="mail" class="w-3 h-3 text-slate-400"></i> ${st.email}
-                        </span>
-                        <span class="text-[11px] text-blue-700 font-mono flex items-center gap-1 mt-0.5">
-                          <i data-lucide="phone" class="w-3 h-3 text-blue-500"></i> ${st.phone || '+91 98765 43210'}
-                        </span>
-                        ${st.username ? `
-                          <span class="text-[10px] text-slate-400 font-mono">@${st.username}</span>
-                        ` : ''}
+                        <span class="text-[11px] text-slate-500 block">${st.email}</span>
+                        ${st.phone ? `<span class="text-[10px] text-slate-400 font-mono block">${st.phone}</span>` : ''}
                       </div>
                     </div>
                   </td>
-                  <td class="py-3 px-4">
-                    <span class="font-mono text-xs font-bold bg-slate-100 px-2 py-1 rounded text-slate-800 border border-slate-200" title="${isHashed ? 'Salted SHA-256 Encrypted' : 'Legacy plain-text password'}">
-                      ${this.showStudentPasswords 
-                        ? (isHashed ? '•••••••• (SHA-256 Secured)' : (st.password || '•••••••• (SHA-256 Secured)')) 
-                        : '••••••••'}
+
+                  <!-- Student Password (Revealable for Admin) -->
+                  <td class="py-3.5 px-4">
+                    <div class="flex items-center gap-2">
+                      <span class="font-mono text-xs px-2 py-1 rounded bg-slate-100 border border-slate-200 text-slate-800 select-all">
+                        ${this.showStudentPasswords ? plainPwd : '••••••••'}
+                      </span>
+                      <button 
+                        onclick="window.adminDashboard.openResetPasswordModal('${st.id}')"
+                        class="text-[11px] text-blue-600 hover:text-blue-800 font-semibold cursor-pointer underline"
+                        title="Change / Reset Password"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  </td>
+
+                  <!-- CA Level & Registration No -->
+                  <td class="py-3.5 px-4">
+                    <span class="inline-block px-2 py-0.5 text-[11px] font-bold rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                      ${st.caLevel || 'CA Foundation'}
+                    </span>
+                    <span class="block text-[11px] text-slate-400 font-mono mt-0.5">
+                      ${st.registrationNo || 'REG-PENDING'}
                     </span>
                   </td>
-                  <td class="py-3 px-4 text-xs">
-                    <span class="font-semibold text-slate-800 block">${st.caLevel}</span>
-                    <span class="text-slate-400 font-mono text-[11px]">${st.registrationNo || 'N/A'}</span>
+
+                  <!-- Activity Counts -->
+                  <td class="py-3.5 px-4">
+                    <div class="text-xs text-slate-600 space-y-0.5">
+                      <div><strong class="text-slate-900 font-mono">${studentAttempts}</strong> MCQ Attempts</div>
+                      <div><strong class="text-slate-900 font-mono">${studentSubs}</strong> Paper Submissions</div>
+                    </div>
                   </td>
-                  <td class="py-3 px-4 text-xs text-slate-600">
-                    <span>${studentAttempts} tests • ${studentSubs} copies</span>
+
+                  <!-- Account Status Badge & Toggle -->
+                  <td class="py-3.5 px-4">
+                    <div class="flex items-center gap-2">
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                        isDeactivated 
+                          ? 'bg-rose-100 text-rose-800 border border-rose-200' 
+                          : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                      }">
+                        <span class="w-1.5 h-1.5 rounded-full ${isDeactivated ? 'bg-rose-500' : 'bg-emerald-500'}"></span>
+                        ${isDeactivated ? 'Deactivated' : 'Active'}
+                      </span>
+                      <button 
+                        onclick="window.adminDashboard.toggleStudentActivation('${st.id}')"
+                        class="text-[11px] font-semibold ${isDeactivated ? 'text-emerald-700 hover:underline' : 'text-slate-500 hover:text-rose-600 hover:underline'} cursor-pointer"
+                        title="${isDeactivated ? 'Activate this account' : 'Deactivate this account'}"
+                      >
+                        ${isDeactivated ? 'Activate' : 'Deactivate'}
+                      </button>
+                    </div>
                   </td>
-                  <td class="py-3 px-4">
+
+                  <!-- Actions -->
+                  <td class="py-3.5 px-4 text-right whitespace-nowrap">
                     <button 
-                      onclick="window.adminDashboard.toggleStudentActivation('${st.id}')"
-                      class="px-2.5 py-0.5 rounded-full text-xs font-bold border transition-colors ${
-                        isActive 
-                          ? 'bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-200' 
-                          : 'bg-rose-100 text-rose-800 border-rose-300 hover:bg-rose-200'
-                      }"
-                      title="Click to ${isActive ? 'Deactivate' : 'Activate'}"
+                      onclick="window.adminDashboard.openEditStudentModal('${st.id}')"
+                      class="px-2.5 py-1 text-xs font-semibold text-slate-700 hover:text-blue-600 hover:bg-slate-100 rounded mr-1 cursor-pointer"
                     >
-                      ${isActive ? '✓ Active' : '✕ Deactivated'}
-                    </button>
-                  </td>
-                  <td class="py-3 px-4 text-right space-x-2">
-                    <button 
-                      onclick="window.adminDashboard.openResetPasswordModal('${st.id}')"
-                      class="text-xs font-semibold text-blue-600 hover:text-blue-800"
-                    >
-                      Reset Pass
+                      Edit
                     </button>
                     <button 
-                      onclick="window.adminDashboard.deleteStudent('${st.id}')"
-                      class="text-xs font-semibold text-rose-600 hover:text-rose-800"
+                      onclick="window.adminDashboard.confirmRemoveStudent('${st.id}')"
+                      class="px-2.5 py-1 text-xs font-semibold text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded cursor-pointer"
                     >
                       Remove
                     </button>
@@ -525,48 +639,48 @@ class AdminDashboard {
         ` : ''}
       </div>
     `;
-
-    if (window.lucide) window.lucide.createIcons();
   }
 
   handleStudentSearch(query) {
     this.studentSearch = query || '';
     this.studentPage = 1;
-    this.renderStudents();
+    this.renderStudentTableOnly();
   }
 
   clearStudentSearch() {
     this.studentSearch = '';
     this.studentPage = 1;
-    this.renderStudents();
+    const inp = document.getElementById('student-search-input');
+    if (inp) inp.value = '';
+    this.renderStudentTableOnly();
   }
 
   handleStudentStatusFilter(status) {
     this.studentStatusFilter = status;
     this.studentPage = 1;
-    this.renderStudents();
+    this.renderStudentTableOnly();
   }
 
   handleStudentLevelFilter(level) {
     this.studentLevelFilter = level;
     this.studentPage = 1;
-    this.renderStudents();
+    this.renderStudentTableOnly();
   }
 
   handleStudentPageSize(size) {
     this.studentPageSize = parseInt(size, 10);
     this.studentPage = 1;
-    this.renderStudents();
+    this.renderStudentTableOnly();
   }
 
   setStudentPage(page) {
     this.studentPage = page;
-    this.renderStudents();
+    this.renderStudentTableOnly();
   }
 
   togglePasswordVisibility() {
     this.showStudentPasswords = !this.showStudentPasswords;
-    this.renderStudents();
+    this.renderStudentTableOnly();
   }
 
   toggleStudentActivation(studentId) {
@@ -2138,6 +2252,19 @@ This will remove the question paper, attached answer keys, and student submissio
         link: 'assignments',
         metadata: { submissionId: submission.id }
       });
+      // Record authoritative XP transaction in store
+      if (window.store && typeof window.store.recordXpTransaction === 'function' && pointsAwarded > 0) {
+        window.store.recordXpTransaction({
+          idempotencyKey: `paper_submission_${submission.id}`,
+          userId: submission.studentId,
+          sourceType: 'paper_submission',
+          sourceId: submission.assignmentId,
+          activityName: asg ? asg.title : 'Test Paper Evaluation',
+          points: pointsAwarded,
+          resultStatus: `Score: ${marks}/${asg ? asg.maximumMarks : 100} M`,
+          metadata: { marksObtained: marks, maximumMarks: asg ? asg.maximumMarks : 100, submissionId: submission.id }
+        });
+      }
       // Backend sync
       fetch('/api/papers/submissions', {
         method: 'POST',

@@ -22,6 +22,7 @@ class FirebaseSyncManager {
     this._isMergingSubjects = false;
     this._isMergingNotifications = false;
     this._isMergingBookmarks = false;
+    this._isMergingXpTransactions = false;
     this._knownUserIds = new Set();
   }
 
@@ -251,6 +252,16 @@ class FirebaseSyncManager {
       this.mergeRemoteBookmarks(remoteBms);
     }, err => {
       console.warn('[FirebaseSync] Bookmarks listener error:', err);
+    });
+
+    // --- XP TRANSACTIONS REALTIME LISTENER ---
+    this.db.ref('xp_transactions').on('value', snap => {
+      if (this._isMergingXpTransactions) return;
+      const val = snap.val();
+      const remoteTxs = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
+      this.mergeRemoteXpTransactions(remoteTxs);
+    }, err => {
+      console.warn('[FirebaseSync] XP transactions listener error:', err);
     });
   }
 
@@ -714,6 +725,38 @@ class FirebaseSyncManager {
     }
   }
 
+  mergeRemoteXpTransactions(remoteTxs) {
+    if (!window.store) return;
+    this._isMergingXpTransactions = true;
+    try {
+      let localTxs = window.store.getXpTransactions();
+      let changed = false;
+      remoteTxs.forEach(rtx => {
+        if (!rtx || !rtx.id) return;
+        const idx = localTxs.findIndex(ltx => ltx.id === rtx.id || (ltx.idempotencyKey && rtx.idempotencyKey && ltx.idempotencyKey === rtx.idempotencyKey));
+        if (idx === -1) {
+          localTxs.unshift(rtx);
+          changed = true;
+        } else if (localTxs[idx].points !== rtx.points) {
+          localTxs[idx] = { ...localTxs[idx], ...rtx };
+          changed = true;
+        }
+      });
+      if (changed) {
+        localTxs.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+        window.store.saveXpTransactions(localTxs);
+        if (window.app && typeof window.app.renderProfilePage === 'function') {
+          const u = window.auth ? window.auth.getCurrentUser() : null;
+          if (u) window.app.renderProfilePage();
+        }
+      }
+    } catch (e) {
+      console.warn('[FirebaseSync] Error merging XP transactions:', e);
+    } finally {
+      this._isMergingXpTransactions = false;
+    }
+  }
+
   // --- WRITE OPERATIONS TO CLOUD ---
 
   saveUser(user) {
@@ -838,6 +881,39 @@ class FirebaseSyncManager {
       }
     }).catch(err => {
       console.warn('[FirebaseSync] markAllNotificationsRead error:', err);
+    });
+  }
+
+  deleteNotification(notificationId) {
+    if (!this.db || !notificationId) return Promise.resolve();
+    return this.db.ref('notifications/' + notificationId).remove().catch(err => {
+      console.warn('[FirebaseSync] deleteNotification error:', err);
+    });
+  }
+
+  clearNotifications(userId) {
+    if (!this.db || !userId) return Promise.resolve();
+    return this.db.ref('notifications').once('value').then(snap => {
+      const val = snap.val();
+      if (!val) return;
+      const updates = {};
+      Object.keys(val).forEach(k => {
+        if (val[k] && val[k].userId === userId) {
+          updates[k] = null;
+        }
+      });
+      if (Object.keys(updates).length > 0) {
+        return this.db.ref('notifications').update(updates);
+      }
+    }).catch(err => {
+      console.warn('[FirebaseSync] clearNotifications error:', err);
+    });
+  }
+
+  saveXpTransaction(transaction) {
+    if (!this.db || !transaction || !transaction.id) return Promise.resolve();
+    return this.db.ref('xp_transactions/' + transaction.id).set(transaction).catch(err => {
+      console.warn('[FirebaseSync] saveXpTransaction error:', err);
     });
   }
 

@@ -393,6 +393,19 @@ class TeacherPortal {
         link: 'assignments',
         metadata: { submissionId: submission.id }
       });
+      // Record authoritative XP transaction in store
+      if (window.store && typeof window.store.recordXpTransaction === 'function' && pointsAwarded > 0) {
+        window.store.recordXpTransaction({
+          idempotencyKey: `paper_submission_${submission.id}`,
+          userId: submission.studentId,
+          sourceType: 'paper_submission',
+          sourceId: submission.assignmentId,
+          activityName: asg ? asg.title : 'Test Paper Evaluation',
+          points: pointsAwarded,
+          resultStatus: `Score: ${marks}/${asg ? asg.maximumMarks : 100} M`,
+          metadata: { marksObtained: marks, maximumMarks: asg ? asg.maximumMarks : 100, submissionId: submission.id }
+        });
+      }
       // Backend sync
       fetch('/api/papers/submissions', {
         method: 'POST',

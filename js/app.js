@@ -610,29 +610,30 @@ class App {
     const levelBadge = document.getElementById('profile-page-level-badge');
     if (levelBadge) levelBadge.textContent = (user.caLevel || 'CA INTERMEDIATE').toUpperCase();
 
-    // 2. Academic Standing & Private Rank
+    // 2. Academic Standing & Authoritative XP
     const rankNumEl = document.getElementById('profile-page-rank-number');
     const tierNameEl = document.getElementById('profile-page-tier-name');
     const xpDisplayEl = document.getElementById('profile-page-xp-display');
     const tierIconContainer = document.getElementById('profile-page-tier-icon-container');
 
-    let rankVal = '#--';
-    let tierObj = { id: 'tier-1', name: 'Rookie I', family: 'Rookie', rankNum: 1 };
-    let xpVal = user.baseXp !== undefined ? user.baseXp : 0;
+    let xpVal = 0;
+    if (window.rankService && typeof window.rankService.getUserTotalXp === 'function') {
+      xpVal = window.rankService.getUserTotalXp(user.id);
+    } else if (window.store && typeof window.store.getUserTotalXp === 'function') {
+      xpVal = window.store.getUserTotalXp(user.id);
+    } else {
+      xpVal = user.totalXp !== undefined ? Number(user.totalXp) : (user.baseXp !== undefined ? Number(user.baseXp) : 0);
+    }
 
-    if (window.leaderboardManager) {
-      if (!window.leaderboardManager.cachedStandings || window.leaderboardManager.cachedStandings.length === 0) {
-        window.leaderboardManager.calculateAllStandings();
-      }
-      const standing = (window.leaderboardManager.cachedStandings || []).find(s => s.id === user.id);
-      if (standing) {
-        const rIndex = window.leaderboardManager.cachedStandings.indexOf(standing);
-        rankVal = '#' + (rIndex + 1);
-        tierObj = standing.tier || tierObj;
-        xpVal = standing.xp !== undefined ? standing.xp : xpVal;
-      } else if (window.leaderboardManager.resolveTier) {
-        tierObj = window.leaderboardManager.resolveTier(xpVal);
-      }
+    const tierData = window.rankService 
+      ? window.rankService.resolveTier(xpVal) 
+      : (window.store && window.store.resolveTier ? window.store.resolveTier(xpVal) : null);
+    const tierObj = tierData ? tierData.currentTier : { id: 'rookie_3', name: 'Rookie III', family: 'Rookie' };
+
+    let rankVal = '#--';
+    if (window.leaderboardManager && typeof window.leaderboardManager.getStudentRank === 'function') {
+      const r = window.leaderboardManager.getStudentRank(user.id);
+      if (r) rankVal = '#' + r;
     }
 
     if (rankNumEl) rankNumEl.textContent = rankVal;
@@ -641,6 +642,9 @@ class App {
     if (tierIconContainer && window.leaderboardManager && window.leaderboardManager.getTierBadgeSvg) {
       tierIconContainer.innerHTML = window.leaderboardManager.getTierBadgeSvg(tierObj, 52);
     }
+
+    // Render Authoritative XP Activity Ledger
+    this.renderProfileXpHistory(user.id, xpVal);
 
     // 3. Edit Form Pre-fill
     const editName = document.getElementById('profile-page-edit-name');
@@ -1244,7 +1248,7 @@ class App {
       return `
         <div 
           onclick="window.app.handleNotificationClick('${n.id}', '${n.link || ''}')"
-          class="p-3.5 hover:bg-slate-50 transition-colors cursor-pointer flex items-start gap-3 ${n.read ? 'opacity-70' : 'bg-blue-50/20'}"
+          class="p-3.5 hover:bg-slate-50 transition-colors cursor-pointer flex items-start gap-3 group ${n.read ? 'opacity-70' : 'bg-blue-50/20'}"
         >
           <div class="w-8 h-8 rounded-full ${iconBg} flex items-center justify-center shrink-0 mt-0.5">
             <i data-lucide="${icon}" class="w-4 h-4"></i>
@@ -1252,7 +1256,17 @@ class App {
           <div class="flex-1 min-w-0">
             <div class="flex items-center justify-between gap-1 mb-0.5">
               <strong class="text-xs text-slate-900 truncate block">${n.title || 'Notification'}</strong>
-              <span class="text-[10px] text-slate-400 shrink-0 font-mono">${timeAgo}</span>
+              <div class="flex items-center gap-1.5 shrink-0">
+                <span class="text-[10px] text-slate-400 font-mono">${timeAgo}</span>
+                <button 
+                  type="button"
+                  onclick="event.stopPropagation(); window.app.deleteNotification('${n.id}')"
+                  class="p-1 rounded text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                  title="Delete notification"
+                >
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
             </div>
             <p class="text-[11px] text-slate-600 leading-snug line-clamp-2">${n.message || ''}</p>
             ${!n.read ? '<span class="inline-block w-1.5 h-1.5 rounded-full bg-blue-600 mt-1"></span>' : ''}
@@ -1283,6 +1297,129 @@ class App {
     }
     this.renderNotificationsList();
     this.updateNotificationBadge();
+  }
+
+  deleteNotification(notifId) {
+    if (window.store && typeof window.store.deleteNotification === 'function') {
+      const user = window.auth ? window.auth.getCurrentUser() : null;
+      window.store.deleteNotification(notifId, user ? user.id : null);
+      this.renderNotificationsList();
+      this.updateNotificationBadge();
+      this.showToast('Notification deleted', 'info');
+    }
+  }
+
+  clearAllNotifications() {
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    if (!user) return;
+    if (window.store && typeof window.store.clearAllNotifications === 'function') {
+      window.store.clearAllNotifications(user.id);
+      this.renderNotificationsList();
+      this.updateNotificationBadge();
+      this.showToast('All notifications cleared', 'info');
+    }
+  }
+
+  renderProfileXpHistory(userId, totalXp) {
+    const tbody = document.getElementById('profile-xp-history-tbody');
+    const totalPill = document.getElementById('profile-xp-total-pill');
+    if (totalPill) {
+      totalPill.textContent = Number(totalXp).toLocaleString() + ' Total XP';
+    }
+    if (!tbody) return;
+
+    let txs = window.store && window.store.getXpTransactions ? window.store.getXpTransactions(userId) : [];
+
+    // Also fetch latest from backend asynchronously to guarantee multi-device accuracy
+    if (!this._fetchingBackendXp && typeof fetch !== 'undefined') {
+      this._fetchingBackendXp = true;
+      const user = window.auth ? window.auth.getCurrentUser() : null;
+      const token = user ? (user.token || user.email) : '';
+      fetch(`/api/xp/transactions?userId=${encodeURIComponent(userId)}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      }).then(r => r.ok ? r.json() : null).then(data => {
+        if (data && data.success && Array.isArray(data.transactions)) {
+          if (window.store && window.store.saveXpTransactions) {
+            const local = window.store.getXpTransactions();
+            const otherUserTxs = local.filter(t => t.userId !== userId);
+            const combined = [...data.transactions, ...otherUserTxs];
+            window.store.saveXpTransactions(combined);
+            const currentTab = this.currentView || 'dashboard';
+            if (currentTab === 'profile') {
+              this.populateXpHistoryRows(data.transactions);
+            }
+          }
+        }
+      }).catch(() => {}).finally(() => { this._fetchingBackendXp = false; });
+    }
+
+    this.populateXpHistoryRows(txs);
+  }
+
+  populateXpHistoryRows(txs) {
+    const tbody = document.getElementById('profile-xp-history-tbody');
+    if (!tbody) return;
+
+    if (!txs || txs.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="5" class="py-8 text-center text-slate-400">
+            <i data-lucide="zap-off" class="w-6 h-6 mx-auto mb-2 text-slate-300"></i>
+            <span class="block font-medium">No points activity recorded yet.</span>
+            <span class="text-[11px] text-slate-400 block mt-0.5">Complete an MCQ test or submit a practical paper to earn platform XP!</span>
+          </td>
+        </tr>
+      `;
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
+
+    tbody.innerHTML = txs.map(t => {
+      let icon = 'zap';
+      let badgeClass = 'bg-indigo-50 text-indigo-700 border border-indigo-200';
+      let typeLabel = 'Platform Points';
+      if (t.sourceType === 'mcq_test') {
+        icon = 'check-square';
+        badgeClass = 'bg-blue-50 text-blue-700 border border-blue-200';
+        typeLabel = 'MCQ Mock Test';
+      } else if (t.sourceType === 'paper_submission') {
+        icon = 'file-check';
+        badgeClass = 'bg-purple-50 text-purple-700 border border-purple-200';
+        typeLabel = 'Test Paper Evaluation';
+      } else if (t.sourceType === 'referral') {
+        icon = 'gift';
+        badgeClass = 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+        typeLabel = 'Referral Bonus';
+      } else if (t.sourceType === 'baseline') {
+        icon = 'award';
+        badgeClass = 'bg-amber-50 text-amber-700 border border-amber-200';
+        typeLabel = 'Enrollment Baseline';
+      }
+
+      const dateStr = t.createdAt
+        ? new Date(t.createdAt).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : 'Recent';
+
+      return `
+        <tr class="hover:bg-slate-50 transition-colors">
+          <td class="py-3 px-3 text-slate-500 font-mono text-[11px] whitespace-nowrap">${dateStr}</td>
+          <td class="py-3 px-3 font-bold text-slate-900">${t.activityName || 'Assessment Activity'}</td>
+          <td class="py-3 px-3">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${badgeClass}">
+              <i data-lucide="${icon}" class="w-3 h-3"></i> ${typeLabel}
+            </span>
+          </td>
+          <td class="py-3 px-3 text-slate-600 text-xs">${t.resultStatus || 'Completed'}</td>
+          <td class="py-3 px-3 text-right whitespace-nowrap">
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-100 text-amber-900 border border-amber-300">
+              +${Number(t.points).toLocaleString()} XP
+            </span>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    if (window.lucide) window.lucide.createIcons();
   }
 }
 

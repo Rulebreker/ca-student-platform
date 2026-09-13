@@ -652,11 +652,14 @@ class LeaderboardManager {
     const standings = this.calculateAllStandings();
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
 
-    // Check rank-up celebration
+    // Maintain baseline tier in localStorage without showing rank-up modal on refresh
     if (currentUser && currentUser.role === 'student') {
       const studentStanding = standings.find(s => s.id === currentUser.id);
       if (studentStanding) {
-        this.checkRankUp(studentStanding);
+        const key = `excellenceca_last_tier_${currentUser.id}`;
+        if (!localStorage.getItem(key)) {
+          localStorage.setItem(key, studentStanding.tier.id);
+        }
       }
     }
 
@@ -667,8 +670,66 @@ class LeaderboardManager {
     const allExamLevels = window.store && window.store.getExamLevels ? window.store.getExamLevels() : ['CA Foundation', 'CA Intermediate', 'CA Final'];
     const allSubjects = window.store ? window.store.getSubjects() : [];
 
-    // Filter by state, district, city, rank, search
-    const filteredStandings = standings.filter(st => {
+    const filteredStandings = this.filterStandings(standings);
+
+    // Assign sequential contextual rank to each student in filteredStandings
+    filteredStandings.forEach((st, idx) => {
+      st.contextRank = idx + 1;
+    });
+
+    const studentSelf = currentUser ? filteredStandings.find(s => s.id === currentUser.id) : null;
+    const isFiltered = this.isAnyFilterActive();
+
+    // Available cities for city filter based on selected state/district
+    const availableCities = Array.from(new Set(
+      standings
+        .filter(s => (this.selectedStateFilter === 'all' || s.state.toLowerCase() === this.selectedStateFilter.toLowerCase()) &&
+                     (this.selectedDistrictFilter === 'all' || (s.district || '').toLowerCase() === this.selectedDistrictFilter.toLowerCase()))
+        .map(s => s.city)
+        .filter(Boolean)
+    )).sort();
+
+    container.innerHTML = `
+      <div class="space-y-8 max-w-7xl mx-auto">
+        
+        <!-- HEADER & PERSISTENT STUDENT HERO RANK CARD -->
+        <div id="leaderboard-hero-area">
+          ${this.renderHeaderAndHeroCard(studentSelf, currentUser, isFiltered, standings)}
+        </div>
+
+        <!-- MULTI-FACETED CONTROLS & 6-WAY FILTER BAR -->
+        <div id="leaderboard-filterbar-area">
+          ${this.renderFilterBar(allExamLevels, allSubjects, availableCities)}
+        </div>
+
+        <!-- DYNAMIC RESULTS (PODIUM + TABLE) -->
+        <div id="leaderboard-results-area" class="space-y-8">
+          ${this.renderResultsArea(filteredStandings, currentUser)}
+        </div>
+
+        <!-- STICKY "YOUR POSITION" CARD -->
+        <div id="leaderboard-sticky-area">
+          ${studentSelf ? this.renderStickyYourPosition(studentSelf) : ''}
+        </div>
+
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  isAnyFilterActive() {
+    return this.selectedRankFilter !== 'all' || 
+           this.selectedExamLevelFilter !== 'all' || 
+           this.selectedSubjectFilter !== 'all' || 
+           this.selectedStateFilter !== 'all' || 
+           this.selectedDistrictFilter !== 'all' || 
+           this.selectedCityFilter !== 'all' || 
+           !!this.searchQuery;
+  }
+
+  filterStandings(standings) {
+    return (standings || []).filter(st => {
       // 1. Rank filter
       if (this.selectedRankFilter !== 'all') {
         const familyMatch = st.tier.family.toLowerCase() === this.selectedRankFilter.toLowerCase();
@@ -705,58 +766,19 @@ class LeaderboardManager {
 
       return true;
     });
+  }
 
-    // Assign sequential contextual rank to each student in filteredStandings
-    filteredStandings.forEach((st, idx) => {
-      st.contextRank = idx + 1;
-    });
-
-    const studentSelf = currentUser ? filteredStandings.find(s => s.id === currentUser.id) : null;
-    const isFiltered = this.selectedRankFilter !== 'all' || 
-                       this.selectedExamLevelFilter !== 'all' || 
-                       this.selectedSubjectFilter !== 'all' || 
-                       this.selectedStateFilter !== 'all' || 
-                       this.selectedDistrictFilter !== 'all' || 
-                       this.selectedCityFilter !== 'all' || 
-                       !!this.searchQuery;
-
-    // Available cities for city filter based on selected state/district
-    const availableCities = Array.from(new Set(
-      standings
-        .filter(s => (this.selectedStateFilter === 'all' || s.state.toLowerCase() === this.selectedStateFilter.toLowerCase()) &&
-                     (this.selectedDistrictFilter === 'all' || (s.district || '').toLowerCase() === this.selectedDistrictFilter.toLowerCase()))
-        .map(s => s.city)
-        .filter(Boolean)
-    )).sort();
-
-    container.innerHTML = `
-      <div class="space-y-8 max-w-7xl mx-auto">
-        
-        <!-- HEADER & STUDENT HERO CARD -->
-        ${this.renderHeaderAndHeroCard(studentSelf, currentUser, isFiltered)}
-
-        <!-- TOP 3 PODIUM -->
-        ${filteredStandings.length >= 3 ? this.renderPodium(filteredStandings.slice(0, 3), currentUser) : ''}
-
-        <!-- MULTI-FACETED CONTROLS & 6-WAY FILTER BAR -->
-        ${this.renderFilterBar(allExamLevels, allSubjects, availableCities)}
-
-        <!-- LEADERBOARD TABLE & CARDS -->
-        ${this.renderTable(filteredStandings, filteredStandings.length >= 3 ? 3 : 0, currentUser)}
-
-        <!-- STICKY "YOUR POSITION" CARD -->
-        ${studentSelf ? this.renderStickyYourPosition(studentSelf) : ''}
-
-      </div>
+  renderResultsArea(filteredStandings, currentUser) {
+    return `
+      ${filteredStandings.length >= 3 ? this.renderPodium(filteredStandings.slice(0, 3), currentUser) : ''}
+      ${this.renderTable(filteredStandings, filteredStandings.length >= 3 ? 3 : 0, currentUser)}
     `;
-
-    if (window.lucide) window.lucide.createIcons();
   }
 
   // =========================================================================
   // 6. HEADER & STUDENT HERO CARD (STRICT PRIVACY - NO PLATFORM RANK/TOTALS)
   // =========================================================================
-  renderHeaderAndHeroCard(studentSelf, currentUser, isFiltered) {
+  renderHeaderAndHeroCard(studentSelf, currentUser, isFiltered, allStandings) {
     // Build context description tag
     const activeContextTags = [];
     if (this.selectedSubjectFilter !== 'all') activeContextTags.push(this.selectedSubjectFilter.toUpperCase());
@@ -793,42 +815,55 @@ class LeaderboardManager {
       `;
     }
 
-    // Student is logged in
-    if (!studentSelf) {
-      // Student is logged in but filtered out by current state/district/level filter
-      return `
-        <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-6 sm:p-8 text-white border border-indigo-900/40 shadow-xl relative overflow-hidden">
-          <div class="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-            <div>
-              <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 mb-3">
-                <i data-lucide="award" class="w-3.5 h-3.5 text-amber-400"></i> ${contextSubtitle}
-              </div>
-              <h1 class="text-2xl sm:text-3xl font-black tracking-tight text-white">Student Leaderboard</h1>
-              <p class="text-xs sm:text-sm text-slate-300 mt-1 font-medium italic">"Compete. Learn. Level Up."</p>
-              
-              <div class="flex items-center gap-2 mt-4 text-[11px] text-amber-300 font-medium">
-                <i data-lucide="info" class="w-3.5 h-3.5"></i>
-                <span>Your profile is outside the currently active filter criteria.</span>
-              </div>
-            </div>
+    // Student is logged in — ALWAYS render the persistent personal rank card
+    const allList = allStandings || (this.cachedStandings && this.cachedStandings.length > 0 ? this.cachedStandings : this.calculateAllStandings());
+    const globalRankIndex = allList.findIndex(s => s.id === currentUser.id);
+    const globalRank = globalRankIndex >= 0 ? globalRankIndex + 1 : 1;
+    const studentRecord = allList.find(s => s.id === currentUser.id) || studentSelf || {
+      id: currentUser.id,
+      name: currentUser.name || 'Student',
+      avatar: currentUser.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120',
+      caLevel: currentUser.caLevel || 'CA Student',
+      state: currentUser.state || 'India',
+      district: currentUser.district || '',
+      totalXp: window.rankService ? window.rankService.getUserTotalXp(currentUser.id) : (currentUser.totalXp || 0)
+    };
 
-            <div class="bg-white/10 backdrop-blur-md border border-white/15 rounded-2xl p-5 shadow-lg flex items-center gap-4">
-              <button 
-                onclick="window.leaderboardManager.resetFilters()"
-                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
-              >
-                <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> Reset Filters to View Your Rank
-              </button>
-            </div>
+    const rankTiers = window.store ? window.store.getRankTiers() : [];
+    const tierData = this.resolveTier(studentRecord.totalXp, rankTiers);
+    const studentTier = tierData.currentTier;
+    const tierBadge = this.getTierBadgeSvg(studentTier, 42);
+
+    const nextTierMinXp = tierData.nextTier ? tierData.nextTier.minXp : studentRecord.totalXp;
+    const progressText = tierData.isMaxRank 
+      ? 'MAX RANK REACHED • CELESTIAL TIER' 
+      : `${studentRecord.totalXp.toLocaleString()} / ${nextTierMinXp.toLocaleString()} XP — ${tierData.xpToNext.toLocaleString()} XP needed for next level`;
+
+    // Determine ranking badges
+    const isInsideFilter = !!studentSelf;
+    let rankBadgeHtml = '';
+    if (isInsideFilter) {
+      rankBadgeHtml = `
+        <div class="flex items-center gap-2">
+          <div class="text-2xl sm:text-3xl font-black text-white font-mono">#${studentSelf.contextRank}</div>
+          ${isFiltered ? `<span class="px-2 py-0.5 rounded text-[10px] font-extrabold bg-indigo-500/25 text-indigo-200 border border-indigo-500/30" title="Overall Rank #${globalRank}">Global #${globalRank}</span>` : ''}
+        </div>
+      `;
+    } else {
+      rankBadgeHtml = `
+        <div class="space-y-1">
+          <div class="flex items-center gap-2">
+            <div class="text-2xl sm:text-3xl font-black text-amber-300 font-mono">#${globalRank}</div>
+            <span class="px-2 py-0.5 rounded text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase tracking-wider">Overall Standing</span>
+          </div>
+          <div class="text-[11px] text-amber-200/90 flex items-center gap-1.5">
+            <i data-lucide="filter" class="w-3 h-3"></i>
+            <span>Outside active filter</span>
+            <button onclick="window.leaderboardManager.resetFilters()" class="text-indigo-200 hover:text-white underline font-bold cursor-pointer ml-1">Reset Filters</button>
           </div>
         </div>
       `;
     }
-
-    const tierBadge = this.getTierBadgeSvg(studentSelf.tier, 40);
-    const progressText = studentSelf.isMaxRank 
-      ? 'MAX RANK REACHED • CELESTIAL TIER' 
-      : `${(studentSelf.xpToNext).toLocaleString()} XP to ${studentSelf.nextTier.name}`;
 
     return `
       <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-6 sm:p-8 text-white border border-indigo-900/40 shadow-xl relative overflow-hidden">
@@ -846,48 +881,69 @@ class LeaderboardManager {
             <h1 class="text-2xl sm:text-3xl font-black tracking-tight text-white">Student Leaderboard</h1>
             <p class="text-xs sm:text-sm text-slate-300 mt-1 font-medium italic">"Compete. Learn. Level Up."</p>
             
-            <!-- Context tags (Strict Privacy: contextual tags only) -->
+            <!-- Context tags -->
             <div class="flex flex-wrap items-center gap-2 mt-4 text-[11px]">
               <span class="px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-200 font-semibold border border-indigo-500/30">
-                <i data-lucide="map-pin" class="w-3 h-3 inline mr-1"></i>${studentSelf.district ? `${studentSelf.district}, ` : ''}${studentSelf.state}
+                <i data-lucide="map-pin" class="w-3 h-3 inline mr-1"></i>${studentRecord.district ? `${studentRecord.district}, ` : ''}${studentRecord.state}
               </span>
               <span class="px-2.5 py-1 rounded-lg bg-blue-500/20 text-blue-200 font-semibold border border-blue-500/30">
-                <i data-lucide="book-open" class="w-3 h-3 inline mr-1"></i>${studentSelf.caLevel}
+                <i data-lucide="book-open" class="w-3 h-3 inline mr-1"></i>${studentRecord.caLevel}
               </span>
             </div>
           </div>
 
-          <!-- Highlighted Student Rank Card (Shows contextual rank ONLY) -->
-          <div class="bg-white/10 backdrop-blur-md border border-white/15 rounded-2xl p-5 sm:p-6 lg:min-w-[340px] shadow-lg">
-            <div class="flex items-center justify-between gap-4 mb-3">
-              <div>
-                <span class="text-[10px] font-extrabold uppercase tracking-wider text-indigo-300 block">YOUR RANK</span>
-                <div class="text-2xl sm:text-3xl font-black text-white flex items-center gap-1.5">
-                  #${studentSelf.contextRank}
+          <!-- Highlighted Student Rank Card (Persistent Real Rank Card) -->
+          <div class="bg-white/10 backdrop-blur-md border border-white/15 rounded-2xl p-5 sm:p-6 lg:min-w-[360px] shadow-xl">
+            
+            <!-- Student Profile Row -->
+            <div class="flex items-center justify-between gap-3 pb-3 mb-3 border-b border-white/10">
+              <div class="flex items-center gap-3 min-w-0">
+                <img 
+                  src="${studentRecord.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120'}" 
+                  alt="${studentRecord.name}" 
+                  class="w-10 h-10 rounded-full object-cover border-2 border-white/20 flex-shrink-0"
+                >
+                <div class="min-w-0">
+                  <div class="font-extrabold text-white text-sm truncate flex items-center gap-1.5">
+                    ${studentRecord.name}
+                    <span class="text-[9px] font-black uppercase tracking-wider text-blue-200 bg-blue-500/30 px-1.5 py-0.5 rounded border border-blue-400/30">You</span>
+                  </div>
+                  <div class="text-[11px] text-slate-300 truncate">
+                    ${studentRecord.district ? `${studentRecord.district}, ` : ''}${studentRecord.state} • ${studentRecord.caLevel}
+                  </div>
                 </div>
               </div>
-              <div class="flex items-center gap-3">
-                ${tierBadge}
-                <div class="text-right">
-                  <span class="text-sm font-black uppercase text-amber-300 block tracking-wide">${studentSelf.tier.name}</span>
-                  <span class="text-xs font-bold text-emerald-400 font-mono">${studentSelf.totalXp.toLocaleString()} XP</span>
-                </div>
+              <div class="text-right flex-shrink-0">
+                <span class="text-xs font-black text-emerald-400 font-mono block">${studentRecord.totalXp.toLocaleString()} XP</span>
+                <span class="text-[10px] text-indigo-300 font-bold uppercase tracking-wider">${studentTier.name}</span>
               </div>
             </div>
 
-            <!-- XP Progress Bar -->
+            <!-- Rank & Badge Row -->
+            <div class="flex items-center justify-between gap-4 mb-3">
+              <div>
+                <span class="text-[10px] font-black uppercase tracking-wider text-indigo-300 block mb-0.5">YOUR RANK</span>
+                ${rankBadgeHtml}
+              </div>
+              <div class="flex items-center gap-2 flex-shrink-0">
+                ${tierBadge}
+              </div>
+            </div>
+
+            <!-- PUBG Style Rank Progress Bar -->
             <div class="space-y-1.5">
               <div class="w-full bg-slate-800/80 rounded-full h-2.5 overflow-hidden border border-white/10">
                 <div 
                   class="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-amber-400 rounded-full transition-all duration-700 shadow-xs"
-                  style="width: ${studentSelf.progressPercent}%"
+                  style="width: ${tierData.progressPercent}%"
                 ></div>
               </div>
               <div class="flex items-center justify-between text-[11px] text-slate-300 font-medium">
-                <span>${progressText}</span>
-                <span class="font-bold text-white font-mono">${studentSelf.progressPercent}%</span>
+                <span class="truncate mr-2">${progressText}</span>
+                <span class="font-bold text-white font-mono flex-shrink-0">${tierData.progressPercent}%</span>
               </div>
             </div>
+
           </div>
 
         </div>
@@ -1083,9 +1139,10 @@ class LeaderboardManager {
         <!-- ROW 1: SEARCH STUDENT (STRICT PRIVACY: NO STUDENT COUNTS DISPLAYED) -->
         <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           <div class="relative flex-1">
-            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2"></i>
+            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"></i>
             <input 
               type="text" 
+              id="leaderboard-search-input"
               placeholder="Search student by name..." 
               value="${this.searchQuery}"
               oninput="window.leaderboardManager.handleSearch(this.value)"
@@ -1840,7 +1897,72 @@ class LeaderboardManager {
   handleSearch(query) {
     this.searchQuery = (query || '').trim();
     this.currentPage = 1;
+
+    const resultsArea = document.getElementById('leaderboard-results-area');
+    if (resultsArea) {
+      // Fast sub-tree update: preserves search input element and user focus completely!
+      const standings = this.cachedStandings && this.cachedStandings.length > 0 ? this.cachedStandings : this.calculateAllStandings();
+      const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+      const filteredStandings = this.filterStandings(standings);
+      filteredStandings.forEach((st, idx) => { st.contextRank = idx + 1; });
+      const studentSelf = currentUser ? filteredStandings.find(s => s.id === currentUser.id) : null;
+
+      resultsArea.innerHTML = this.renderResultsArea(filteredStandings, currentUser);
+
+      const stickyArea = document.getElementById('leaderboard-sticky-area');
+      if (stickyArea) {
+        stickyArea.innerHTML = studentSelf ? this.renderStickyYourPosition(studentSelf) : '';
+      }
+
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
+
+    // Fallback: preserve selection & focus
+    const input = document.getElementById('leaderboard-search-input');
+    const start = input ? input.selectionStart : null;
+    const end = input ? input.selectionEnd : null;
+
     this.render();
+
+    if (start !== null) {
+      const restored = document.getElementById('leaderboard-search-input');
+      if (restored) {
+        restored.focus();
+        restored.setSelectionRange(start, end);
+      }
+    }
+  }
+
+  triggerRankUpIfEligible(userId, oldTotalXp, newTotalXp) {
+    if (!userId || newTotalXp <= oldTotalXp) return;
+    const rankTiers = window.store ? window.store.getRankTiers() : [];
+    if (!rankTiers || rankTiers.length === 0) return;
+
+    const oldTierData = this.resolveTier(oldTotalXp, rankTiers);
+    const newTierData = this.resolveTier(newTotalXp, rankTiers);
+
+    const oldTierIdx = rankTiers.findIndex(t => t.id === oldTierData.currentTier.id);
+    const newTierIdx = rankTiers.findIndex(t => t.id === newTierData.currentTier.id);
+
+    if (newTierIdx > oldTierIdx) {
+      const key = `excellenceca_last_tier_${userId}`;
+      const lastRecordedTierId = localStorage.getItem(key);
+      const lastRecordedIdx = lastRecordedTierId ? rankTiers.findIndex(t => t.id === lastRecordedTierId) : oldTierIdx;
+
+      if (newTierIdx > lastRecordedIdx) {
+        const student = (this.cachedStandings && this.cachedStandings.find(s => s.id === userId)) || {
+          id: userId,
+          name: (window.auth && window.auth.getCurrentUser() && window.auth.getCurrentUser().id === userId) ? window.auth.getCurrentUser().name : 'Student',
+          totalXp: newTotalXp,
+          contextRank: this.getStudentRank(userId) || 1
+        };
+        student.totalXp = newTotalXp;
+        student.contextRank = this.getStudentRank(userId) || student.contextRank || 1;
+        this.showRankUpModal(oldTierData.currentTier, newTierData.currentTier, student);
+        localStorage.setItem(key, newTierData.currentTier.id);
+      }
+    }
   }
 
   resetFilters() {

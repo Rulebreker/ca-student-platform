@@ -33,6 +33,18 @@ class StudentDashboard {
     const welcomeLevelEl = document.getElementById('dashboard-welcome-level');
     if (welcomeLevelEl) welcomeLevelEl.textContent = user.caLevel || 'CA Student';
 
+    let totalXp = 0;
+    if (window.rankService && typeof window.rankService.getUserTotalXp === 'function') {
+      totalXp = window.rankService.getUserTotalXp(user.id);
+    } else if (window.store && typeof window.store.getUserTotalXp === 'function') {
+      totalXp = window.store.getUserTotalXp(user.id);
+    } else {
+      totalXp = user.totalXp !== undefined ? Number(user.totalXp) : (user.baseXp !== undefined ? Number(user.baseXp) : 0);
+    }
+
+    const metricTotalXp = document.getElementById('metric-total-xp');
+    if (metricTotalXp) metricTotalXp.textContent = Number(totalXp).toLocaleString();
+
     const metricTests = document.getElementById('metric-tests-attempted');
     if (metricTests) metricTests.textContent = totalTests;
     const metricAvg = document.getElementById('metric-avg-score');

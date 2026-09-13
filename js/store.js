@@ -23,7 +23,8 @@ const STORAGE_KEYS = {
   XP_SETTINGS: 'excellenceca_xp_settings',
   REFERRALS: 'excellenceca_referrals',
   BOOKMARKS: 'excellenceca_bookmarks',
-  NOTIFICATIONS: 'excellenceca_notifications'
+  NOTIFICATIONS: 'excellenceca_notifications',
+  XP_TRANSACTIONS: 'excellenceca_xp_transactions'
 };
 
 const DEFAULT_RANK_TIERS = [
@@ -1903,6 +1904,41 @@ class AppStore {
       localStorage.setItem(STORAGE_KEYS.XP_SETTINGS, JSON.stringify(DEFAULT_XP_SETTINGS));
     }
 
+    if (!localStorage.getItem(STORAGE_KEYS.XP_TRANSACTIONS)) {
+      const initialTx = [];
+      DEFAULT_USERS.forEach(st => {
+        if (st.role === 'student' && st.baseXp) {
+          initialTx.push({
+            id: 'tx-base-' + st.id,
+            idempotencyKey: 'baseline_' + st.id,
+            userId: st.id,
+            sourceType: 'baseline',
+            sourceId: 'enrollment',
+            activityName: 'Academic Baseline & Enrollment Credit',
+            points: Math.round(Number(st.baseXp)),
+            resultStatus: 'Curriculum Verification Completed',
+            metadata: { level: st.caLevel },
+            createdAt: st.createdAt || '2026-08-15T10:00:00.000Z'
+          });
+        }
+      });
+      DEFAULT_REFERRALS.forEach(ref => {
+        initialTx.push({
+          id: 'tx-ref-' + ref.id,
+          idempotencyKey: 'referral_' + ref.referredId,
+          userId: ref.referrerId,
+          sourceType: 'referral',
+          sourceId: ref.referredId,
+          activityName: 'Referral Bonus: ' + ref.referredName,
+          points: ref.pointsAwarded || 100,
+          resultStatus: 'Student Enrolled',
+          metadata: { referredUsername: ref.referredUsername },
+          createdAt: ref.createdAt
+        });
+      });
+      localStorage.setItem(STORAGE_KEYS.XP_TRANSACTIONS, JSON.stringify(initialTx));
+    }
+
     // Sync / enrich existing users with student location and XP data
     const existingStoredUsers = localStorage.getItem(STORAGE_KEYS.USERS);
     if (existingStoredUsers) {
@@ -2243,6 +2279,190 @@ class AppStore {
   getUnreadNotificationCount(userId) {
     if (!userId) return 0;
     return this.getNotifications(userId).filter(n => !n.read).length;
+  }
+  deleteNotification(id, userId) {
+    if (!id) return;
+    let list = this.getNotifications();
+    list = list.filter(n => n.id !== id);
+    this.saveNotifications(list);
+
+    if (window.firebaseSync && typeof window.firebaseSync.deleteNotification === 'function') {
+      window.firebaseSync.deleteNotification(id);
+    }
+
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    const token = user ? (user.token || user.email) : '';
+    fetch('/api/notifications/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ id, userId: userId || (user ? user.id : '') })
+    }).catch(() => {});
+
+    if (window.app && typeof window.app.updateNotificationBadge === 'function') {
+      window.app.updateNotificationBadge();
+    }
+  }
+  clearAllNotifications(userId) {
+    let list = this.getNotifications();
+    list = list.filter(n => userId && n.userId !== userId);
+    this.saveNotifications(list);
+
+    if (window.firebaseSync && typeof window.firebaseSync.clearNotifications === 'function') {
+      window.firebaseSync.clearNotifications(userId);
+    }
+
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    const token = user ? (user.token || user.email) : '';
+    fetch('/api/notifications/clear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ userId: userId || (user ? user.id : '') })
+    }).catch(() => {});
+
+    if (window.app && typeof window.app.updateNotificationBadge === 'function') {
+      window.app.updateNotificationBadge();
+    }
+  }
+
+  // ==========================================
+  // AUTHORITATIVE XP & REWARD POINTS LEDGER
+  // ==========================================
+  getXpTransactions(userId = null) {
+    const raw = localStorage.getItem(STORAGE_KEYS.XP_TRANSACTIONS);
+    let list = [];
+    try { list = raw ? JSON.parse(raw) : []; } catch (e) { list = []; }
+    if (userId) {
+      list = list.filter(t => t.userId === userId);
+    }
+    return list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }
+  saveXpTransactions(transactions) {
+    localStorage.setItem(STORAGE_KEYS.XP_TRANSACTIONS, JSON.stringify(transactions));
+  }
+  recordXpTransaction(tx) {
+    if (!tx || !tx.userId || !tx.points) return null;
+    const list = this.getXpTransactions();
+    
+    // Idempotency protection
+    if (tx.idempotencyKey) {
+      const existing = list.find(t => t.idempotencyKey === tx.idempotencyKey);
+      if (existing) {
+        if (existing.points !== tx.points) {
+          const diff = tx.points - existing.points;
+          existing.points = tx.points;
+          existing.resultStatus = tx.resultStatus || existing.resultStatus;
+          this.saveXpTransactions(list);
+          this.adjustUserTotalXp(tx.userId, diff);
+        }
+        return existing;
+      }
+    }
+
+    const txObj = {
+      id: tx.id || 'tx-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      idempotencyKey: tx.idempotencyKey || null,
+      userId: tx.userId,
+      sourceType: tx.sourceType || 'general',
+      sourceId: tx.sourceId || '',
+      activityName: tx.activityName || 'Platform Activity',
+      points: Math.round(Number(tx.points)),
+      resultStatus: tx.resultStatus || '',
+      metadata: tx.metadata || {},
+      createdAt: tx.createdAt || new Date().toISOString()
+    };
+
+    list.unshift(txObj);
+    this.saveXpTransactions(list);
+    this.adjustUserTotalXp(tx.userId, txObj.points);
+
+    if (window.firebaseSync && typeof window.firebaseSync.saveXpTransaction === 'function') {
+      window.firebaseSync.saveXpTransaction(txObj);
+    }
+
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    const token = user ? (user.token || user.email) : '';
+    fetch('/api/xp/award', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(txObj)
+    }).catch(() => {});
+
+    return txObj;
+  }
+  adjustUserTotalXp(userId, diff) {
+    if (!userId || !diff) return;
+    const users = this.getUsers();
+    const u = users.find(usr => usr.id === userId);
+    if (u) {
+      u.totalXp = Math.max(0, (u.totalXp !== undefined ? Number(u.totalXp) : (Number(u.baseXp || 0))) + Number(diff));
+      this.updateUser(u);
+    }
+  }
+  getUserTotalXp(userId) {
+    if (!userId) return 0;
+    const u = this.getUserById(userId);
+    if (u && u.totalXp !== undefined && u.totalXp !== null) {
+      return Number(u.totalXp);
+    }
+    const txs = this.getXpTransactions(userId);
+    if (txs && txs.length > 0) {
+      const sum = txs.reduce((acc, t) => acc + Number(t.points || 0), 0);
+      if (u) {
+        u.totalXp = sum;
+        this.updateUser(u);
+      }
+      return sum;
+    }
+    return u ? Number(u.baseXp || 0) : 0;
+  }
+  resolveTier(totalXp, rankTiers = null) {
+    const tiers = rankTiers || this.getRankTiers() || DEFAULT_RANK_TIERS;
+    if (!tiers || tiers.length === 0) {
+      return {
+        currentTier: { id: 'rookie_3', name: 'Rookie III', family: 'Rookie', minXp: 0, maxXp: 499 },
+        nextTier: null,
+        xpToNext: 0,
+        progressPercent: 100,
+        isMaxRank: false,
+        progressText: '0 XP'
+      };
+    }
+
+    let currentTier = tiers[0];
+    let currentIndex = 0;
+
+    for (let i = 0; i < tiers.length; i++) {
+      if (totalXp >= tiers[i].minXp) {
+        currentTier = tiers[i];
+        currentIndex = i;
+      }
+    }
+
+    const isMaxRank = currentIndex === tiers.length - 1;
+    const nextTier = !isMaxRank ? tiers[currentIndex + 1] : null;
+
+    let xpToNext = 0;
+    let progressPercent = 100;
+
+    if (!isMaxRank && nextTier) {
+      xpToNext = Math.max(0, nextTier.minXp - totalXp);
+      const range = nextTier.minXp - currentTier.minXp;
+      const progress = totalXp - currentTier.minXp;
+      progressPercent = range > 0 ? Math.min(100, Math.max(0, Math.round((progress / range) * 100))) : 100;
+    }
+
+    const progressText = isMaxRank
+      ? `${totalXp.toLocaleString()} XP — Max Rank Reached`
+      : `${totalXp.toLocaleString()} / ${nextTier.minXp.toLocaleString()} XP — ${xpToNext.toLocaleString()} XP needed for next level`;
+
+    return {
+      currentTier,
+      nextTier,
+      xpToNext,
+      progressPercent,
+      isMaxRank,
+      progressText
+    };
   }
 
   // Lectures
@@ -2643,3 +2863,10 @@ class AppStore {
 
 
 window.store = new AppStore();
+window.rankService = {
+  getRankTiers: () => window.store.getRankTiers(),
+  resolveTier: (totalXp, rankTiers) => window.store.resolveTier(totalXp, rankTiers),
+  getUserTotalXp: (userId) => window.store.getUserTotalXp(userId),
+  getXpTransactions: (userId) => window.store.getXpTransactions(userId),
+  recordXpTransaction: (tx) => window.store.recordXpTransaction(tx)
+};
