@@ -734,8 +734,11 @@ class FirebaseSyncManager {
       if (changed) {
         window.store.saveQuestions(filteredQs);
 
-        // If admin is currently in question builder for a test, update view
-        if (window.adminDashboard && window.adminDashboard.activeTestQuestionsId) {
+        // If admin is currently in question builder list view (NOT editing a question form),
+        // refresh the question list. Guard against _isEditingQuestion to avoid disrupting the admin
+        // mid-edit (render-loop anti-pattern fix).
+        if (window.adminDashboard && window.adminDashboard.activeTestQuestionsId
+            && !window.adminDashboard._isEditingQuestion) {
           window.adminDashboard.openQuestionBuilder(window.adminDashboard.activeTestQuestionsId);
         }
 
@@ -1157,6 +1160,36 @@ class FirebaseSyncManager {
     return this.db.ref('questions/' + questionId).remove().catch(err => {
       console.warn('[FirebaseSync] deleteQuestion error:', err);
     });
+  }
+
+  /**
+   * Upload a file to Firebase Storage and return the public download URL.
+   * Used for explanation diagram images — permanently stored, not in /tmp.
+   * Falls back gracefully if Firebase Storage SDK is not loaded.
+   * @param {File} file - The file to upload
+   * @param {string} storagePath - e.g. 'explanation-images/q-123/1234567890_diagram.png'
+   * @returns {Promise<string|null>} Download URL or null on failure
+   */
+  async uploadToFirebaseStorage(file, storagePath) {
+    if (typeof firebase === 'undefined') {
+      console.warn('[FirebaseSync] Firebase not initialized — cannot upload to Storage.');
+      return null;
+    }
+    if (typeof firebase.storage !== 'function') {
+      console.warn('[FirebaseSync] firebase-storage-compat.js not loaded — cannot upload to Storage.');
+      return null;
+    }
+    try {
+      const storage = firebase.storage();
+      const storageRef = storage.ref(storagePath);
+      const snapshot = await storageRef.put(file, { contentType: file.type });
+      const downloadUrl = await snapshot.ref.getDownloadURL();
+      console.info('[FirebaseSync] Uploaded explanation image to Storage:', storagePath);
+      return downloadUrl;
+    } catch (err) {
+      console.error('[FirebaseSync] Firebase Storage upload error:', err);
+      return null;
+    }
   }
 
   saveSubject(subject) {

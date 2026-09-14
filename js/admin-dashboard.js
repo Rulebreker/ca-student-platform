@@ -3064,6 +3064,10 @@ This will remove the question paper, attached answer keys, and student submissio
   openTestModal(testId = null) {
     const isEdit = !!testId;
     const test = isEdit ? window.store.getTestById(testId) : null;
+    const existingQs = isEdit ? window.store.getQuestionsByTestId(testId) : [];
+    const computedMaxMarks = existingQs.length > 0 
+      ? existingQs.reduce((sum, q) => sum + (typeof q.marks === 'number' ? q.marks : (test && typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0)), 0)
+      : (test ? (test.maximumMarks || 10) : 10);
     const modalContent = document.getElementById('admin-generic-modal-content');
     if (!modalContent) return;
 
@@ -3160,14 +3164,17 @@ This will remove the question paper, attached answer keys, and student submissio
               >
             </div>
             <div>
-              <label class="block font-bold text-slate-700 mb-1">Max Marks *</label>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block font-bold text-slate-700">Max Marks *</label>
+                ${existingQs.length > 0 ? `<span class="text-[9px] text-blue-600 font-semibold" title="Computed from attached questions">(${existingQs.length} Qs)</span>` : ''}
+              </div>
               <input 
                 type="number" 
                 id="tst-maxmarks" 
                 step="0.5" 
                 min="1" 
                 required 
-                value="${test ? (test.maximumMarks || 10) : 10}"
+                value="${computedMaxMarks}"
                 class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold"
               >
             </div>
@@ -3391,6 +3398,17 @@ This will remove the question paper, attached answer keys, and student submissio
       scheduledPublishTime = `${sDate}T${sTime.length === 5 ? sTime + ':00' : sTime}+05:30`;
     }
 
+    // Bug 3 fix: For existing tests that already have questions, compute maximumMarks from
+    // actual per-question marks (not from the form field which defaults to 10 and would overwrite
+    // the server-computed value). For new tests (no questions yet), use the form field.
+    let resolvedMaxMarks = maximumMarks;
+    if (existingId) {
+      const existingQuestions = window.store.getQuestionsByTestId(existingId);
+      if (existingQuestions.length > 0) {
+        resolvedMaxMarks = existingQuestions.reduce((sum, q) => sum + (typeof q.marks === 'number' ? q.marks : marksPerCorrect), 0);
+      }
+    }
+
     const testPayload = {
       id: existingId || ('tst-' + Date.now()),
       title,
@@ -3400,7 +3418,7 @@ This will remove the question paper, attached answer keys, and student submissio
       chapter: topic,
       topic,
       durationMinutes,
-      maximumMarks,
+      maximumMarks: resolvedMaxMarks,
       marksPerCorrect,
       negativeMarksPerWrong,
       pointsPerCorrect,
@@ -3418,6 +3436,7 @@ This will remove the question paper, attached answer keys, and student submissio
       totalQuestions: existingId ? (window.store.getQuestionsByTestId(existingId).length) : 0,
       updatedAt: new Date().toISOString()
     };
+
 
     if (!existingId) {
       testPayload.createdAt = new Date().toISOString();
@@ -3508,12 +3527,14 @@ This will remove the question paper, attached answer keys, and student submissio
   // --- QUESTION BUILDER MODAL ---
   openQuestionBuilder(testId) {
     this.activeTestQuestionsId = testId;
+    this._isEditingQuestion = false; // Clear editing guard — now in list view
     const test = window.store.getTestById(testId);
     if (!test) return;
 
     const questions = window.store.getQuestionsByTestId(testId);
     const modalContent = document.getElementById('admin-generic-modal-content');
     if (!modalContent) return;
+
 
     const posMark = typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0;
     const negMark = typeof test.negativeMarksPerWrong === 'number' ? test.negativeMarksPerWrong : 0.5;
@@ -3743,6 +3764,7 @@ This will remove the question paper, attached answer keys, and student submissio
     const existingQ = questionId ? window.store.getQuestions().find(x => x.id === questionId) : null;
     const modalContent = document.getElementById('admin-generic-modal-content');
     if (!modalContent) return;
+    this._isEditingQuestion = true; // Guard: prevent realtime sync from re-rendering while admin is editing
 
     const optTypes = existingQ && existingQ.optionTypes ? existingQ.optionTypes : { A: 'text', B: 'text', C: 'text', D: 'text' };
     const optImages = existingQ && existingQ.optionImages ? existingQ.optionImages : { A: null, B: null, C: null, D: null };
@@ -3953,15 +3975,39 @@ This will remove the question paper, attached answer keys, and student submissio
           </div>
 
           <!-- Explanation / ICAI Standard Reference -->
-          <div>
-            <label class="block font-bold text-slate-700 mb-1">ICAI Solution Explanation & Conceptual Reference</label>
+          <div class="space-y-2">
+            <label class="block font-bold text-slate-700 mb-1">ICAI Solution Explanation &amp; Conceptual Reference</label>
             <textarea 
               id="q-explanation" 
               rows="2" 
               class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" 
               placeholder="Explain the solution formula, section reference, or accounting principle..."
             >${existingQ ? (existingQ.explanation || '') : ''}</textarea>
+
+            <!-- Explanation Image Upload (for ICAI diagrams / journal entries / balance sheets) -->
+            <div class="bg-amber-50/60 border border-amber-200 rounded-xl p-3 space-y-2">
+              <label class="block font-semibold text-amber-900 text-[11px] uppercase tracking-wide">Explanation Diagram / Image (Optional)</label>
+              <p class="text-[11px] text-amber-800">Attach an ICAI diagram, journal entry table, or balance sheet image shown after student submits. Uploaded to Firebase Storage (permanent).</p>
+              <div class="flex items-center gap-3 flex-wrap">
+                <input 
+                  type="file" 
+                  id="q-explanation-img-file" 
+                  accept="image/jpeg,image/png,image/gif,image/webp"
+                  onchange="window.adminDashboard.handleExplanationImageUpload(this)" 
+                  class="text-xs file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200"
+                >
+                <input type="hidden" id="q-explanation-img-url" value="${existingQ && existingQ.explanationImage ? existingQ.explanationImage : ''}">
+                <span id="q-explanation-img-spinner" class="hidden text-[11px] text-amber-700 font-semibold animate-pulse">⏳ Uploading…</span>
+              </div>
+              <div id="q-explanation-img-preview-container" class="${existingQ && existingQ.explanationImage ? '' : 'hidden'} relative inline-block mt-1">
+                <img id="q-explanation-img-preview" src="${existingQ && existingQ.explanationImage ? existingQ.explanationImage : ''}" class="max-h-36 rounded border border-amber-300 object-contain bg-white">
+                <button type="button" onclick="window.adminDashboard.removeExplanationImage()" class="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full p-1 shadow hover:bg-rose-700">
+                  <i data-lucide="x" class="w-3 h-3"></i>
+                </button>
+              </div>
+            </div>
           </div>
+
 
           <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
             <button 
@@ -4064,9 +4110,108 @@ This will remove the question paper, attached answer keys, and student submissio
     document.getElementById(`opt-img-preview-container-${optKey}`).classList.add('hidden');
   }
 
+  async handleExplanationImageUpload(input) {
+    if (!input.files || !input.files[0]) return;
+    const file = input.files[0];
+
+    // Show spinner, disable input
+    const spinner = document.getElementById('q-explanation-img-spinner');
+    if (spinner) spinner.classList.remove('hidden');
+    input.disabled = true;
+
+    try {
+      // Validate file client-side
+      const MAX_SIZE = 5 * 1024 * 1024;
+      if (file.size > MAX_SIZE) {
+        window.app.showToast('Explanation image must be under 5 MB.', 'error');
+        input.disabled = false;
+        if (spinner) spinner.classList.add('hidden');
+        return;
+      }
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+      if (!allowedTypes.includes(file.type)) {
+        window.app.showToast('Only JPEG, PNG, GIF, or WebP images are allowed.', 'error');
+        input.disabled = false;
+        if (spinner) spinner.classList.add('hidden');
+        return;
+      }
+
+      let imageUrl = null;
+
+      // Attempt Firebase Storage upload (permanent, survives Vercel cold starts)
+      if (window.firebaseSync && typeof window.firebaseSync.uploadToFirebaseStorage === 'function') {
+        const questionId = document.getElementById('q-explanation-img-url') ? 'q-' + Date.now() : 'q-unknown';
+        const storagePath = `explanation-images/${questionId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+        try {
+          imageUrl = await window.firebaseSync.uploadToFirebaseStorage(file, storagePath);
+        } catch (fbErr) {
+          console.warn('[ExplanationImg] Firebase Storage upload failed, falling back:', fbErr);
+          imageUrl = null;
+        }
+      }
+
+      // Fallback: base64 data URL (stored in localStorage via question payload)
+      if (!imageUrl) {
+        imageUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error('Failed to read file'));
+          reader.readAsDataURL(file);
+        });
+        console.info('[ExplanationImg] Using base64 fallback — consider Firebase Storage for persistence');
+      }
+
+      const urlInput = document.getElementById('q-explanation-img-url');
+      const preview = document.getElementById('q-explanation-img-preview');
+      const previewContainer = document.getElementById('q-explanation-img-preview-container');
+
+      if (urlInput) urlInput.value = imageUrl;
+      if (preview) preview.src = imageUrl;
+      if (previewContainer) previewContainer.classList.remove('hidden');
+
+      window.app.showToast('Explanation diagram attached.', 'success');
+    } catch (err) {
+      console.error('[ExplanationImg] Upload error:', err);
+      window.app.showToast('Failed to attach explanation image. Please try again.', 'error');
+    } finally {
+      input.disabled = false;
+      if (spinner) spinner.classList.add('hidden');
+    }
+  }
+
+  removeExplanationImage() {
+    const urlInput = document.getElementById('q-explanation-img-url');
+    const previewContainer = document.getElementById('q-explanation-img-preview-container');
+    const fileInput = document.getElementById('q-explanation-img-file');
+    if (urlInput) urlInput.value = '';
+    if (previewContainer) previewContainer.classList.add('hidden');
+    if (fileInput) fileInput.value = '';
+  }
+
   async saveQuestion(e, existingQId = '') {
     e.preventDefault();
+
+    // Bug 1 + 2 fix: Guard against null testId (stale modal) and disable button to prevent double-submit
     const testId = this.activeTestQuestionsId;
+    if (!testId) {
+      window.app.showToast('Error: No active test selected. Please close and reopen the question builder.', 'error');
+      return;
+    }
+
+    // Disable submit button immediately to prevent double-submit
+    const submitBtn = e.target ? e.target.querySelector('[type="submit"]') : null;
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Saving…';
+    }
+
+    const enableSubmit = () => {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = existingQId ? 'Update Question' : 'Save Question';
+      }
+    };
+
     const test = window.store.getTestById(testId);
     const existingQs = window.store.getQuestionsByTestId(testId);
 
@@ -4088,10 +4233,12 @@ This will remove the question paper, attached answer keys, and student submissio
 
     if (!correctOption) {
       window.app.showToast('Please select the correct answer key (A, B, C, or D).', 'warning');
+      enableSubmit();
       return;
     }
 
     const explanation = document.getElementById('q-explanation').value.trim();
+    const explanationImageUrl = document.getElementById('q-explanation-img-url') ? document.getElementById('q-explanation-img-url').value : '';
     const marksInput = document.getElementById('q-marks');
     const marksVal = marksInput ? parseFloat(marksInput.value) : null;
     const qMarks = (marksVal && !isNaN(marksVal) && marksVal > 0) ? marksVal : (test && typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0);
@@ -4126,6 +4273,7 @@ This will remove the question paper, attached answer keys, and student submissio
       marks: qMarks,
       requiredTier: requiredTier || 'free',
       explanation: explanation || 'Refer to ICAI Module.',
+      explanationImage: explanationImageUrl || null,
       isDraft: false, // Explicit admin authoring is verified
       isDuplicate: false
     };
@@ -4139,24 +4287,38 @@ This will remove the question paper, attached answer keys, and student submissio
     if (test) {
       const allQs = window.store.getQuestionsByTestId(testId);
       test.totalQuestions = allQs.length;
+      // Bug 3 fix: always sum per-question marks (not totalQuestions × marksPerCorrect)
       test.maximumMarks = allQs.reduce((sum, q) => sum + (typeof q.marks === 'number' ? q.marks : (test.marksPerCorrect || 2.0)), 0);
       window.store.updateTest(test);
     }
 
-    // Backend sync
+    // Backend sync — with proper error toast (not silent catch)
     const user = window.auth.getCurrentUser();
     const token = user ? (user.token || user.email) : '';
     try {
-      await fetch('/api/tests/questions', {
+      const resp = await fetch('/api/tests/questions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify(qPayload)
       });
-    } catch (e) {}
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}));
+        console.warn('[saveQuestion] Backend returned error:', resp.status, errData);
+        // Data is already in localStorage+Firebase via store — show warning not error
+        window.app.showToast('Question saved locally. Backend sync had an issue — will retry on next load.', 'warning');
+      } else {
+        window.app.showToast('Question saved successfully!', 'success');
+      }
+    } catch (netErr) {
+      console.warn('[saveQuestion] Network error during backend sync:', netErr);
+      // Still saved locally — inform admin
+      window.app.showToast('Question saved locally (offline). Will sync when connection is restored.', 'info');
+    }
 
-    window.app.showToast('Question saved successfully!', 'success');
+    this._isEditingQuestion = false;
     this.openQuestionBuilder(testId);
   }
+
 
   async duplicateQuestion(questionId) {
     const q = window.store.duplicateQuestion(questionId);

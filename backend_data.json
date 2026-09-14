@@ -41,9 +41,9 @@
       "name": "Priya Patel",
       "username": "priya_patel",
       "email": "priya.patel@castudent.in",
-      "password": "sha256:450459dc28a84f80:9f79c4ed7d8ed0c3fac1f1cda56f0721ff38d0d3efd0dacb4e11111e7ee32e52",
+      "password": "sha256:95c8e45668514c2b:9f52176f5093d933b5b84d082542d9849ce113aa9daf9640b779c5b514e755ac",
       "role": "student",
-      "token": "token_student_e125b9e57a494289",
+      "token": "token_student_d905746d7b09408a",
       "isActive": true,
       "caLevel": "CA FOUNDATION",
       "referralPoints": 0,
@@ -1669,6 +1669,48 @@
   ],
   "submissions": [],
   "tests": [
+    {
+      "title": "CA Foundation Accounting Mock - Standard Costing",
+      "subject": "Accounting",
+      "topic": "Standard Costing & Variance Analysis",
+      "durationMinutes": 45,
+      "marksPerCorrect": 2.0,
+      "negativeMarksPerWrong": 0.5,
+      "pointsPerCorrect": 10.0,
+      "maxAttempts": 3,
+      "maximumMarks": 6.0,
+      "status": "Published",
+      "examLevel": "CA Foundation",
+      "unattemptedMarks": 0.0,
+      "isPublished": true,
+      "subjectId": "sub-1",
+      "id": "tst-1789389157272",
+      "createdAt": "2026-09-14T12:32:37.272752+00:00",
+      "totalQuestions": 2,
+      "attemptsCount": 0,
+      "chapter": "Cost & Management Accounting"
+    },
+    {
+      "title": "CA Foundation Accounting Mock - Standard Costing",
+      "subject": "Accounting",
+      "topic": "Standard Costing & Variance Analysis",
+      "durationMinutes": 45,
+      "marksPerCorrect": 2.0,
+      "negativeMarksPerWrong": 0.5,
+      "pointsPerCorrect": 10.0,
+      "maxAttempts": 3,
+      "maximumMarks": 6.0,
+      "status": "Published",
+      "examLevel": "CA Foundation",
+      "unattemptedMarks": 0.0,
+      "isPublished": true,
+      "subjectId": "sub-1",
+      "id": "tst-1789389026547",
+      "createdAt": "2026-09-14T12:30:26.547138+00:00",
+      "totalQuestions": 2,
+      "attemptsCount": 0,
+      "chapter": "Cost & Management Accounting"
+    },
     {
       "title": "Test 1: Law of Contract Speed Test",
       "description": "Speed practice covering offer, acceptance, and consideration.",
@@ -4302,9 +4344,115 @@
       "explanation": "Step 3 is determining the transaction price.",
       "isDraft": false,
       "createdAt": "2026-09-13T11:37:25.060433+00:00"
+    },
+    {
+      "testId": "tst-1789389026547",
+      "text": "Which of the following variance accounts will usually have a credit balance if favorable?",
+      "optionA": "Material Price Variance",
+      "optionB": "Material Usage Variance",
+      "optionC": "Labor Rate Variance",
+      "optionD": "All of the above",
+      "correctOption": "D",
+      "marks": 2.5,
+      "explanation": "Favorable cost variances reflect lower expenses than standard and are credited to standard variance accounts.",
+      "explanationImage": "https://firebasestorage.googleapis.com/v0/b/excellenceca-45a9d.firebasestorage.app/o/explanation-images%2Fq1_variance_table.png?alt=media",
+      "requiredTier": "free",
+      "id": "q-1789389026685",
+      "number": 1
+    },
+    {
+      "testId": "tst-1789389026547",
+      "text": "Idle time variance is always considered:",
+      "optionA": "Favorable",
+      "optionB": "Adverse",
+      "optionC": "Neutral",
+      "optionD": "Unallocated",
+      "correctOption": "B",
+      "marks": 3.5,
+      "explanation": "Idle time represents non-productive paid labor hours, hence it is always adverse.",
+      "requiredTier": "free",
+      "id": "q-1789389026903",
+      "number": 2
+    },
+    {
+      "testId": "tst-1789389157272",
+      "text": "Which of the following variance accounts will usually have a credit balance if favorable?",
+      "optionA": "Material Price Variance",
+      "optionB": "Material Usage Variance",
+      "optionC": "Labor Rate Variance",
+      "optionD": "All of the above",
+      "correctOption": "D",
+      "marks": 2.5,
+      "explanation": "Favorable cost variances reflect lower expenses than standard and are credited to standard variance accounts.",
+      "explanationImage": "https://firebasestorage.googleapis.com/v0/b/excellenceca-45a9d.firebasestorage.app/o/explanation-images%2Fq1_variance_table.png?alt=media",
+      "requiredTier": "free",
+      "id": "q-1789389157407",
+      "number": 1
+    },
+    {
+      "testId": "tst-1789389157272",
+      "text": "Idle time variance is always considered:",
+      "optionA": "Favorable",
+      "optionB": "Adverse",
+      "optionC": "Neutral",
+      "optionD": "Unallocated",
+      "correctOption": "B",
+      "marks": 3.5,
+      "explanation": "Idle time represents non-productive paid labor hours, hence it is always adverse.",
+      "requiredTier": "free",
+      "id": "q-1789389157609",
+      "number": 2
     }
   ],
   "test_attempts": [
+    {
+      "id": "att-1789389229360",
+      "testId": "tst-1789389228059",
+      "testTitle": "CA Foundation Accounting Mock - Standard Costing",
+      "userId": "usr-student-1",
+      "userName": "Rohan Sharma",
+      "attemptNumber": 1,
+      "startedAt": "2026-09-14T12:33:49.360463+00:00",
+      "submittedAt": "2026-09-14T12:33:49.360463+00:00",
+      "timeTakenSeconds": 60,
+      "correctCount": 2,
+      "wrongCount": 0,
+      "unattemptedCount": 0,
+      "grossMarks": 6.0,
+      "negativePenalty": 0.0,
+      "finalScore": 6.0,
+      "earnedPoints": 20.0,
+      "maximumMarks": 6.0,
+      "percentage": 100.0,
+      "userAnswers": {
+        "q-1789389228188": "D",
+        "q-1789389228389": "B"
+      }
+    },
+    {
+      "id": "att-1789389158572",
+      "testId": "tst-1789389157272",
+      "testTitle": "CA Foundation Accounting Mock - Standard Costing",
+      "userId": "usr-student-1",
+      "userName": "Rohan Sharma",
+      "attemptNumber": 1,
+      "startedAt": "2026-09-14T12:32:38.572862+00:00",
+      "submittedAt": "2026-09-14T12:32:38.572862+00:00",
+      "timeTakenSeconds": 60,
+      "correctCount": 2,
+      "wrongCount": 0,
+      "unattemptedCount": 0,
+      "grossMarks": 4.0,
+      "negativePenalty": 0.0,
+      "finalScore": 4.0,
+      "earnedPoints": 20.0,
+      "maximumMarks": 4.0,
+      "percentage": 100.0,
+      "userAnswers": {
+        "q-1789389157407": "D",
+        "q-1789389157609": "B"
+      }
+    },
     {
       "id": "att-1789221563852",
       "testId": "tst-1789221563664",
@@ -5099,6 +5247,38 @@
     }
   ],
   "xp_transactions": [
+    {
+      "id": "tx-1789389229360-87ef60",
+      "idempotencyKey": "mcq_attempt_att-1789389229360",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789389228059",
+      "activityName": "CA Foundation Accounting Mock - Standard Costing",
+      "points": 20,
+      "resultStatus": "2/2 Correct (100%)",
+      "metadata": {
+        "correctCount": 2,
+        "percentage": 100.0,
+        "testId": "tst-1789389228059"
+      },
+      "createdAt": "2026-09-14T12:33:49.360463+00:00"
+    },
+    {
+      "id": "tx-1789389158572-a59bc7",
+      "idempotencyKey": "mcq_attempt_att-1789389158572",
+      "userId": "usr-student-1",
+      "sourceType": "mcq_test",
+      "sourceId": "tst-1789389157272",
+      "activityName": "CA Foundation Accounting Mock - Standard Costing",
+      "points": 20,
+      "resultStatus": "2/2 Correct (100%)",
+      "metadata": {
+        "correctCount": 2,
+        "percentage": 100.0,
+        "testId": "tst-1789389157272"
+      },
+      "createdAt": "2026-09-14T12:32:38.572862+00:00"
+    },
     {
       "id": "tx_sub_psess_1789377422429_30553b71",
       "userId": "usr-student-1",
@@ -7446,8 +7626,36 @@
       "createdAt": "2026-09-12T09:39:55.101241+00:00"
     }
   ],
-  "notifications": {
-    "notif_sub_1789366405146": {
+  "notifications": [
+    {
+      "id": "notif-1789389229360",
+      "userId": "usr-student-1",
+      "type": "points_received",
+      "title": "Platform Points Earned!",
+      "message": "You earned +20.0 platform points on 'CA Foundation Accounting Mock - Standard Costing'!",
+      "link": "tests",
+      "read": false,
+      "metadata": {
+        "points": 20.0,
+        "testId": "tst-1789389228059"
+      },
+      "createdAt": "2026-09-14T12:33:49.360463+00:00"
+    },
+    {
+      "id": "notif-1789389158572",
+      "userId": "usr-student-1",
+      "type": "points_received",
+      "title": "Platform Points Earned!",
+      "message": "You earned +20.0 platform points on 'CA Foundation Accounting Mock - Standard Costing'!",
+      "link": "tests",
+      "read": false,
+      "metadata": {
+        "points": 20.0,
+        "testId": "tst-1789389157272"
+      },
+      "createdAt": "2026-09-14T12:32:38.572862+00:00"
+    },
+    {
       "id": "notif_sub_1789366405146",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -7456,7 +7664,7 @@
       "createdAt": "2026-09-14T06:13:25.145017+00:00",
       "isRead": false
     },
-    "notif_sub_cexp_1789366300310_722c": {
+    {
       "id": "notif_sub_cexp_1789366300310_722c",
       "userId": "usr-student-1",
       "title": "Subscription Expiry Updated",
@@ -7465,7 +7673,7 @@
       "createdAt": "2026-09-14T06:11:40.310248+00:00",
       "isRead": false
     },
-    "notif_sub_ext_1789366300040_6fe3": {
+    {
       "id": "notif_sub_ext_1789366300040_6fe3",
       "userId": "usr-student-1",
       "title": "Subscription Extended",
@@ -7474,7 +7682,7 @@
       "createdAt": "2026-09-14T06:11:40.040577+00:00",
       "isRead": false
     },
-    "notif_sub_grant_1789366299712_b058": {
+    {
       "id": "notif_sub_grant_1789366299712_b058",
       "userId": "usr-student-1",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -7483,7 +7691,7 @@
       "createdAt": "2026-09-14T06:11:39.712547+00:00",
       "isRead": false
     },
-    "notif_sub_1789366299167": {
+    {
       "id": "notif_sub_1789366299167",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -7492,7 +7700,7 @@
       "createdAt": "2026-09-14T06:11:39.167845+00:00",
       "isRead": false
     },
-    "notif_sub_cexp_1789366232027_b12d": {
+    {
       "id": "notif_sub_cexp_1789366232027_b12d",
       "userId": "usr-student-1",
       "title": "Subscription Expiry Updated",
@@ -7501,7 +7709,7 @@
       "createdAt": "2026-09-14T06:10:32.027416+00:00",
       "isRead": false
     },
-    "notif_sub_ext_1789366231619_fc7b": {
+    {
       "id": "notif_sub_ext_1789366231619_fc7b",
       "userId": "usr-student-1",
       "title": "Subscription Extended",
@@ -7510,7 +7718,7 @@
       "createdAt": "2026-09-14T06:10:31.619279+00:00",
       "isRead": false
     },
-    "notif_sub_grant_1789366231241_23c0": {
+    {
       "id": "notif_sub_grant_1789366231241_23c0",
       "userId": "usr-student-1",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -7519,7 +7727,7 @@
       "createdAt": "2026-09-14T06:10:31.241742+00:00",
       "isRead": false
     },
-    "notif_sub_1789366230464": {
+    {
       "id": "notif_sub_1789366230464",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -7528,7 +7736,7 @@
       "createdAt": "2026-09-14T06:10:30.463441+00:00",
       "isRead": false
     },
-    "notif_sub_cexp_1789366211804_91c1": {
+    {
       "id": "notif_sub_cexp_1789366211804_91c1",
       "userId": "usr-student-1",
       "title": "Subscription Expiry Updated",
@@ -7537,7 +7745,7 @@
       "createdAt": "2026-09-14T06:10:11.803986+00:00",
       "isRead": false
     },
-    "notif_sub_ext_1789366211449_c01b": {
+    {
       "id": "notif_sub_ext_1789366211449_c01b",
       "userId": "usr-student-1",
       "title": "Subscription Extended",
@@ -7546,7 +7754,7 @@
       "createdAt": "2026-09-14T06:10:11.449944+00:00",
       "isRead": false
     },
-    "notif_sub_grant_1789366210994_2119": {
+    {
       "id": "notif_sub_grant_1789366210994_2119",
       "userId": "usr-student-1",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -7555,7 +7763,7 @@
       "createdAt": "2026-09-14T06:10:10.994386+00:00",
       "isRead": false
     },
-    "notif_sub_1789366210162": {
+    {
       "id": "notif_sub_1789366210162",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -7564,7 +7772,7 @@
       "createdAt": "2026-09-14T06:10:10.161476+00:00",
       "isRead": false
     },
-    "notif_sub_1789365023045": {
+    {
       "id": "notif_sub_1789365023045",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -7573,7 +7781,7 @@
       "createdAt": "2026-09-14T05:50:23.044434+00:00",
       "isRead": false
     },
-    "notif_sub_cexp_1789364901962_0df9": {
+    {
       "id": "notif_sub_cexp_1789364901962_0df9",
       "userId": "usr_lifecycle_test_student",
       "title": "Subscription Expiry Updated",
@@ -7582,7 +7790,7 @@
       "createdAt": "2026-09-14T05:48:21.962701+00:00",
       "isRead": false
     },
-    "notif_sub_grant_1789364901716_54da": {
+    {
       "id": "notif_sub_grant_1789364901716_54da",
       "userId": "usr_lifecycle_test_student",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -7591,7 +7799,7 @@
       "createdAt": "2026-09-14T05:48:21.716026+00:00",
       "isRead": false
     },
-    "notif_sub_cexp_1789364880151_91d1": {
+    {
       "id": "notif_sub_cexp_1789364880151_91d1",
       "userId": "usr_lifecycle_test_student",
       "title": "Subscription Expiry Updated",
@@ -7600,7 +7808,7 @@
       "createdAt": "2026-09-14T05:48:00.151119+00:00",
       "isRead": false
     },
-    "notif_sub_grant_1789364879895_cd38": {
+    {
       "id": "notif_sub_grant_1789364879895_cd38",
       "userId": "usr_lifecycle_test_student",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -7609,7 +7817,7 @@
       "createdAt": "2026-09-14T05:47:59.894426+00:00",
       "isRead": false
     },
-    "notif_sub_grant_1789364864970_807b": {
+    {
       "id": "notif_sub_grant_1789364864970_807b",
       "userId": "usr_lifecycle_test_student",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -7618,7 +7826,7 @@
       "createdAt": "2026-09-14T05:47:44.970361+00:00",
       "isRead": false
     },
-    "notif_sub_1789362302998": {
+    {
       "id": "notif_sub_1789362302998",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -7627,7 +7835,7 @@
       "createdAt": "2026-09-14T05:05:02.998772+00:00",
       "isRead": false
     },
-    "notif_sub_1789362132646": {
+    {
       "id": "notif_sub_1789362132646",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -7636,7 +7844,7 @@
       "createdAt": "2026-09-14T05:02:12.645715+00:00",
       "isRead": false
     },
-    "notif_sub_canc_1789359391751_f1ef": {
+    {
       "id": "notif_sub_canc_1789359391751_f1ef",
       "userId": "usr-student-1",
       "title": "Subscription Cancelled",
@@ -7645,7 +7853,7 @@
       "createdAt": "2026-09-14T04:16:31.751971+00:00",
       "isRead": false
     },
-    "notif_sub_1789358777383": {
+    {
       "id": "notif_sub_1789358777383",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -7654,7 +7862,7 @@
       "createdAt": "2026-09-14T04:06:17.382598+00:00",
       "isRead": false
     },
-    "notif_sub_1789332293433": {
+    {
       "id": "notif_sub_1789332293433",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -7663,7 +7871,7 @@
       "createdAt": "2026-09-13T20:44:53.433883+00:00",
       "isRead": false
     },
-    "notif_sub_1789330977235": {
+    {
       "id": "notif_sub_1789330977235",
       "userId": "usr-admin-1",
       "title": "Trial Pass Activated!",
@@ -7673,7 +7881,7 @@
       "isRead": false,
       "read": true
     },
-    "notif_sub_canc_1789330555776_9c7c": {
+    {
       "id": "notif_sub_canc_1789330555776_9c7c",
       "userId": "usr-student-1789308468650",
       "title": "Subscription Cancelled",
@@ -7682,7 +7890,7 @@
       "createdAt": "2026-09-13T20:15:55.776517+00:00",
       "isRead": false
     },
-    "notif_sub_1789329430913": {
+    {
       "id": "notif_sub_1789329430913",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -7691,7 +7899,7 @@
       "createdAt": "2026-09-13T19:57:10.912598+00:00",
       "isRead": false
     },
-    "notif_sub_1789329331818": {
+    {
       "id": "notif_sub_1789329331818",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -7700,7 +7908,7 @@
       "createdAt": "2026-09-13T19:55:31.817879+00:00",
       "isRead": false
     },
-    "notif_sub_canc_1789323009194_ccef": {
+    {
       "id": "notif_sub_canc_1789323009194_ccef",
       "userId": "usr-student-4",
       "title": "Subscription Cancelled",
@@ -7709,7 +7917,7 @@
       "createdAt": "2026-09-13T18:10:09.194755+00:00",
       "isRead": false
     },
-    "notif_sub_grant_1789323008496_f61c": {
+    {
       "id": "notif_sub_grant_1789323008496_f61c",
       "userId": "usr-student-4",
       "title": "Pass Granted: Elite Pass (Monthly)",
@@ -7718,7 +7926,7 @@
       "createdAt": "2026-09-13T18:10:08.496697+00:00",
       "isRead": false
     },
-    "notif_sub_rej_1789322999779": {
+    {
       "id": "notif_sub_rej_1789322999779",
       "userId": "usr-student-2",
       "title": "Payment Verification Failed",
@@ -7727,7 +7935,7 @@
       "createdAt": "2026-09-13T18:09:59.779537+00:00",
       "isRead": false
     },
-    "notif_sub_1789322999128": {
+    {
       "id": "notif_sub_1789322999128",
       "userId": "usr-student-2",
       "title": "Core Pass Activated!",
@@ -7736,7 +7944,7 @@
       "createdAt": "2026-09-13T18:09:59.127640+00:00",
       "isRead": false
     },
-    "notif_sub_ext_1789322984046_4d97": {
+    {
       "id": "notif_sub_ext_1789322984046_4d97",
       "userId": "usr-student-2",
       "title": "Subscription Extended",
@@ -7745,7 +7953,7 @@
       "createdAt": "2026-09-13T18:09:44.046823+00:00",
       "isRead": false
     },
-    "notif_sub_ext_1789322983973_f624": {
+    {
       "id": "notif_sub_ext_1789322983973_f624",
       "userId": "usr-student-1",
       "title": "Subscription Extended",
@@ -7754,7 +7962,7 @@
       "createdAt": "2026-09-13T18:09:43.973177+00:00",
       "isRead": false
     },
-    "notif_sub_grant_1789322983741_7ef9": {
+    {
       "id": "notif_sub_grant_1789322983741_7ef9",
       "userId": "usr-student-1",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -7763,7 +7971,7 @@
       "createdAt": "2026-09-13T18:09:43.741015+00:00",
       "isRead": false
     },
-    "notif_sub_canc_1789322973929_0602": {
+    {
       "id": "notif_sub_canc_1789322973929_0602",
       "userId": "usr-student-4",
       "title": "Subscription Cancelled",
@@ -7772,7 +7980,7 @@
       "createdAt": "2026-09-13T18:09:33.929454+00:00",
       "isRead": false
     },
-    "notif_sub_grant_1789322973250_1d60": {
+    {
       "id": "notif_sub_grant_1789322973250_1d60",
       "userId": "usr-student-4",
       "title": "Pass Granted: Elite Pass (Monthly)",
@@ -7781,7 +7989,7 @@
       "createdAt": "2026-09-13T18:09:33.250613+00:00",
       "isRead": false
     },
-    "notif_sub_grant_1789322951069_75d9": {
+    {
       "id": "notif_sub_grant_1789322951069_75d9",
       "userId": "usr-student-4",
       "title": "Pass Granted: Elite Pass (Monthly)",
@@ -7790,7 +7998,7 @@
       "createdAt": "2026-09-13T18:09:11.068092+00:00",
       "isRead": false
     },
-    "notif_sub_grant_1789320165169_e033": {
+    {
       "id": "notif_sub_grant_1789320165169_e033",
       "userId": "usr-student-1789308468650",
       "title": "Pass Granted: Elite Pass (Monthly)",
@@ -7799,7 +8007,7 @@
       "createdAt": "2026-09-13T17:22:45.168943+00:00",
       "isRead": false
     },
-    "notif_sub_ext_1789318714232_4634": {
+    {
       "id": "notif_sub_ext_1789318714232_4634",
       "userId": "usr-student-2",
       "title": "Subscription Extended",
@@ -7808,7 +8016,7 @@
       "createdAt": "2026-09-13T16:58:34.232362+00:00",
       "isRead": false
     },
-    "notif_sub_ext_1789318714121_a7d9": {
+    {
       "id": "notif_sub_ext_1789318714121_a7d9",
       "userId": "usr-student-1",
       "title": "Subscription Extended",
@@ -7818,7 +8026,7 @@
       "isRead": false,
       "read": true
     },
-    "notif_sub_grant_1789318713827_aeb0": {
+    {
       "id": "notif_sub_grant_1789318713827_aeb0",
       "userId": "usr-student-1",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -7828,7 +8036,7 @@
       "isRead": false,
       "read": true
     },
-    "notif_sub_rej_1789318708952": {
+    {
       "id": "notif_sub_rej_1789318708952",
       "userId": "usr-student-2",
       "title": "Payment Verification Failed",
@@ -7837,7 +8045,7 @@
       "createdAt": "2026-09-13T16:58:28.952157+00:00",
       "isRead": false
     },
-    "notif_sub_1789318708209": {
+    {
       "id": "notif_sub_1789318708209",
       "userId": "usr-student-2",
       "title": "Core Pass Activated!",
@@ -7846,7 +8054,7 @@
       "createdAt": "2026-09-13T16:58:28.208211+00:00",
       "isRead": false
     },
-    "notif_sub_ext_1789318549249_bbac": {
+    {
       "id": "notif_sub_ext_1789318549249_bbac",
       "userId": "usr-student-1",
       "title": "Subscription Extended",
@@ -7855,7 +8063,7 @@
       "createdAt": "2026-09-13T16:55:49.249701+00:00",
       "isRead": false
     },
-    "notif_sub_grant_1789318548999_2e9e": {
+    {
       "id": "notif_sub_grant_1789318548999_2e9e",
       "userId": "usr-student-1",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -7864,7 +8072,7 @@
       "createdAt": "2026-09-13T16:55:48.999248+00:00",
       "isRead": false
     },
-    "notif_sub_1789371343896": {
+    {
       "id": "notif_sub_1789371343896",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -7873,7 +8081,7 @@
       "createdAt": "2026-09-14T07:35:43.896725+00:00",
       "isRead": false
     },
-    "notif_sub_1789376254915": {
+    {
       "id": "notif_sub_1789376254915",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -7882,7 +8090,7 @@
       "createdAt": "2026-09-14T08:57:34.914452+00:00",
       "isRead": false
     },
-    "notif_sub_1789376632934": {
+    {
       "id": "notif_sub_1789376632934",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -7891,7 +8099,7 @@
       "createdAt": "2026-09-14T09:03:52.934006+00:00",
       "isRead": false
     },
-    "notif_sub_1789377138765": {
+    {
       "id": "notif_sub_1789377138765",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -7900,7 +8108,7 @@
       "createdAt": "2026-09-14T09:12:18.764423+00:00",
       "isRead": false
     },
-    "notif_sub_1789377428293": {
+    {
       "id": "notif_sub_1789377428293",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -7909,7 +8117,7 @@
       "createdAt": "2026-09-14T09:17:08.293843+00:00",
       "isRead": false
     }
-  },
+  ],
   "bookmarks": [],
   "subjects": [
     {
@@ -8221,6 +8429,155 @@
     }
   ],
   "payment_sessions": [
+    {
+      "paymentSessionId": "psess_1789389262345_30039043",
+      "sessionId": "psess_1789389262345_30039043",
+      "userId": "usr-student-1",
+      "userEmail": "rohan.sharma@castudent.in",
+      "userName": "Rohan Sharma",
+      "userPhone": "",
+      "caLevel": "CA FOUNDATION",
+      "planId": "core_monthly",
+      "planName": "Core Pass (Monthly)",
+      "planTier": "core",
+      "amount": 49,
+      "currency": "INR",
+      "durationDays": 30,
+      "upiPayUri": "upi://pay?pa=coretest%40upi&pn=ExcellenceCA&am=49.00&cu=INR&tn=Core%20Pass%20%28Monthly%29",
+      "channelId": "chan_1789371093717_31e2",
+      "channelSnapshot": {
+        "id": "chan_1789371093717_31e2",
+        "name": "Core Test Channel",
+        "title": "Core Test Channel",
+        "upiId": "coretest@upi",
+        "payeeName": "ExcellenceCA",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi%3A//pay%3Fpa%3Dcoretest%2540upi%26pn%3DExcellenceCA%26am%3D49.00%26cu%3DINR%26tn%3DCore%2520Pass%2520%2528Monthly%2529",
+        "targetPlanId": "core_monthly",
+        "targetPassTitle": "Core Pass Monthly",
+        "expectedAmount": 499,
+        "subscriptionTier": "core_monthly",
+        "needsReupload": false
+      },
+      "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi%3A//pay%3Fpa%3Dcoretest%2540upi%26pn%3DExcellenceCA%26am%3D49.00%26cu%3DINR%26tn%3DCore%2520Pass%2520%2528Monthly%2529",
+      "status": "pending_verification",
+      "createdAt": "2026-09-14T12:34:22.345319+00:00",
+      "expiresAt": "2026-09-14T12:44:22.345319+00:00",
+      "utr": "UTR17893892637FA0",
+      "screenshot": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==",
+      "submittedAt": "2026-09-14T12:34:23.273962+00:00",
+      "verifiedAt": null,
+      "verifiedBy": null,
+      "rejectionReason": null
+    },
+    {
+      "amount": 49,
+      "caLevel": "CA FOUNDATION",
+      "cancelledAt": "2026-09-14T12:34:16.161007+00:00",
+      "channelId": "chan_1789371093717_31e2",
+      "channelSnapshot": {
+        "expectedAmount": 499,
+        "id": "chan_1789371093717_31e2",
+        "name": "Core Test Channel",
+        "needsReupload": false,
+        "payeeName": "ExcellenceCA",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi%3A//pay%3Fpa%3Dcoretest%2540upi%26pn%3DExcellenceCA%26am%3D49.00%26cu%3DINR%26tn%3DCore%2520Pass%2520%2528Monthly%2529",
+        "subscriptionTier": "core_monthly",
+        "targetPassTitle": "Core Pass Monthly",
+        "targetPlanId": "core_monthly",
+        "title": "Core Test Channel",
+        "upiId": "coretest@upi"
+      },
+      "createdAt": "2026-09-14T12:34:08.062578+00:00",
+      "currency": "INR",
+      "durationDays": 30,
+      "expiresAt": "2026-09-14T12:44:08.062578+00:00",
+      "paymentSessionId": "psess_1789389248062_740a1645",
+      "planId": "core_monthly",
+      "planName": "Core Pass (Monthly)",
+      "planTier": "core",
+      "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi%3A//pay%3Fpa%3Dcoretest%2540upi%26pn%3DExcellenceCA%26am%3D49.00%26cu%3DINR%26tn%3DCore%2520Pass%2520%2528Monthly%2529",
+      "rejectionReason": "Payment session closed before completion.",
+      "sessionId": "psess_1789389248062_740a1645",
+      "status": "cancelled",
+      "upiPayUri": "upi://pay?pa=coretest%40upi&pn=ExcellenceCA&am=49.00&cu=INR&tn=Core%20Pass%20%28Monthly%29",
+      "userEmail": "rohan.sharma@castudent.in",
+      "userId": "usr-student-1",
+      "userName": "Rohan Sharma",
+      "userPhone": ""
+    },
+    {
+      "amount": 49,
+      "caLevel": "CA FOUNDATION",
+      "channelId": "chan_1789371093717_31e2",
+      "channelSnapshot": {
+        "expectedAmount": 499,
+        "id": "chan_1789371093717_31e2",
+        "name": "Core Test Channel",
+        "needsReupload": false,
+        "payeeName": "ExcellenceCA",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi%3A//pay%3Fpa%3Dcoretest%2540upi%26pn%3DExcellenceCA%26am%3D49.00%26cu%3DINR%26tn%3DCore%2520Pass%2520%2528Monthly%2529",
+        "subscriptionTier": "core_monthly",
+        "targetPassTitle": "Core Pass Monthly",
+        "targetPlanId": "core_monthly",
+        "title": "Core Test Channel",
+        "upiId": "coretest@upi"
+      },
+      "createdAt": "2026-09-14T12:30:04.784227+00:00",
+      "currency": "INR",
+      "durationDays": 30,
+      "expiresAt": "2026-09-14T12:40:04.784227+00:00",
+      "paymentSessionId": "psess_1789389004784_3dbec33b",
+      "planId": "core_monthly",
+      "planName": "Core Pass (Monthly)",
+      "planTier": "core",
+      "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi%3A//pay%3Fpa%3Dcoretest%2540upi%26pn%3DExcellenceCA%26am%3D49.00%26cu%3DINR%26tn%3DCore%2520Pass%2520%2528Monthly%2529",
+      "screenshot": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==",
+      "sessionId": "psess_1789389004784_3dbec33b",
+      "status": "pending_verification",
+      "submittedAt": "2026-09-14T12:30:07.233952+00:00",
+      "upiPayUri": "upi://pay?pa=coretest%40upi&pn=ExcellenceCA&am=49.00&cu=INR&tn=Core%20Pass%20%28Monthly%29",
+      "userEmail": "rohan.sharma@castudent.in",
+      "userId": "usr-student-1",
+      "userName": "Rohan Sharma",
+      "userPhone": "",
+      "utr": "UTR17893890072ED7"
+    },
+    {
+      "amount": 49,
+      "caLevel": "CA FOUNDATION",
+      "cancelledAt": "2026-09-14T12:29:59.685589+00:00",
+      "channelId": "chan_1789371093717_31e2",
+      "channelSnapshot": {
+        "expectedAmount": 499,
+        "id": "chan_1789371093717_31e2",
+        "name": "Core Test Channel",
+        "needsReupload": false,
+        "payeeName": "ExcellenceCA",
+        "qrCodeUrl": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi%3A//pay%3Fpa%3Dcoretest%2540upi%26pn%3DExcellenceCA%26am%3D49.00%26cu%3DINR%26tn%3DCore%2520Pass%2520%2528Monthly%2529",
+        "subscriptionTier": "core_monthly",
+        "targetPassTitle": "Core Pass Monthly",
+        "targetPlanId": "core_monthly",
+        "title": "Core Test Channel",
+        "upiId": "coretest@upi"
+      },
+      "createdAt": "2026-09-14T12:29:55.395482+00:00",
+      "currency": "INR",
+      "durationDays": 30,
+      "expiresAt": "2026-09-14T12:39:55.395482+00:00",
+      "paymentSessionId": "psess_1789388995395_95cd59a4",
+      "planId": "core_monthly",
+      "planName": "Core Pass (Monthly)",
+      "planTier": "core",
+      "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi%3A//pay%3Fpa%3Dcoretest%2540upi%26pn%3DExcellenceCA%26am%3D49.00%26cu%3DINR%26tn%3DCore%2520Pass%2520%2528Monthly%2529",
+      "rejectionReason": "Payment session closed before completion.",
+      "sessionId": "psess_1789388995395_95cd59a4",
+      "status": "cancelled",
+      "upiPayUri": "upi://pay?pa=coretest%40upi&pn=ExcellenceCA&am=49.00&cu=INR&tn=Core%20Pass%20%28Monthly%29",
+      "userEmail": "rohan.sharma@castudent.in",
+      "userId": "usr-student-1",
+      "userName": "Rohan Sharma",
+      "userPhone": ""
+    },
     {
       "adminRemarks": "Verified with Institutional HDFC Bank Statement",
       "amount": 49,
@@ -11705,8 +12062,9 @@
       "planName": "Core Pass (Monthly)",
       "planTier": "core",
       "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi%3A//pay%3Fpa%3Dcoretest%2540upi%26pn%3DExcellenceCA%26am%3D49.00%26cu%3DINR%26tn%3DCore%2520Pass%2520%2528Monthly%2529",
+      "rejectionReason": "Payment session timed out (5 minutes).",
       "sessionId": "psess_1789377394105_510feca6",
-      "status": "pending",
+      "status": "expired",
       "upiPayUri": "upi://pay?pa=coretest%40upi&pn=ExcellenceCA&am=49.00&cu=INR&tn=Core%20Pass%20%28Monthly%29",
       "userEmail": "rohan.sharma@castudent.in",
       "userId": "usr-student-1",
@@ -11925,6 +12283,46 @@
     }
   },
   "admin_audit_logs": [
+    {
+      "id": "log_6f7d0d34fcf2",
+      "action": "ADMIN_RESET_PASSWORD",
+      "adminId": "usr-admin-1",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "targetUserId": "usr-student-2",
+      "targetUserEmail": "priya.patel@castudent.in",
+      "targetUserName": "Priya Patel",
+      "timestamp": "2026-09-14T12:34:02.631719+00:00"
+    },
+    {
+      "id": "log_a9afbdadbd91",
+      "action": "ADMIN_RESET_PASSWORD",
+      "adminId": "usr-admin-1",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "targetUserId": "usr-student-2",
+      "targetUserEmail": "priya.patel@castudent.in",
+      "targetUserName": "Priya Patel",
+      "timestamp": "2026-09-14T12:34:00.070384+00:00"
+    },
+    {
+      "id": "log_772008f5236b",
+      "action": "ADMIN_RESET_PASSWORD",
+      "adminId": "usr-admin-1",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "targetUserId": "usr-student-2",
+      "targetUserEmail": "priya.patel@castudent.in",
+      "targetUserName": "Priya Patel",
+      "timestamp": "2026-09-14T12:29:50.760147+00:00"
+    },
+    {
+      "id": "log_6901698331c4",
+      "action": "ADMIN_RESET_PASSWORD",
+      "adminId": "usr-admin-1",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "targetUserId": "usr-student-2",
+      "targetUserEmail": "priya.patel@castudent.in",
+      "targetUserName": "Priya Patel",
+      "timestamp": "2026-09-14T12:29:46.935846+00:00"
+    },
     {
       "id": "audit_1789377428527_e70a23",
       "adminId": "usr-admin-1",
@@ -17618,6 +18016,10 @@
     "token_student_704d007556ce4481",
     "token_student_dd4af13b52314449",
     "token_student_1cd241ce7fbd45d8",
-    "token_student_51d60762cd084590"
+    "token_student_51d60762cd084590",
+    "token_student_e125b9e57a494289",
+    "token_student_83ffdc04a74b4d06",
+    "token_student_4e9276ffe1d9463a",
+    "token_student_e9086e0180cc4266"
   ]
 }

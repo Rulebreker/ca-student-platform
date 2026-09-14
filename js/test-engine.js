@@ -1352,6 +1352,12 @@ class TestEngine {
                       ICAI Standard Explanation:
                     </div>
                     <p class="leading-relaxed text-slate-800">${q.explanation || 'Refer to relevant Accounting Standard / Companies Act provisions.'}</p>
+                    ${q.explanationImage ? `
+                      <div class="mt-2 border-t border-amber-200 pt-2">
+                        <p class="text-[10px] font-semibold text-amber-700 uppercase tracking-wide mb-1">ICAI Reference Diagram:</p>
+                        <img src="${q.explanationImage}" alt="ICAI Explanation Diagram" class="max-h-48 rounded border border-amber-300 object-contain bg-white w-full" onerror="this.style.display='none'">
+                      </div>
+                    ` : ''}
                   </div>
                 </div>
               `;

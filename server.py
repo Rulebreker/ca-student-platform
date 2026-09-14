@@ -1119,7 +1119,7 @@ def load_backend_data(refresh_collections=None):
                         cur_data = json.load(f)
                     
                     import urllib.request
-                    keys_to_fetch = ['users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs']
+                    keys_to_fetch = ['users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions']
                     
                     for key in keys_to_fetch:
                         try:
@@ -1194,6 +1194,22 @@ def load_backend_data(refresh_collections=None):
                                             if isinstance(l, dict) and l.get('id'):
                                                 l_map[l['id']] = l
                                         cur_data['admin_audit_logs'] = list(l_map.values())
+                                elif key == 'tests':
+                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                                    if items:
+                                        t_map = {t.get('id'): t for t in cur_data.get('tests', []) if isinstance(t, dict) and t.get('id')}
+                                        for t in items:
+                                            if isinstance(t, dict) and t.get('id'):
+                                                t_map[t['id']] = t
+                                        cur_data['tests'] = list(t_map.values())
+                                elif key == 'questions':
+                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                                    if items:
+                                        q_map = {q.get('id'): q for q in cur_data.get('questions', []) if isinstance(q, dict) and q.get('id')}
+                                        for q in items:
+                                            if isinstance(q, dict) and q.get('id'):
+                                                q_map[q['id']] = q
+                                        cur_data['questions'] = list(q_map.values())
                         except Exception as err:
                             print(f"[COLD_START] Failed to fetch {key} from Firebase: {err}", flush=True)
 
@@ -1214,19 +1230,14 @@ def load_backend_data(refresh_collections=None):
                     d = None
 
             if d is not None:
-                if 'tests' not in d: d['tests'] = []
-                if 'questions' not in d: d['questions'] = []
-                if 'test_attempts' not in d: d['test_attempts'] = []
-                if 'submissions' not in d: d['submissions'] = []
-                if 'papers' not in d: d['papers'] = []
-                if 'xp_transactions' not in d: d['xp_transactions'] = []
-                if 'notifications' not in d: d['notifications'] = []
-                if 'bookmarks' not in d: d['bookmarks'] = []
-                if 'subjects' not in d: d['subjects'] = []
-                if 'referrals' not in d: d['referrals'] = []
+                list_keys = ['tests', 'questions', 'test_attempts', 'submissions', 'papers', 'xp_transactions', 'notifications', 'bookmarks', 'subjects', 'referrals', 'payment_sessions', 'payment_channels', 'admin_audit_logs', 'xp_reset_history']
+                for lk in list_keys:
+                    if lk not in d:
+                        d[lk] = []
+                    elif isinstance(d[lk], dict):
+                        d[lk] = list(d[lk].values())
                 if 'referral_settings' not in d: d['referral_settings'] = {'referrerReward': 100, 'newStudentReward': 100}
                 if 'xp_reset_settings' not in d: d['xp_reset_settings'] = {'enabled': False, 'nextReset': None, 'intervalDays': 90, 'customSeconds': None, 'lastReset': None}
-                if 'xp_reset_history' not in d: d['xp_reset_history'] = []
                 # Sync seed users and hashed passwords
                 for email, init_u in INITIAL_USERS.items():
                     if email not in d.get('users', {}):
@@ -4270,6 +4281,11 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         test_data['subjectId'] = sub_id_map.get(test_data.get('subject'), 'sub-1')
 
                 if test_id:
+                    # Bug 3 fix: If test has questions, preserve the sum of individual question marks
+                    test_qs = [q for q in data.get('questions', []) if q.get('testId') == test_id]
+                    if test_qs:
+                        test_data['maximumMarks'] = sum(float(q.get('marks', test_data.get('marksPerCorrect', 2.0))) for q in test_qs)
+                        test_data['totalQuestions'] = len(test_qs)
                     idx = next((i for i, t in enumerate(tests) if t.get('id') == test_id), None)
                     if idx is not None:
                         tests[idx].update(test_data)
@@ -4286,6 +4302,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 data['tests'] = tests
                 save_backend_data(data)
+                sync_to_firebase(f"tests/{test_data['id']}", test_data, method='PUT')
                 self.send_json(200, {'success': True, 'test': test_data})
                 return
             except Exception as e:
@@ -4332,6 +4349,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     target['liveEndTime'] = req_data.get('liveEndTime')
 
                 save_backend_data(data)
+                sync_to_firebase(f"tests/{target['id']}", target, method='PUT')
                 self.send_json(200, {'success': True, 'test': target})
                 return
             except Exception as e:
@@ -4353,8 +4371,12 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 data = load_backend_data()
                 data['tests'] = [t for t in data.get('tests', []) if t.get('id') != target_id]
+                deleted_qs = [q for q in data.get('questions', []) if q.get('testId') == target_id]
                 data['questions'] = [q for q in data.get('questions', []) if q.get('testId') != target_id]
                 save_backend_data(data)
+                sync_to_firebase(f"tests/{target_id}", None, method='DELETE')
+                for dq in deleted_qs:
+                    sync_to_firebase(f"questions/{dq['id']}", None, method='DELETE')
                 self.send_json(200, {'success': True, 'deletedId': target_id})
                 return
             except Exception as e:
@@ -4391,13 +4413,19 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     dup['text'] = f"{orig.get('text')} (Copy)"
                     questions.append(dup)
 
-                    # Update totalQuestions
+                    # Update totalQuestions & maximumMarks as sum of question marks
+                    dup_test = None
                     for t in tests:
                         if t.get('id') == orig.get('testId'):
-                            t['totalQuestions'] = len([q for q in questions if q.get('testId') == t.get('id')])
-                            t['maximumMarks'] = t['totalQuestions'] * t.get('marksPerCorrect', 2.0)
+                            t_qs = [q for q in questions if q.get('testId') == t.get('id')]
+                            t['totalQuestions'] = len(t_qs)
+                            t['maximumMarks'] = sum(float(q.get('marks', t.get('marksPerCorrect', 2.0))) for q in t_qs)
+                            dup_test = t
 
                     save_backend_data(data)
+                    sync_to_firebase(f"questions/{dup['id']}", dup, method='PUT')
+                    if dup_test:
+                        sync_to_firebase(f"tests/{dup_test['id']}", dup_test, method='PUT')
                     self.send_json(200, {'success': True, 'question': dup})
                     return
 
@@ -4408,6 +4436,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         for q in questions:
                             if q.get('id') == qid:
                                 q['number'] = idx + 1
+                                sync_to_firebase(f"questions/{q['id']}", q, method='PUT')
                     save_backend_data(data)
                     self.send_json(200, {'success': True, 'order': order_ids})
                     return
@@ -4441,13 +4470,20 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         questions.append(req_data)
                         target_q = req_data
 
-                    # Update test totalQuestions count & maxMarks
+                    # Bug 3 fix: compute maximumMarks from actual per-question marks (not totalQuestions * marksPerCorrect)
+                    # This preserves custom per-question mark weights set by admin
+                    test_questions = [q for q in questions if q.get('testId') == test_id]
                     for t in tests:
                         if t.get('id') == test_id:
-                            t['totalQuestions'] = len([q for q in questions if q.get('testId') == test_id])
-                            t['maximumMarks'] = t['totalQuestions'] * t.get('marksPerCorrect', 2.0)
-
+                            t['totalQuestions'] = len(test_questions)
+                            t['maximumMarks'] = sum(float(q.get('marks', t.get('marksPerCorrect', 2.0))) for q in test_questions)
                     save_backend_data(data)
+                    # Sync question and updated test to Firebase RTDB (prevents data loss on Vercel cold start)
+                    sync_to_firebase(f"questions/{target_q['id']}", target_q, method='PUT')
+                    if test_id:
+                        updated_test = next((t for t in tests if t.get('id') == test_id), None)
+                        if updated_test:
+                            sync_to_firebase(f"tests/{test_id}", updated_test, method='PUT')
                     self.send_json(200, {'success': True, 'question': target_q})
                     return
             except Exception as e:
@@ -4477,11 +4513,18 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     rem.sort(key=lambda x: x.get('number', 0))
                     for i, q in enumerate(rem):
                         q['number'] = i + 1
+                    updated_test_ref = None
                     for t in data.get('tests', []):
                         if t.get('id') == test_id:
                             t['totalQuestions'] = len(rem)
-                            t['maximumMarks'] = len(rem) * t.get('marksPerCorrect', 2.0)
+                            # Bug 3 fix: sum per-question marks instead of N * marksPerCorrect
+                            t['maximumMarks'] = sum(float(q.get('marks', t.get('marksPerCorrect', 2.0))) for q in rem)
+                            updated_test_ref = t
                     save_backend_data(data)
+                    # Sync deletion and test update to Firebase RTDB
+                    sync_to_firebase(f"questions/{q_id}", None, method='DELETE')
+                    if updated_test_ref:
+                        sync_to_firebase(f"tests/{test_id}", updated_test_ref, method='PUT')
                 self.send_json(200, {'success': True, 'deletedId': q_id})
                 return
             except Exception as e:
@@ -4859,29 +4902,33 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 unattempted_count = 0
 
                 user_tier = get_user_tier(user.get('id'), data)
+                gross = 0.0
+                penalty = 0.0
                 for q in questions:
                     req_tier = str(q.get('requiredTier', 'free')).lower()
                     if not check_tier_access(user_tier, req_tier):
                         unattempted_count += 1
                         continue
 
+                    q_pos = float(q.get('marks', test.get('marksPerCorrect', 2.0)))
+                    q_neg = float(q.get('negativeMarks', test.get('negativeMarksPerWrong', 0.5)))
+
                     chosen = answers.get(q.get('id'))
                     if not chosen:
                         unattempted_count += 1
                     elif chosen == q.get('correctOption'):
                         correct_count += 1
+                        gross += q_pos
                     else:
                         wrong_count += 1
+                        penalty += q_neg
 
                 # Dynamic marking and platform points scheme
                 pos = float(test.get('marksPerCorrect', 2.0))
-                neg = float(test.get('negativeMarksPerWrong', 0.5))
                 points_per_correct = float(test.get('pointsPerCorrect', pos))
-                gross = correct_count * pos
-                penalty = wrong_count * neg
                 score = max(0.0, gross - penalty)
                 earned_points = correct_count * points_per_correct
-                max_marks = len(questions) * pos
+                max_marks = sum(float(q.get('marks', pos)) for q in questions) if questions else 0.0
                 pct = (score / max_marks * 100) if max_marks > 0 else 0
 
                 attempt_record = {
@@ -4916,6 +4963,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         metadata={'correctCount': correct_count, 'percentage': pct, 'testId': test_id}
                     )
                     notifs = data.get('notifications', [])
+                    if isinstance(notifs, dict):
+                        notifs = list(notifs.values())
                     notifs.insert(0, {
                         'id': f"notif-{int(datetime.now().timestamp() * 1000)}",
                         'userId': user.get('id'),
@@ -4929,6 +4978,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     })
                     data['notifications'] = notifs
 
+                if isinstance(attempts, dict):
+                    attempts = list(attempts.values())
                 attempts.insert(0, attempt_record)
                 data['test_attempts'] = attempts
                 save_backend_data(data)
