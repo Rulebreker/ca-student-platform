@@ -42,22 +42,43 @@ class AssignmentPortal {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       }).then(r => r.ok ? r.json() : null).then(data => {
         if (data && Array.isArray(data.papers)) {
-          const localAssignments = window.store.getAssignments();
+          let localAssignments = window.store.getAssignments();
+          const backendIds = new Set(data.papers.map(bp => bp && bp.id).filter(Boolean));
           let changed = false;
+
+          // 1. Prune repository papers that were deleted on backend
+          const beforeCount = localAssignments.length;
+          localAssignments = localAssignments.filter(la => {
+            if (!la || !la.id) return false;
+            // If it exists in backend, keep it
+            if (backendIds.has(la.id)) return true;
+            // If it starts with paper- or asg- and is NOT in backend, prune it!
+            if (la.id.startsWith('paper-') || la.id.startsWith('asg-')) {
+              return false;
+            }
+            return true;
+          });
+          if (localAssignments.length !== beforeCount) {
+            changed = true;
+          }
+
+          // 2. Add or update papers from backend
           data.papers.forEach(bp => {
             if (!bp.id) return;
             const existIdx = localAssignments.findIndex(a => a.id === bp.id);
             if (existIdx === -1) {
               // New paper from backend — add it
-              // Map backend paper fields to local assignment format
               const paperObj = {
                 id: bp.id,
                 title: bp.title || 'Untitled Paper',
+                examLevel: bp.examLevel || 'CA Foundation',
                 subjectId: bp.subjectId || '',
                 subject: bp.subject || '',
                 topic: bp.topic || '',
                 maximumMarks: bp.maximumMarks || 0,
-                durationMinutes: bp.durationMinutes || 0,
+                durationMinutes: (bp.isUntimed || bp.durationMinutes === 0) ? 0 : (bp.durationMinutes || 180),
+                isUntimed: !!(bp.isUntimed || bp.durationMinutes === 0),
+                hasTimeLimit: !(bp.isUntimed || bp.durationMinutes === 0),
                 description: bp.description || '',
                 status: bp.effectiveStatus || bp.status || 'Published',
                 isPublished: bp.effectiveStatus !== 'Draft' && bp.status !== 'Draft',
@@ -69,6 +90,8 @@ class AssignmentPortal {
                 answerPdfId: bp.answerPdfId || null,
                 answerPdfData: bp.answerPdfData || null,
                 requiredTier: bp.requiredTier || 'free',
+                allowedPlans: bp.allowedPlans || null,
+                hideFromNonEligible: !!bp.hideFromNonEligible,
                 isTierLocked: !!bp.isTierLocked,
                 scheduledPublishTime: bp.scheduledPublishTime || null,
                 liveStartTime: bp.liveStartTime || null,
@@ -80,9 +103,14 @@ class AssignmentPortal {
               localAssignments.unshift(paperObj);
               changed = true;
             } else {
-              // Existing paper — update metadata (title, status, PDF info)
+              // Existing paper — update metadata (title, status, PDF info, tier, duration)
               const existing = localAssignments[existIdx];
-              const updateFields = ['title', 'subject', 'subjectId', 'topic', 'maximumMarks', 'durationMinutes', 'description', 'status', 'questionPdfName', 'questionPdfId', 'answerPdfName', 'answerPdfId', 'requiredTier', 'isTierLocked'];
+              const updateFields = [
+                'title', 'examLevel', 'subject', 'subjectId', 'topic', 'maximumMarks', 
+                'durationMinutes', 'isUntimed', 'hasTimeLimit', 'description', 'status', 
+                'questionPdfName', 'questionPdfId', 'answerPdfName', 'answerPdfId', 
+                'requiredTier', 'allowedPlans', 'hideFromNonEligible', 'isTierLocked'
+              ];
               updateFields.forEach(f => {
                 if (bp[f] !== undefined && bp[f] !== null && existing[f] !== bp[f]) {
                   existing[f] = bp[f];
@@ -220,14 +248,45 @@ class AssignmentPortal {
 
       // Tier Access Verification
       const curUser = window.auth ? window.auth.getCurrentUser() : null;
+      const isStaff = curUser && (curUser.role === 'admin' || curUser.role === 'teacher');
       const curEntitlements = window.store && curUser ? window.store.getUserEntitlements(curUser.id) : null;
       const curUserTier = curEntitlements ? curEntitlements.tier.toLowerCase() : 'free';
       const tierLevels = { none: 0, free: 0, trial: 1, core: 2, plus: 3, elite: 4, teacher: 99, admin: 99 };
-      const curUserLevel = curUser && (curUser.role === 'admin' || curUser.role === 'teacher') ? 99 : (tierLevels[curUserTier] ?? 0);
-      const rawReq = (asg.requiredTier || 'free').toString().trim().toLowerCase();
-      const reqTier = (rawReq === 'none' || rawReq === 'null' || !rawReq) ? 'free' : rawReq;
-      const reqLevel = tierLevels[reqTier] ?? 0;
-      const isTierLocked = (reqTier !== 'free') && (asg.isTierLocked || (curUserLevel < reqLevel));
+      const curUserLevel = isStaff ? 99 : (tierLevels[curUserTier] ?? 0);
+
+      let isTierLocked = false;
+      let reqBadgeText = '';
+      if (!isStaff) {
+        if (asg.isTierLocked !== undefined && asg.isTierLocked !== null) {
+          isTierLocked = !!asg.isTierLocked;
+        } else if (Array.isArray(asg.allowedPlans) && asg.allowedPlans.length > 0) {
+          const allowed = asg.allowedPlans.map(p => String(p).toLowerCase().trim());
+          if (!allowed.includes('all') && !allowed.includes('free') && !allowed.includes(curUserTier)) {
+            isTierLocked = true;
+          }
+        } else {
+          const rawReq = (asg.requiredTier || 'free').toString().trim().toLowerCase();
+          const reqTier = (rawReq === 'none' || rawReq === 'null' || !rawReq) ? 'free' : rawReq;
+          const reqLevel = tierLevels[reqTier] ?? 0;
+          if (reqTier !== 'free' && curUserLevel < reqLevel) {
+            isTierLocked = true;
+          }
+        }
+
+        if (Array.isArray(asg.allowedPlans) && asg.allowedPlans.length > 0) {
+          const allowed = asg.allowedPlans.map(p => String(p).toLowerCase().trim());
+          if (!allowed.includes('all') && !allowed.includes('free')) {
+            reqBadgeText = allowed.map(p => p.toUpperCase()).join('/') + ' PASS';
+          }
+        } else {
+          const rawReq = (asg.requiredTier || 'free').toString().trim().toLowerCase();
+          if (rawReq && rawReq !== 'free' && rawReq !== 'none' && rawReq !== 'null') {
+            reqBadgeText = rawReq.toUpperCase() + ' PASS';
+          }
+        }
+      }
+
+      const isUntimed = !!(asg.isUntimed || asg.hasTimeLimit === false || asg.durationMinutes === 0);
 
       return `
         <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-xs hover:shadow-md transition-all flex flex-col h-full group box-border">
@@ -240,13 +299,9 @@ class AssignmentPortal {
               <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
                 ${examLevel}
               </span>
-              ${reqTier !== 'free' ? `
-                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
-                  reqTier === 'core' ? 'bg-blue-100 text-blue-800 border-blue-200' :
-                  reqTier === 'plus' ? 'bg-indigo-100 text-indigo-800 border-indigo-200' :
-                  'bg-purple-100 text-purple-800 border-purple-200'
-                } flex-shrink-0">
-                  ${reqTier} Pass
+              ${reqBadgeText ? `
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-indigo-100 text-indigo-800 border-indigo-200 flex-shrink-0">
+                  ${reqBadgeText}
                 </span>
               ` : ''}
             </div>
@@ -292,7 +347,7 @@ class AssignmentPortal {
               <div class="truncate">
                 <span class="text-xs font-bold text-slate-800 block leading-tight">Question Paper (PDF)</span>
                 <span class="text-[10px] text-slate-500 font-mono truncate block" title="${asg.questionPdfName || 'Official_QP.pdf'}">
-                  ${isTierLocked ? `${reqTier.toUpperCase()} Pass Required` : (asg.questionPdfName || 'Official_QP.pdf')}
+                  ${isTierLocked ? (reqBadgeText ? `${reqBadgeText} Required` : 'Pass Required') : (asg.questionPdfName || 'Official_QP.pdf')}
                 </span>
               </div>
             </div>
@@ -301,9 +356,9 @@ class AssignmentPortal {
                 type="button"
                 onclick="window.app.navigate('passes')"
                 class="flex-shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-xs transition-colors flex items-center gap-1 cursor-pointer"
-                title="Requires ${reqTier.toUpperCase()} Pass to unlock and download"
+                title="Requires ${reqBadgeText || 'Pass'} to unlock and download"
               >
-                <i data-lucide="lock" class="w-3.5 h-3.5"></i> ${reqTier.toUpperCase()} Pass
+                <i data-lucide="lock" class="w-3.5 h-3.5"></i> ${reqBadgeText || 'Pass Required'}
               </button>
             ` : `
               <button 
@@ -324,7 +379,7 @@ class AssignmentPortal {
                 ${timeInfoHtml}
               </div>
               <div class="flex items-center gap-2 font-bold text-slate-700 text-xs flex-shrink-0">
-                <span><i data-lucide="clock" class="w-3.5 h-3.5 inline"></i> ${asg.durationMinutes || 180}m</span>
+                <span>${isUntimed ? '<i data-lucide="infinity" class="w-3.5 h-3.5 inline"></i> No Time Limit' : `<i data-lucide="clock" class="w-3.5 h-3.5 inline"></i> ${asg.durationMinutes || 180}m`}</span>
                 <span>•</span>
                 <span>${asg.maximumMarks} Marks</span>
               </div>
@@ -344,7 +399,7 @@ class AssignmentPortal {
                 onclick="window.app.navigate('passes')"
                 class="w-full h-10 px-4 text-xs font-bold rounded-lg bg-gradient-to-r from-indigo-50 to-purple-50 hover:from-indigo-100 hover:to-purple-100 text-indigo-900 border border-indigo-200 transition-colors flex items-center justify-center gap-1.5 cursor-pointer box-border"
               >
-                <i data-lucide="lock" class="w-4 h-4 text-indigo-600 flex-shrink-0"></i> <span class="truncate">Requires ${reqTier.toUpperCase()} Pass → Upgrade</span>
+                <i data-lucide="lock" class="w-4 h-4 text-indigo-600 flex-shrink-0"></i> <span class="truncate">Requires ${reqBadgeText || 'Pass'} → Upgrade</span>
               </button>
             ` : evalStatus.canAttempt ? `
               <button 
@@ -430,7 +485,25 @@ class AssignmentPortal {
     const allAssignments = window.store.getAssignments();
     const subjects = window.store.getSubjects();
     const user = window.auth ? window.auth.getCurrentUser() : null;
-    const bmCount = user && window.store && window.store.getBookmarks ? window.store.getBookmarks(user.id).filter(b => b.itemType === 'paper' || allAssignments.some(a => a.id === b.itemId)).length : 0;
+    const isStaff = user && (user.role === 'admin' || user.role === 'teacher');
+    const curEntitlements = window.store && user ? window.store.getUserEntitlements(user.id) : null;
+    const curUserTier = curEntitlements ? curEntitlements.tier.toLowerCase() : 'free';
+    const tierLevels = { none: 0, free: 0, trial: 1, core: 2, plus: 3, elite: 4 };
+
+    // Only count papers that are visible to this student
+    const visibleAssignments = allAssignments.filter(a => {
+      if (isStaff) return true;
+      if (!a.hideFromNonEligible) return true;
+      if (Array.isArray(a.allowedPlans) && a.allowedPlans.length > 0) {
+        const allowed = a.allowedPlans.map(p => String(p).toLowerCase().trim());
+        return allowed.includes('all') || allowed.includes('free') || allowed.includes(curUserTier);
+      }
+      const rawReq = (a.requiredTier || 'free').toString().trim().toLowerCase();
+      const reqTier = (rawReq === 'none' || rawReq === 'null' || !rawReq) ? 'free' : rawReq;
+      return (tierLevels[curUserTier] ?? 0) >= (tierLevels[reqTier] ?? 0);
+    });
+
+    const bmCount = user && window.store && window.store.getBookmarks ? window.store.getBookmarks(user.id).filter(b => b.itemType === 'paper' || visibleAssignments.some(a => a.id === b.itemId)).length : 0;
     const examLevels = ['all', 'CA Foundation', 'CA Intermediate', 'CA Final'];
 
     if (levelContainer) {
@@ -463,7 +536,7 @@ class AssignmentPortal {
           }"
         >
           <span>All Test Papers</span>
-          <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono ${this.selectedSubject === 'all' && !this.filterBookmarkedOnly ? 'bg-blue-700/90 text-white' : 'bg-slate-100 text-slate-600'}">${allAssignments.length}</span>
+          <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono ${this.selectedSubject === 'all' && !this.filterBookmarkedOnly ? 'bg-blue-700/90 text-white' : 'bg-slate-100 text-slate-600'}">${visibleAssignments.length}</span>
         </button>
 
         <!-- Bookmarked Filter Button -->
@@ -482,7 +555,7 @@ class AssignmentPortal {
         </button>
 
         ${subjects.map(s => {
-          const count = allAssignments.filter(a => a.subjectId === s.id || a.subject === s.name).length;
+          const count = visibleAssignments.filter(a => a.subjectId === s.id || a.subject === s.name).length;
           const isActive = this.selectedSubject === s.id && !this.filterBookmarkedOnly;
           return `
             <button 
@@ -614,6 +687,24 @@ class AssignmentPortal {
     const userSubmissions = user ? window.store.getSubmissionsByUser(user.id) : [];
 
     let list = [...allAssignments];
+
+    // Filter hidden non-eligible papers
+    const isStaff = user && (user.role === 'admin' || user.role === 'teacher');
+    const curEntitlements = window.store && user ? window.store.getUserEntitlements(user.id) : null;
+    const curUserTier = curEntitlements ? curEntitlements.tier.toLowerCase() : 'free';
+    const tierLevels = { none: 0, free: 0, trial: 1, core: 2, plus: 3, elite: 4 };
+
+    list = list.filter(a => {
+      if (isStaff) return true;
+      if (!a.hideFromNonEligible) return true;
+      if (Array.isArray(a.allowedPlans) && a.allowedPlans.length > 0) {
+        const allowed = a.allowedPlans.map(p => String(p).toLowerCase().trim());
+        return allowed.includes('all') || allowed.includes('free') || allowed.includes(curUserTier);
+      }
+      const rawReq = (a.requiredTier || 'free').toString().trim().toLowerCase();
+      const reqTier = (rawReq === 'none' || rawReq === 'null' || !rawReq) ? 'free' : rawReq;
+      return (tierLevels[curUserTier] ?? 0) >= (tierLevels[reqTier] ?? 0);
+    });
 
     // 0. Exam Level filter
     if (this.selectedLevel && this.selectedLevel !== 'all') {
@@ -811,20 +902,50 @@ class AssignmentPortal {
     const existingSubmission = window.store.getSubmissionsByUser(user.id).find(s => s.assignmentId === asg.id);
 
     // Tier Access Check
+    const isStaff = user && (user.role === 'admin' || user.role === 'teacher');
     const curEntitlements = window.store && user ? window.store.getUserEntitlements(user.id) : null;
     const curUserTier = curEntitlements ? curEntitlements.tier.toLowerCase() : 'free';
     const tierLevels = { none: 0, free: 0, trial: 1, core: 2, plus: 3, elite: 4, teacher: 99, admin: 99 };
-    const curUserLevel = user && (user.role === 'admin' || user.role === 'teacher') ? 99 : (tierLevels[curUserTier] ?? 0);
-    const rawReq = (asg.requiredTier || 'free').toString().trim().toLowerCase();
-    const paperReqTier = (rawReq === 'none' || rawReq === 'null' || !rawReq) ? 'free' : rawReq;
-    const paperReqLevel = tierLevels[paperReqTier] ?? 0;
-    const isModalPaperLocked = (paperReqTier !== 'free') && (asg.isTierLocked || (curUserLevel < paperReqLevel));
+    const curUserLevel = isStaff ? 99 : (tierLevels[curUserTier] ?? 0);
+
+    let isModalPaperLocked = false;
+    let modalReqBadgeText = '';
+    if (!isStaff) {
+      if (asg.isTierLocked !== undefined && asg.isTierLocked !== null) {
+        isModalPaperLocked = !!asg.isTierLocked;
+      } else if (Array.isArray(asg.allowedPlans) && asg.allowedPlans.length > 0) {
+        const allowed = asg.allowedPlans.map(p => String(p).toLowerCase().trim());
+        if (!allowed.includes('all') && !allowed.includes('free') && !allowed.includes(curUserTier)) {
+          isModalPaperLocked = true;
+        }
+      } else {
+        const rawReq = (asg.requiredTier || 'free').toString().trim().toLowerCase();
+        const paperReqTier = (rawReq === 'none' || rawReq === 'null' || !rawReq) ? 'free' : rawReq;
+        const paperReqLevel = tierLevels[paperReqTier] ?? 0;
+        if (paperReqTier !== 'free' && curUserLevel < paperReqLevel) {
+          isModalPaperLocked = true;
+        }
+      }
+
+      if (Array.isArray(asg.allowedPlans) && asg.allowedPlans.length > 0) {
+        const allowed = asg.allowedPlans.map(p => String(p).toLowerCase().trim());
+        if (!allowed.includes('all') && !allowed.includes('free')) {
+          modalReqBadgeText = allowed.map(p => p.toUpperCase()).join('/') + ' PASS';
+        }
+      } else {
+        const rawReq = (asg.requiredTier || 'free').toString().trim().toLowerCase();
+        if (rawReq && rawReq !== 'free' && rawReq !== 'none' && rawReq !== 'null') {
+          modalReqBadgeText = rawReq.toUpperCase() + ' PASS';
+        }
+      }
+    }
 
     if (!existingSubmission && !isModalPaperLocked && !evalStatus.canAttempt && user.role === 'student') {
       window.app.showToast(`Access Denied: ${evalStatus.badgeText}. Test cannot be attempted outside the active window.`, 'error');
       return;
     }
 
+    const isUntimed = !!(asg.isUntimed || asg.hasTimeLimit === false || asg.durationMinutes === 0);
     const subject = window.store.getSubjectById(asg.subjectId) || { name: asg.subject || 'Accounting' };
     const modalContent = document.getElementById('assignment-modal-content');
     if (!modalContent) return;
@@ -838,14 +959,10 @@ class AssignmentPortal {
                 ${subject.name}
               </span>
               <span class="text-xs font-semibold text-slate-500">• Max Marks: ${asg.maximumMarks}</span>
-              <span class="text-xs font-semibold text-slate-500">• Duration: ${asg.durationMinutes || 180} Mins</span>
-              ${paperReqTier !== 'free' ? `
-                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase ${
-                  paperReqTier === 'core' ? 'bg-blue-100 text-blue-800 border border-blue-200' :
-                  paperReqTier === 'plus' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' :
-                  'bg-purple-100 text-purple-800 border border-purple-200'
-                }">
-                  ${paperReqTier} Pass Required
+              <span class="text-xs font-semibold text-slate-500">• Duration: ${isUntimed ? 'No Time Limit' : `${asg.durationMinutes || 180} Mins`}</span>
+              ${modalReqBadgeText ? `
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase bg-indigo-100 text-indigo-800 border border-indigo-200">
+                  ${modalReqBadgeText} REQUIRED
                 </span>
               ` : ''}
             </div>
@@ -865,7 +982,7 @@ class AssignmentPortal {
                 <i data-lucide="lock" class="w-6 h-6"></i>
               </div>
               <div>
-                <span class="text-xs font-bold text-indigo-950 block">${paperReqTier.toUpperCase()} PASS REQUIRED</span>
+                <span class="text-xs font-bold text-indigo-950 block">${modalReqBadgeText || 'PASS'} REQUIRED</span>
                 <span class="text-[11px] text-slate-600">Question Paper PDF is locked for your current membership pass.</span>
               </div>
             </div>
@@ -874,7 +991,7 @@ class AssignmentPortal {
               onclick="window.app.closeModal('assignment-modal'); window.app.navigate('passes');"
               class="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm inline-flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              <i data-lucide="sparkles" class="w-4 h-4"></i> Upgrade to ${paperReqTier.toUpperCase()} Pass
+              <i data-lucide="sparkles" class="w-4 h-4"></i> Upgrade Pass
             </button>
           </div>
         ` : `

@@ -1644,7 +1644,25 @@ class AdminDashboard {
     this.selectedNewQuestionFile = null;
     this.selectedNewAnswerFile = null;
 
-    const validSubjects = window.store.getSubjects ? window.store.getSubjects() : [];
+    const currentExamLevel = paper ? (paper.examLevel || 'CA Foundation') : 'CA Foundation';
+    const validSubjects = window.store && window.store.getDescriptiveSubjectsByLevel 
+      ? window.store.getDescriptiveSubjectsByLevel(currentExamLevel) 
+      : (window.store && window.store.getSubjects ? window.store.getSubjects() : []);
+
+    const isUntimed = !!(paper && (paper.isUntimed || paper.hasTimeLimit === false || paper.durationMinutes === 0));
+    const isPlanSelected = (plan) => {
+      if (!paper) return true; // Default to all selected for new paper
+      if (Array.isArray(paper.allowedPlans) && paper.allowedPlans.length > 0) {
+        return paper.allowedPlans.map(p => String(p).toLowerCase()).includes(plan);
+      }
+      if (paper.requiredTier) {
+        const tier = String(paper.requiredTier).toLowerCase();
+        if (tier === 'free') return true;
+        const levels = { free: 0, trial: 1, core: 2, plus: 3, elite: 4 };
+        return (levels[plan] ?? 0) >= (levels[tier] ?? 0);
+      }
+      return true;
+    };
 
     modalContent.innerHTML = `
       <div class="p-6 sm:p-7 max-h-[90vh] overflow-y-auto">
@@ -1676,7 +1694,7 @@ class AdminDashboard {
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label class="block font-bold text-slate-700 mb-1">Exam Level <span class="text-rose-500">*</span></label>
-              <select id="admin-paper-exam-level" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold bg-white">
+              <select id="admin-paper-exam-level" onchange="window.adminDashboard.onPaperExamLevelChange(this.value)" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold bg-white">
                 <option value="CA Foundation" ${!paper || paper.examLevel === 'CA Foundation' ? 'selected' : ''}>CA Foundation</option>
                 <option value="CA Intermediate" ${paper && paper.examLevel === 'CA Intermediate' ? 'selected' : ''}>CA Intermediate</option>
                 <option value="CA Final" ${paper && paper.examLevel === 'CA Final' ? 'selected' : ''}>CA Final</option>
@@ -1687,7 +1705,7 @@ class AdminDashboard {
               <select id="admin-paper-subject" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-blue-900 focus:ring-2 focus:ring-blue-500 bg-white">
                 ${validSubjects.map(s => `
                   <option value="${s.id}" ${paper && (paper.subjectId === s.id || paper.subject === s.name) ? 'selected' : ''}>
-                    ${s.name} (${s.level || 'Foundation'})
+                    ${s.name} (${s.level || currentExamLevel})
                   </option>
                 `).join('')}
               </select>
@@ -1720,15 +1738,28 @@ class AdminDashboard {
               >
             </div>
             <div>
-              <label class="block font-bold text-slate-700 mb-1">Duration / Time Limit (Minutes) <span class="text-rose-500">*</span></label>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block font-bold text-slate-700">Duration (Minutes) <span class="text-rose-500">*</span></label>
+                <label class="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-purple-700 hover:text-purple-900 select-none">
+                  <input 
+                    type="checkbox" 
+                    id="admin-paper-untimed" 
+                    ${isUntimed ? 'checked' : ''} 
+                    onchange="window.adminDashboard.togglePaperUntimed(this.checked)"
+                    class="rounded border-slate-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                  >
+                  <span>No Time Limit / Untimed</span>
+                </label>
+              </div>
               <input 
                 type="number" 
                 id="admin-paper-duration" 
-                min="15" 
+                min="1" 
                 max="360" 
-                required 
-                value="${paper ? (paper.durationMinutes || 180) : 180}" 
-                class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold focus:ring-2 focus:ring-blue-500"
+                ${isUntimed ? 'disabled' : 'required'} 
+                value="${isUntimed ? '' : (paper ? (paper.durationMinutes || 180) : 180)}" 
+                placeholder="${isUntimed ? 'No Time Limit' : '180'}"
+                class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold focus:ring-2 focus:ring-blue-500 ${isUntimed ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white'}"
               >
             </div>
           </div>
@@ -1781,7 +1812,7 @@ class AdminDashboard {
           </div>
 
           <!-- Paper Status & Required Subscription Tier -->
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="space-y-4">
             <div>
               <label class="block font-bold text-slate-700 mb-1">Paper Status</label>
               <select id="admin-paper-status" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-blue-500 bg-white">
@@ -1791,15 +1822,31 @@ class AdminDashboard {
                 <option value="Live" ${paper && paper.status === 'Live' ? 'selected' : ''}>Live (Active Exam Window)</option>
               </select>
             </div>
+
             <div>
-              <label class="block font-bold text-slate-700 mb-1">Required Subscription Tier</label>
-              <select id="admin-paper-required-tier" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold focus:ring-2 focus:ring-blue-500 bg-white text-slate-800">
-                <option value="free" ${!paper || paper.requiredTier === 'free' ? 'selected' : ''}>Free (All Students)</option>
-                <option value="trial" ${paper && paper.requiredTier === 'trial' ? 'selected' : ''}>Trial Pass or Higher</option>
-                <option value="core" ${paper && paper.requiredTier === 'core' ? 'selected' : ''}>Core Pass or Higher</option>
-                <option value="plus" ${paper && paper.requiredTier === 'plus' ? 'selected' : ''}>Plus Pass or Higher</option>
-                <option value="elite" ${paper && paper.requiredTier === 'elite' ? 'selected' : ''}>Elite Pass Only</option>
-              </select>
+              <label class="block font-bold text-slate-700 mb-1.5">Required Subscription Tier(s) <span class="text-slate-400 font-normal">(Select which subscription tiers can access this paper)</span> <span class="text-rose-500">*</span></label>
+              <div class="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                  <input type="checkbox" value="free" class="admin-paper-plan rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer" ${isPlanSelected('free') ? 'checked' : ''}>
+                  <span class="text-xs font-bold text-slate-700">Free Tier</span>
+                </label>
+                <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                  <input type="checkbox" value="trial" class="admin-paper-plan rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer" ${isPlanSelected('trial') ? 'checked' : ''}>
+                  <span class="text-xs font-bold text-amber-800">₹9 Trial</span>
+                </label>
+                <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                  <input type="checkbox" value="core" class="admin-paper-plan rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer" ${isPlanSelected('core') ? 'checked' : ''}>
+                  <span class="text-xs font-bold text-blue-800">Core Pass</span>
+                </label>
+                <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                  <input type="checkbox" value="plus" class="admin-paper-plan rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer" ${isPlanSelected('plus') ? 'checked' : ''}>
+                  <span class="text-xs font-bold text-indigo-800">Plus Pass</span>
+                </label>
+                <label class="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                  <input type="checkbox" value="elite" class="admin-paper-plan rounded border-slate-300 text-purple-600 focus:ring-purple-500 cursor-pointer" ${isPlanSelected('elite') ? 'checked' : ''}>
+                  <span class="text-xs font-bold text-purple-800">Elite Pass</span>
+                </label>
+              </div>
             </div>
           </div>
 
@@ -1865,6 +1912,44 @@ class AdminDashboard {
     }
   }
 
+  onPaperExamLevelChange(level) {
+    const subjectSelect = document.getElementById('admin-paper-subject');
+    if (!subjectSelect) return;
+    const subjects = window.store && window.store.getDescriptiveSubjectsByLevel 
+      ? window.store.getDescriptiveSubjectsByLevel(level) 
+      : (window.store && window.store.getSubjects ? window.store.getSubjects() : []);
+    const currentVal = subjectSelect.value;
+    subjectSelect.innerHTML = subjects.map(s => `
+      <option value="${s.id}">
+        ${s.name} (${s.level || level})
+      </option>
+    `).join('');
+    // Keep current selection if valid for new level; otherwise select first subject
+    const exists = subjects.some(s => s.id === currentVal || s.name === currentVal);
+    if (exists) {
+      subjectSelect.value = currentVal;
+    } else if (subjects.length > 0) {
+      subjectSelect.value = subjects[0].id;
+    }
+  }
+
+  togglePaperUntimed(isUntimed) {
+    const durInput = document.getElementById('admin-paper-duration');
+    if (!durInput) return;
+    durInput.disabled = isUntimed;
+    if (isUntimed) {
+      durInput.value = '';
+      durInput.placeholder = 'No Time Limit';
+      durInput.classList.add('bg-slate-100', 'text-slate-400', 'cursor-not-allowed');
+      durInput.removeAttribute('required');
+    } else {
+      durInput.value = '180';
+      durInput.placeholder = '180';
+      durInput.classList.remove('bg-slate-100', 'text-slate-400', 'cursor-not-allowed');
+      durInput.setAttribute('required', 'required');
+    }
+  }
+
   async saveTestPaper(e) {
     e.preventDefault();
 
@@ -1874,9 +1959,31 @@ class AdminDashboard {
     const subjectObj = window.store.getSubjectById(subjectId) || { name: 'Accounting' };
     const topic = document.getElementById('admin-paper-topic').value.trim();
     const maximumMarks = parseInt(document.getElementById('admin-paper-marks').value, 10);
-    const durationMinutes = parseInt(document.getElementById('admin-paper-duration').value, 10);
+
+    const isUntimed = !!(document.getElementById('admin-paper-untimed') && document.getElementById('admin-paper-untimed').checked);
+    const durationInput = document.getElementById('admin-paper-duration');
+    const durationMinutes = isUntimed ? 0 : (parseInt(durationInput ? durationInput.value : '180', 10) || 180);
+
     const description = document.getElementById('admin-paper-desc').value.trim();
     const status = document.getElementById('admin-paper-status').value;
+
+    const planCheckboxes = Array.from(document.querySelectorAll('.admin-paper-plan:checked')).map(cb => cb.value);
+    if (planCheckboxes.length === 0) {
+      window.app.showToast('Please select at least one subscription tier for this test paper.', 'warning');
+      return;
+    }
+    const allowedPlans = planCheckboxes;
+    let requiredTier = 'free';
+    if (!allowedPlans.includes('free')) {
+      for (const t of ['trial', 'core', 'plus', 'elite']) {
+        if (allowedPlans.includes(t)) {
+          requiredTier = t;
+          break;
+        }
+      }
+    }
+
+    const hideFromNonEligible = document.getElementById('admin-paper-hide-non-eligible') ? document.getElementById('admin-paper-hide-non-eligible').checked : false;
 
     const isEdit = !!this.activeEditingPaperId;
     const existing = isEdit ? window.store.getAssignmentById(this.activeEditingPaperId) : null;
@@ -1889,11 +1996,21 @@ class AdminDashboard {
     let answerPdfId = existing ? existing.answerPdfId : null;
     let answerPdfData = existing ? existing.answerPdfData : null;
 
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin inline mr-1"></i> Saving...';
+    }
+
     // If new Question Paper selected, upload
     if (this.selectedNewQuestionFile) {
       const upRes = await window.secureBackend.uploadProtectedPdf(this.selectedNewQuestionFile, 'question');
       if (!upRes.success) {
         window.app.showToast('Question Paper Upload Error: ' + upRes.error, 'error');
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = isEdit ? 'Save Changes' : 'Create & Save Paper';
+        }
         return;
       }
       questionPdfName = upRes.fileName;
@@ -1906,6 +2023,10 @@ class AdminDashboard {
       const upRes = await window.secureBackend.uploadProtectedPdf(this.selectedNewAnswerFile, 'answer');
       if (!upRes.success) {
         window.app.showToast('Answer Sheet Upload Error: ' + upRes.error, 'error');
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = isEdit ? 'Save Changes' : 'Create & Save Paper';
+        }
         return;
       }
       answerPdfName = upRes.fileName;
@@ -1913,11 +2034,8 @@ class AdminDashboard {
       answerPdfData = upRes.fileData;
     }
 
-    const requiredTier = document.getElementById('admin-paper-required-tier') ? document.getElementById('admin-paper-required-tier').value : 'free';
-    const hideFromNonEligible = document.getElementById('admin-paper-hide-non-eligible') ? document.getElementById('admin-paper-hide-non-eligible').checked : false;
-
     const paperObj = {
-      id: isEdit ? existing.id : ('asg-' + Date.now()),
+      id: isEdit ? existing.id : ('paper-' + Date.now()),
       title,
       examLevel,
       subjectId,
@@ -1925,15 +2043,18 @@ class AdminDashboard {
       topic,
       maximumMarks,
       durationMinutes,
+      isUntimed,
+      hasTimeLimit: !isUntimed,
       description,
       status,
       requiredTier,
+      allowedPlans,
       hideFromNonEligible,
       isPublished: status !== 'Draft',
       isLive: status === 'Live',
       scheduledPublishTime: existing ? existing.scheduledPublishTime : (status === 'Scheduled' ? new Date(Date.now() + 86400000).toISOString() : null),
       liveStartTime: existing ? existing.liveStartTime : (status === 'Live' ? new Date().toISOString() : null),
-      liveEndTime: existing ? existing.liveEndTime : (status === 'Live' ? new Date(Date.now() + durationMinutes * 60000).toISOString() : null),
+      liveEndTime: existing ? existing.liveEndTime : (status === 'Live' ? new Date(Date.now() + (durationMinutes || 180) * 60000).toISOString() : null),
       expiryTime: existing ? existing.expiryTime : new Date(Date.now() + 30 * 86400000).toISOString(),
       deadline: existing ? existing.deadline : new Date(Date.now() + 30 * 86400000).toISOString(),
       questionPdfName,
@@ -1945,75 +2066,112 @@ class AdminDashboard {
       createdAt: existing ? existing.createdAt : new Date().toISOString()
     };
 
-    if (isEdit) {
-      window.store.updateAssignment(paperObj);
-      window.app.showToast('Test Paper updated successfully!', 'success');
-    } else {
-      window.store.addAssignment(paperObj);
-      window.app.showToast('Test Paper created & uploaded successfully!', 'success');
-    }
-
-    // Sync with backend API if online
-    fetch('/api/papers', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${window.auth.getCurrentUser().token || window.auth.getCurrentUser().email}`
-      },
-      body: JSON.stringify(paperObj)
-    }).catch(() => {});
-
-    // Trigger notification to students matching exam level if newly created and published
-    if (!isEdit && paperObj.isPublished) {
-      const allStudents = window.store.getStudents ? window.store.getStudents() : [];
-      const bulkNotifs = [];
-      allStudents.forEach(st => {
-        const stLevel = (st.caLevel || '').toUpperCase();
-        const pLevel = (examLevel || '').toUpperCase();
-        if (!pLevel || stLevel.includes('FOUNDATION') && pLevel.includes('FOUNDATION') ||
-            stLevel.includes('INTER') && pLevel.includes('INTER') ||
-            stLevel.includes('FINAL') && pLevel.includes('FINAL') ||
-            !st.caLevel) {
-          bulkNotifs.push({
-            userId: st.id,
-            type: 'new_paper',
-            title: 'New Test Paper Uploaded!',
-            message: `${paperObj.title} (${paperObj.subject}) is now available for download.`,
-            link: 'assignments',
-            metadata: { paperId: paperObj.id }
-          });
-        }
-      });
-      if (bulkNotifs.length > 0 && window.store && typeof window.store.addNotificationsBulk === 'function') {
-        window.store.addNotificationsBulk(bulkNotifs);
-      }
-    }
-
-    window.app.closeModal('admin-generic-modal');
-    this.renderTestPapers();
-  }
-
-  confirmDeletePaper(paperId) {
-    const paper = window.store.getAssignmentById(paperId);
-    if (!paper) return;
-
-    if (confirm(`Are you sure you want to permanently delete the test paper:
-"${paper.title}"?
-
-This will remove the question paper, attached answer keys, and student submission records.`)) {
-      window.store.deleteAssignment(paperId);
-      
-      fetch('/api/papers/delete', {
+    try {
+      const curUser = window.auth ? window.auth.getCurrentUser() : null;
+      const token = curUser ? (curUser.token || curUser.email) : '';
+      const resp = await fetch('/api/papers', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${window.auth.getCurrentUser().token || window.auth.getCurrentUser().email}`
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(paperObj)
+      });
+      const resJson = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(resJson.error || `Server error (${resp.status})`);
+      }
+
+      if (isEdit) {
+        window.store.updateAssignment(paperObj);
+        window.app.showToast('Test Paper updated successfully!', 'success');
+      } else {
+        window.store.addAssignment(paperObj);
+        window.app.showToast('Test Paper created & uploaded successfully!', 'success');
+      }
+
+      // Trigger notification to students matching exam level if newly created and published
+      if (!isEdit && paperObj.isPublished) {
+        const allStudents = window.store.getStudents ? window.store.getStudents() : [];
+        const bulkNotifs = [];
+        allStudents.forEach(st => {
+          const stLevel = (st.caLevel || '').toUpperCase();
+          const pLevel = (examLevel || '').toUpperCase();
+          if (!pLevel || (stLevel.includes('FOUNDATION') && pLevel.includes('FOUNDATION')) ||
+              (stLevel.includes('INTER') && pLevel.includes('INTER')) ||
+              (stLevel.includes('FINAL') && pLevel.includes('FINAL')) ||
+              !st.caLevel) {
+            bulkNotifs.push({
+              userId: st.id,
+              type: 'new_paper',
+              title: 'New Test Paper Uploaded!',
+              message: `${paperObj.title} (${paperObj.subject}) is now available for download.`,
+              link: 'assignments',
+              metadata: { paperId: paperObj.id }
+            });
+          }
+        });
+        if (bulkNotifs.length > 0 && window.store && typeof window.store.addNotificationsBulk === 'function') {
+          window.store.addNotificationsBulk(bulkNotifs);
+        }
+      }
+
+      window.app.closeModal('admin-generic-modal');
+      this.renderTestPapers();
+    } catch (err) {
+      console.error('[AdminDashboard] Save paper error:', err);
+      window.app.showToast(`Failed to save test paper: ${err.message}`, 'error');
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = isEdit ? 'Save Changes' : 'Create & Save Paper';
+      }
+    }
+  }
+
+  async confirmDeletePaper(paperId) {
+    const paper = window.store.getAssignmentById(paperId);
+    if (!paper) return;
+
+    // Hard protection for core test papers
+    const protectedTitles = [
+      'Indian Regulatory Framework – Descriptive Practice Test 1',
+      'Indian Regulatory Framework – Descriptive Practice Test 2',
+      'Indian Regulatory Framework - Descriptive Practice Test 1',
+      'Indian Regulatory Framework - Descriptive Practice Test 2'
+    ];
+    const protectedIds = ['asg-1789408695574', 'asg-1789409044746'];
+    if (protectedIds.includes(paperId) || (paper.title && protectedTitles.includes(paper.title))) {
+      window.app.showToast('This core practice test paper is protected and cannot be deleted.', 'error');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to permanently delete the test paper:\n"${paper.title}"?\n\nThis will remove the question paper, attached answer keys, and student submission records.`)) {
+      return;
+    }
+
+    try {
+      const curUser = window.auth ? window.auth.getCurrentUser() : null;
+      const token = curUser ? (curUser.token || curUser.email) : '';
+      const resp = await fetch('/api/papers/delete', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({ id: paperId })
-      }).catch(() => {});
+      });
 
+      const resJson = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(resJson.error || `Server error (${resp.status})`);
+      }
+
+      window.store.deleteAssignment(paperId);
       window.app.showToast('Test paper deleted successfully.', 'info');
       this.renderTestPapers();
+    } catch (err) {
+      console.error('[AdminDashboard] Delete paper error:', err);
+      window.app.showToast(`Failed to delete test paper: ${err.message}`, 'error');
     }
   }
 

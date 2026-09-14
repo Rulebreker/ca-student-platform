@@ -113,10 +113,24 @@ const DEFAULT_BANNERS = [
 ];
 
 const DEFAULT_SUBJECTS = [
+  // CA Foundation
   { id: 'sub-1', code: 'PAPER-1', name: 'Accounting', level: 'CA Foundation', icon: 'calculator' },
   { id: 'sub-2', code: 'PAPER-2', name: 'Business Law', level: 'CA Foundation', icon: 'scale' },
   { id: 'sub-3', code: 'PAPER-3', name: 'Business Economics', level: 'CA Foundation', icon: 'trending-up' },
-  { id: 'sub-4', code: 'PAPER-4', name: 'Quantitative Aptitude', level: 'CA Foundation', icon: 'bar-chart-2' }
+  { id: 'sub-4', code: 'PAPER-4', name: 'Quantitative Aptitude', level: 'CA Foundation', icon: 'bar-chart-2' },
+  // CA Intermediate
+  { id: 'sub-inter-1', code: 'INTER-P1', name: 'Advanced Accounting', level: 'CA Intermediate', icon: 'calculator' },
+  { id: 'sub-inter-2', code: 'INTER-P2', name: 'Corporate and Other Laws', level: 'CA Intermediate', icon: 'scale' },
+  { id: 'sub-inter-3', code: 'INTER-P3', name: 'Taxation', level: 'CA Intermediate', icon: 'receipt' },
+  { id: 'sub-inter-4', code: 'INTER-P4', name: 'Cost and Management Accounting', level: 'CA Intermediate', icon: 'pie-chart' },
+  { id: 'sub-inter-5', code: 'INTER-P5', name: 'Auditing and Ethics', level: 'CA Intermediate', icon: 'shield-check' },
+  { id: 'sub-inter-6', code: 'INTER-P6', name: 'Financial Management and Strategic Management', level: 'CA Intermediate', icon: 'trending-up' },
+  // CA Final
+  { id: 'sub-final-1', code: 'FINAL-P1', name: 'Financial Reporting', level: 'CA Final', icon: 'file-text' },
+  { id: 'sub-final-2', code: 'FINAL-P2', name: 'Advanced Financial Management', level: 'CA Final', icon: 'trending-up' },
+  { id: 'sub-final-3', code: 'FINAL-P3', name: 'Advanced Auditing, Assurance and Professional Ethics', level: 'CA Final', icon: 'shield-check' },
+  { id: 'sub-final-4', code: 'FINAL-P4', name: 'Direct Tax Laws & International Taxation', level: 'CA Final', icon: 'receipt' },
+  { id: 'sub-final-5', code: 'FINAL-P5', name: 'Indirect Tax Laws', level: 'CA Final', icon: 'briefcase' }
 ];
 
 
@@ -2147,10 +2161,48 @@ class AppStore {
     if (!raw) return DEFAULT_SUBJECTS;
     try {
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_SUBJECTS;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // Merge missing default subjects so Intermediate and Final subjects are always available
+        const existingIds = new Set(parsed.map(s => s.id));
+        const missingDefaults = DEFAULT_SUBJECTS.filter(s => !existingIds.has(s.id));
+        if (missingDefaults.length > 0) {
+          const merged = [...parsed, ...missingDefaults];
+          this.saveSubjects(merged);
+          return merged;
+        }
+        return parsed;
+      }
+      return DEFAULT_SUBJECTS;
     } catch (e) {
       return DEFAULT_SUBJECTS;
     }
+  }
+  getDescriptiveSubjectsByLevel(level) {
+    const norm = String(level || 'CA Foundation').trim().toUpperCase();
+    const all = this.getSubjects();
+    if (norm.includes('FOUNDATION')) {
+      // For CA Foundation descriptive papers, only valid descriptive subjects (Accounts / Accounting and Business Law) must be shown
+      // Exclude MCQ-only subjects: Business Economics and Quantitative Aptitude
+      return all.filter(s => {
+        const sLevel = String(s.level || '').toUpperCase();
+        const sName = String(s.name || '').toLowerCase();
+        const isFoundation = sLevel.includes('FOUNDATION') || !s.level;
+        const isDescriptive = (sName.includes('account') || sName.includes('law')) &&
+                              !sName.includes('econ') && !sName.includes('quant') && !sName.includes('math');
+        return isFoundation && isDescriptive;
+      });
+    } else if (norm.includes('INTER')) {
+      return all.filter(s => {
+        const sLevel = String(s.level || '').toUpperCase();
+        return sLevel.includes('INTER');
+      });
+    } else if (norm.includes('FINAL')) {
+      return all.filter(s => {
+        const sLevel = String(s.level || '').toUpperCase();
+        return sLevel.includes('FINAL');
+      });
+    }
+    return all;
   }
   saveSubjects(subjects) {
     localStorage.setItem(STORAGE_KEYS.SUBJECTS, JSON.stringify(subjects));
@@ -2888,6 +2940,9 @@ class AppStore {
   deleteAssignment(id) {
     const assignments = this.getAssignments().filter(a => a.id !== id);
     this.saveAssignments(assignments);
+    // Clean up corresponding submissions locally
+    const submissions = this.getSubmissions().filter(s => s.assignmentId !== id && s.paperId !== id);
+    this.saveSubmissions(submissions);
     if (window.firebaseSync && typeof window.firebaseSync.deleteAssignment === 'function') {
       window.firebaseSync.deleteAssignment(id);
     }

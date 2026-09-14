@@ -1012,7 +1012,7 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
         return data
 
     now = time.time()
-    all_keys = ['users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions']
+    all_keys = ['users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'assignments', 'papers']
     target_keys = collections if collections else all_keys
 
     keys_to_fetch = [k for k in target_keys if (now - _collection_last_synced.get(k, 0)) >= min_interval]
@@ -1144,6 +1144,21 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
                                 else:
                                     q_map[qid] = q
                         data['questions'] = list(q_map.values())
+                        _collection_last_synced[key] = now
+                        updated = True
+                elif key in ['assignments', 'papers']:
+                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                    if items:
+                        p_map = {p.get('id'): p for p in data.get('papers', []) if isinstance(p, dict) and p.get('id')}
+                        for p in items:
+                            if isinstance(p, dict) and p.get('id'):
+                                pid = p.get('id')
+                                cur = p_map.get(pid)
+                                if cur:
+                                    cur.update(p)
+                                else:
+                                    p_map[pid] = p
+                        data['papers'] = list(p_map.values())
                         _collection_last_synced[key] = now
                         updated = True
         except Exception:
@@ -2194,7 +2209,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         if path == '/api/papers':
             token = self.get_auth_token()
             user = authenticate_token(token)
-            data = load_backend_data()
+            data = load_backend_data(refresh_collections=['papers', 'assignments'])
             papers = data.get('papers', [])
             now_iso = datetime.now(timezone.utc).isoformat()
             is_admin_or_teacher = user and user.get('role') in ['admin', 'teacher']
@@ -2213,7 +2228,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 else:
                     req_tier = str(raw_req).strip().lower()
                 p_copy['requiredTier'] = req_tier
-                has_tier = is_admin_or_teacher or check_tier_access(user_tier, req_tier)
+                
+                # Check eligibility using allowedPlans if present or requiredTier fallback
+                has_tier = is_admin_or_teacher or check_test_eligibility(user_tier, p)
                 p_copy['isTierLocked'] = not has_tier
 
                 hide_non_eligible = bool(p.get('hideFromNonEligible', False))
@@ -2227,6 +2244,12 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     p_copy['answerPdfId'] = None
                     p_copy['answerPdfName'] = None
                     p_copy['answerPdfData'] = None
+
+                # Support untimed / infinite duration
+                if p.get('isUntimed') or not p.get('hasTimeLimit', True) or p.get('durationMinutes') == 0:
+                    p_copy['isUntimed'] = True
+                    p_copy['hasTimeLimit'] = False
+                    p_copy['durationMinutes'] = 0
 
                 if base_status == 'Draft':
                     if not is_admin_or_teacher: continue
@@ -4186,23 +4209,47 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
         # 3. Descriptive Papers Management
         if path == '/api/papers':
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                paper_data = json.loads(body.decode('utf-8')) if body else {}
+            except Exception as e:
+                self.send_json(400, {'error': f'Invalid payload: {str(e)}', 'code': 400})
+                return
+
             token = self.get_auth_token()
             user = authenticate_token(token)
             if not user or user.get('role') != 'admin':
                 self.send_json(403, {'error': 'Forbidden: Admin only.', 'code': 403})
                 return
+
             try:
-                content_length = int(self.headers.get('Content-Length', 0))
-                body = self.rfile.read(content_length)
-                paper_data = json.loads(body.decode('utf-8'))
+                # Normalize allowedPlans
+                raw_plans = paper_data.get('allowedPlans')
+                if isinstance(raw_plans, list):
+                    paper_data['allowedPlans'] = [str(p).strip().lower() for p in raw_plans if str(p).strip().lower() in ['free', 'trial', 'core', 'plus', 'elite', 'all']]
+                elif isinstance(raw_plans, str):
+                    paper_data['allowedPlans'] = [str(p).strip().lower() for p in raw_plans.split(',') if str(p).strip().lower() in ['free', 'trial', 'core', 'plus', 'elite', 'all']]
 
                 # Normalize requiredTier
                 tier = str(paper_data.get('requiredTier', 'free')).lower().strip()
-                if tier not in ['free', 'core', 'plus', 'elite']:
+                if tier not in ['free', 'trial', 'core', 'plus', 'elite']:
                     tier = 'free'
                 paper_data['requiredTier'] = tier
 
-                data = load_backend_data()
+                # Normalize untimed / duration
+                is_untimed = bool(paper_data.get('isUntimed') or not paper_data.get('hasTimeLimit', True) or int(paper_data.get('durationMinutes', 180) or 0) == 0)
+                paper_data['isUntimed'] = is_untimed
+                paper_data['hasTimeLimit'] = not is_untimed
+                if is_untimed:
+                    paper_data['durationMinutes'] = 0
+                else:
+                    try:
+                        paper_data['durationMinutes'] = int(paper_data.get('durationMinutes') or 180)
+                    except (ValueError, TypeError):
+                        paper_data['durationMinutes'] = 180
+
+                data = load_backend_data(refresh_collections=['papers', 'assignments'])
                 papers = data.get('papers', [])
                 paper_id = paper_data.get('id')
                 if paper_id:
@@ -4217,10 +4264,64 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     papers.insert(0, paper_data)
                 data['papers'] = papers
                 save_backend_data(data)
+                sync_to_firebase(f"papers/{paper_data['id']}", paper_data, method='PUT')
+                sync_to_firebase(f"assignments/{paper_data['id']}", paper_data, method='PUT')
                 self.send_json(200, {'success': True, 'paper': paper_data})
                 return
             except Exception as e:
                 self.send_json(500, {'error': f'Failed to save paper: {str(e)}', 'code': 500})
+                return
+
+        # 3a. Descriptive Paper Deletion
+        if path == '/api/papers/delete':
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+            except Exception as e:
+                self.send_json(400, {'error': f'Invalid payload: {str(e)}', 'code': 400})
+                return
+
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+
+            try:
+                target_id = req_data.get('id')
+                if not target_id:
+                    self.send_json(400, {'error': 'Paper ID is required.', 'code': 400})
+                    return
+
+                # Hard protection for core test papers
+                PROTECTED_TITLES = [
+                    'Indian Regulatory Framework – Descriptive Practice Test 1',
+                    'Indian Regulatory Framework – Descriptive Practice Test 2',
+                    'Indian Regulatory Framework - Descriptive Practice Test 1',
+                    'Indian Regulatory Framework - Descriptive Practice Test 2'
+                ]
+                PROTECTED_IDS = ['asg-1789408695574', 'asg-1789409044746']
+
+                data = load_backend_data(refresh_collections=['papers', 'assignments'])
+                target_paper = next((p for p in data.get('papers', []) if p.get('id') == target_id), None)
+                if not target_paper:
+                    target_paper = next((p for p in data.get('assignments', []) if p.get('id') == target_id), None)
+
+                if target_id in PROTECTED_IDS or (target_paper and target_paper.get('title') in PROTECTED_TITLES):
+                    self.send_json(403, {'error': 'Forbidden: This core practice test paper is protected and cannot be deleted.', 'code': 403})
+                    return
+
+                data['papers'] = [p for p in data.get('papers', []) if p.get('id') != target_id]
+                data['assignments'] = [p for p in data.get('assignments', []) if p.get('id') != target_id]
+                data['submissions'] = [s for s in data.get('submissions', []) if s.get('assignmentId') != target_id and s.get('paperId') != target_id]
+                save_backend_data(data)
+                sync_to_firebase(f"papers/{target_id}", None, method='DELETE')
+                sync_to_firebase(f"assignments/{target_id}", None, method='DELETE')
+                self.send_json(200, {'success': True, 'deletedId': target_id})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Failed to delete paper: {str(e)}', 'code': 500})
                 return
 
         # 3b. Descriptive Paper Submissions & Evaluation Updates
@@ -4264,13 +4365,13 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         return
 
                 if user.get('role') == 'student':
-                    # Tier access check
+                    # Tier access check (supports allowedPlans and requiredTier)
                     target_paper = next((p for p in data.get('papers', []) if p.get('id') == paper_id), None)
                     if target_paper:
-                        req_tier = str(target_paper.get('requiredTier', 'free')).lower()
                         user_tier = get_user_tier(user.get('id'), data)
-                        if not check_tier_access(user_tier, req_tier):
-                            self.send_json(403, {'error': f'Forbidden: This test paper requires an active {req_tier.capitalize()} Pass or higher.', 'code': 403})
+                        if not check_test_eligibility(user_tier, target_paper):
+                            req_tier = str(target_paper.get('requiredTier', 'free')).capitalize()
+                            self.send_json(403, {'error': f'Forbidden: This test paper requires an active {req_tier} Pass or eligible subscription plan.', 'code': 403})
                             return
 
                     # STRICT ONE-TIME SUBMISSION CHECK (NO RE-UPLOAD)
