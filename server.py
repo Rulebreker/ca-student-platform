@@ -810,18 +810,68 @@ def load_backend_data():
                 except Exception as _seed_err:
                     print(f"[SEED_COPY_WARNING] {_seed_err}", flush=True)
             try:
-                import urllib.request
-                req = urllib.request.Request(f"{FIREBASE_RTDB_URL}/subscriptions.json")
-                with urllib.request.urlopen(req, timeout=2.0) as resp:
-                    cloud_subs = json.loads(resp.read().decode('utf-8'))
-                    if cloud_subs and isinstance(cloud_subs, dict) and os.path.exists(DATA_STORE_FILE):
-                        with open(DATA_STORE_FILE, 'r', encoding='utf-8') as f:
-                            cur_data = json.load(f)
-                        cur_data.setdefault('subscriptions', {}).update(cloud_subs)
-                        with open(DATA_STORE_FILE, 'w', encoding='utf-8') as f:
-                            json.dump(cur_data, f, indent=2)
+                if os.path.exists(DATA_STORE_FILE):
+                    with open(DATA_STORE_FILE, 'r', encoding='utf-8') as f:
+                        cur_data = json.load(f)
+                    
+                    import urllib.request
+                    keys_to_fetch = ['subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs']
+                    
+                    for key in keys_to_fetch:
+                        try:
+                            req = urllib.request.Request(f"{FIREBASE_RTDB_URL}/{key}.json")
+                            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                                raw_bytes = resp.read()
+                                if not raw_bytes:
+                                    continue
+                                cloud_data = json.loads(raw_bytes.decode('utf-8'))
+                                if not cloud_data:
+                                    continue
+
+                                if key in ['subscriptions', 'subscription_plans']:
+                                    if isinstance(cloud_data, dict):
+                                        cur_data.setdefault(key, {}).update(cloud_data)
+                                elif key == 'payment_sessions':
+                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                                    if items:
+                                        s_map = {s.get('paymentSessionId') or s.get('id'): s for s in cur_data.get('payment_sessions', []) if isinstance(s, dict)}
+                                        for s in items:
+                                            if isinstance(s, dict):
+                                                sid = s.get('paymentSessionId') or s.get('id')
+                                                if sid:
+                                                    s_map[sid] = s
+                                        cur_data['payment_sessions'] = list(s_map.values())
+                                elif key == 'payment_channels':
+                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                                    if items:
+                                        c_map = {c.get('id'): c for c in cur_data.get('payment_channels', []) if isinstance(c, dict) and c.get('id')}
+                                        for c in items:
+                                            if isinstance(c, dict) and c.get('id'):
+                                                c_map[c['id']] = c
+                                        cur_data['payment_channels'] = list(c_map.values())
+                                elif key == 'notifications':
+                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                                    if items:
+                                        n_map = {n.get('id'): n for n in cur_data.get('notifications', []) if isinstance(n, dict) and n.get('id')}
+                                        for n in items:
+                                            if isinstance(n, dict) and n.get('id'):
+                                                n_map[n['id']] = n
+                                        cur_data['notifications'] = list(n_map.values())
+                                elif key == 'admin_audit_logs':
+                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                                    if items:
+                                        l_map = {l.get('id'): l for l in cur_data.get('admin_audit_logs', []) if isinstance(l, dict) and l.get('id')}
+                                        for l in items:
+                                            if isinstance(l, dict) and l.get('id'):
+                                                l_map[l['id']] = l
+                                        cur_data['admin_audit_logs'] = list(l_map.values())
+                        except Exception as err:
+                            print(f"[COLD_START] Failed to fetch {key} from Firebase: {err}", flush=True)
+
+                    with open(DATA_STORE_FILE, 'w', encoding='utf-8') as f:
+                        json.dump(cur_data, f, indent=2)
             except Exception as _cloud_seed_err:
-                pass
+                print(f"[COLD_START] Cloud seed overall error: {_cloud_seed_err}", flush=True)
 
         if os.path.exists(DATA_STORE_FILE):
             d = None
@@ -2331,7 +2381,16 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 with open(dest_path, 'wb') as f:
                     f.write(binary_data)
 
-                qr_url = f'/api/images/{unique_img_id}'
+                if binary_data.startswith(b'\x89PNG'):
+                    mime_type = 'image/png'
+                elif binary_data.startswith(b'\xff\xd8\xff'):
+                    mime_type = 'image/jpeg'
+                elif binary_data.startswith(b'RIFF') and b'WEBP' in binary_data[:16]:
+                    mime_type = 'image/webp'
+                else:
+                    mime_type = 'image/png'
+
+                qr_url = f'data:{mime_type};base64,{file_data_b64}'
                 data = load_backend_data()
                 if channel_id:
                     channels = data.setdefault('payment_channels', [])

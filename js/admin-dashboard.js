@@ -2563,9 +2563,16 @@ This will remove the question paper, attached answer keys, and student submissio
   }
 
   // --- 6. MCQ TESTS BUILDER & COMPREHENSIVE QUESTION MANAGEMENT ---
-  renderMCQTests() {
+  renderMCQTests(forceFullRender = false) {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
+
+    // Fast path: if search input and table container already exist, only update the table
+    // without destroying the search input (prevents focus loss on keystroke)
+    if (!forceFullRender && document.getElementById('admin-mcq-table-container') && document.getElementById('admin-mcq-search-input')) {
+      this.renderMCQTestsTableOnly();
+      return;
+    }
 
     const tests = window.store.getTests();
     const search = (this.mcqSearch || '').toLowerCase().trim();
@@ -2608,14 +2615,224 @@ This will remove the question paper, attached answer keys, and student submissio
           <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
           <input 
             type="text" 
+            id="admin-mcq-search-input"
             placeholder="Search MCQ tests by title, subject, or topic..."
             value="${this.mcqSearch || ''}"
-            oninput="window.adminDashboard.mcqSearch = this.value; window.adminDashboard.mcqPage = 1; window.adminDashboard.renderMCQTests();"
+            oninput="window.adminDashboard.mcqSearch = this.value; window.adminDashboard.mcqPage = 1; window.adminDashboard.renderMCQTestsTableOnly();"
             class="w-full pl-9 pr-3.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white transition-colors"
           />
         </div>
       </div>
 
+      <div id="admin-mcq-table-container">
+      <div class="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
+        <table class="w-full text-left text-xs min-w-[950px]">
+          <thead>
+            <tr class="border-b border-slate-200 bg-slate-50/80 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+              <th class="py-3 px-3">Test Title & Tier</th>
+              <th class="py-3 px-3">Subject</th>
+              <th class="py-3 px-3">Topic</th>
+              <th class="py-3 px-2 text-center">Questions</th>
+              <th class="py-3 px-2 text-center">Max Marks</th>
+              <th class="py-3 px-2 text-center">Duration</th>
+              <th class="py-3 px-2 text-center">Marking (+ / -)</th>
+              <th class="py-3 px-2 text-center">Attempt Limit</th>
+              <th class="py-3 px-3 text-center">Status</th>
+              <th class="py-3 px-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            ${filteredTests.length === 0 ? `
+              <tr>
+                <td colspan="10" class="py-12 text-center text-slate-400 text-xs">
+                  ${tests.length === 0 ? 'No mock tests registered yet. Click "Create MCQ Test" to start.' : 'No tests found matching search criteria.'}
+                </td>
+              </tr>
+            ` : pagedTests.map(tst => {
+              const subject = window.store.getSubjectById(tst.subjectId);
+              const subjectName = subject ? subject.name : (tst.subject || 'Accounting');
+              const qCount = window.store.getQuestionsByTestId(tst.id).length;
+              const posMark = typeof tst.marksPerCorrect === 'number' ? tst.marksPerCorrect : 2.0;
+              const negMark = typeof tst.negativeMarksPerWrong === 'number' ? tst.negativeMarksPerWrong : 0.5;
+              const maxAtt = tst.maxAttempts || 3;
+              const status = tst.status || (tst.isPublished ? 'Published' : 'Draft');
+
+              let statusBadgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
+              if (status === 'Published') statusBadgeClass = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+              else if (status === 'Live') statusBadgeClass = 'bg-amber-50 text-amber-800 border-amber-200 animate-pulse';
+              else if (status === 'Scheduled') statusBadgeClass = 'bg-purple-50 text-purple-800 border-purple-200';
+              else if (status === 'Completed/Expired') statusBadgeClass = 'bg-rose-50 text-rose-800 border-rose-200';
+
+              const reqTier = (tst.requiredTier || tst.tier || 'free').toLowerCase();
+              let tierBadge = '<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-600 border border-slate-200">FREE</span>';
+              if (reqTier === 'elite') tierBadge = '<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-100 text-purple-800 border border-purple-200">ELITE</span>';
+              else if (reqTier === 'plus') tierBadge = '<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">PLUS</span>';
+              else if (reqTier === 'core') tierBadge = '<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-800 border border-blue-200">CORE</span>';
+
+              return `
+                <tr class="hover:bg-slate-50/70 transition-colors">
+                  <td class="py-3 px-3 max-w-[220px]">
+                    <div class="flex items-center gap-1.5">
+                      <span class="font-bold text-slate-900 line-clamp-1">${tst.title}</span>
+                      ${tierBadge}
+                    </div>
+                    <div class="flex items-center gap-2 mt-0.5">
+                      <span class="text-[10px] text-slate-400">${new Date(tst.createdAt || Date.now()).toLocaleDateString()}</span>
+                      ${tst.hideFromNonEligible ? '<span class="text-[10px] font-semibold text-rose-600">Hidden if ineligible</span>' : ''}
+                    </div>
+                  </td>
+                  <td class="py-3 px-3">
+                    <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700">
+                      ${subjectName}
+                    </span>
+                  </td>
+                  <td class="py-3 px-3 max-w-[130px] truncate text-slate-600 font-medium">${tst.topic || tst.chapter || 'Syllabus Core'}</td>
+                  <td class="py-3 px-2 text-center">
+                    <button 
+                      onclick="window.adminDashboard.openQuestionBuilder('${tst.id}')"
+                      class="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded text-[11px] transition-colors cursor-pointer"
+                      title="Manage Questions"
+                    >
+                      ${qCount} MCQs →
+                    </button>
+                  </td>
+                  <td class="py-3 px-2 text-center font-bold text-slate-800">${tst.maximumMarks || (qCount * posMark) || 10}</td>
+                  <td class="py-3 px-2 text-center text-slate-600 font-medium">${tst.durationMinutes}m</td>
+                  <td class="py-3 px-2 text-center font-semibold">
+                    <span class="text-emerald-700">+${posMark}</span> / <span class="text-rose-600">-${negMark}</span>
+                  </td>
+                  <td class="py-3 px-2 text-center font-bold text-slate-700">${maxAtt}</td>
+                  <td class="py-3 px-3 text-center">
+                    <span class="px-2 py-0.5 text-[10px] font-bold rounded-full border ${statusBadgeClass}">
+                      ${status}
+                    </span>
+                  </td>
+                  <td class="py-3 px-3 text-right">
+                    <div class="flex items-center justify-end gap-1.5">
+                      <button 
+                        onclick="window.adminDashboard.openTestModal('${tst.id}')"
+                        class="px-2 py-1 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                        title="Edit Test Details"
+                      >
+                        Edit
+                      </button>
+                      <button 
+                        onclick="window.adminDashboard.openQuestionBuilder('${tst.id}')"
+                        class="px-2 py-1 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition-colors font-semibold"
+                        title="Add/Review Questions"
+                      >
+                        Questions
+                      </button>
+                      <button 
+                        onclick="window.adminDashboard.previewTest('${tst.id}')"
+                        class="px-2 py-1 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded transition-colors font-semibold flex items-center gap-0.5"
+                        title="Preview Exact Student Interface"
+                      >
+                        <i data-lucide="eye" class="w-3 h-3"></i> Preview
+                      </button>
+                      <button 
+                        onclick="window.adminDashboard.openPublishModal('${tst.id}')"
+                        class="px-2 py-1 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 rounded transition-colors font-semibold"
+                        title="Publish / Schedule"
+                      >
+                        Publish
+                      </button>
+                      <button 
+                        onclick="window.adminDashboard.deleteTest('${tst.id}')"
+                        class="px-2 py-1 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded transition-colors"
+                        title="Delete Test"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination Controls (10/page) -->
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-semibold text-slate-500 pt-3 px-1">
+        <div>
+          Showing <span class="font-bold text-slate-800">${filteredTests.length === 0 ? 0 : startIndex + 1}</span> to <span class="font-bold text-slate-800">${Math.min(startIndex + pageSize, filteredTests.length)}</span> of <span class="font-bold text-slate-800">${filteredTests.length}</span> tests
+        </div>
+        <div class="flex items-center gap-1.5">
+          <button 
+            onclick="window.adminDashboard.setMcqPage(${this.mcqPage - 1})"
+            ${this.mcqPage <= 1 ? 'disabled' : ''}
+            class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 transition-colors cursor-pointer flex items-center gap-1"
+          >
+            <i data-lucide="chevron-left" class="w-3.5 h-3.5"></i> Prev
+          </button>
+          ${Array.from({ length: totalPages }, (_, i) => i + 1)
+            .filter(p => p === 1 || p === totalPages || Math.abs(p - this.mcqPage) <= 2)
+            .map((p, idx, arr) => {
+              const prev = arr[idx - 1];
+              const showEllipsis = prev && p - prev > 1;
+              return `
+                ${showEllipsis ? '<span class="px-1.5 text-slate-400">...</span>' : ''}
+                <button 
+                  onclick="window.adminDashboard.setMcqPage(${p})"
+                  class="px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${this.mcqPage === p ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'}"
+                >
+                  ${p}
+                </button>
+              `;
+            }).join('')}
+          <button 
+            onclick="window.adminDashboard.setMcqPage(${this.mcqPage + 1})"
+            ${this.mcqPage >= totalPages ? 'disabled' : ''}
+            class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 transition-colors cursor-pointer flex items-center gap-1"
+          >
+            Next <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+      </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  setMcqPage(page) {
+    this.mcqPage = page;
+    if (document.getElementById('admin-mcq-table-container')) {
+      this.renderMCQTestsTableOnly();
+    } else {
+      this.renderMCQTests(true);
+    }
+  }
+
+  renderMCQTestsTableOnly() {
+    const tableContainer = document.getElementById('admin-mcq-table-container');
+    if (!tableContainer) {
+      this.renderMCQTests(true);
+      return;
+    }
+
+    const tests = window.store.getTests();
+    const search = (this.mcqSearch || '').toLowerCase().trim();
+
+    const filteredTests = tests.filter(tst => {
+      if (!search) return true;
+      const subject = window.store.getSubjectById(tst.subjectId);
+      const subjectName = (subject ? subject.name : (tst.subject || '')).toLowerCase();
+      const title = (tst.title || '').toLowerCase();
+      const topic = (tst.topic || tst.chapter || '').toLowerCase();
+      return title.includes(search) || subjectName.includes(search) || topic.includes(search);
+    });
+
+    this.mcqPage = this.mcqPage || 1;
+    const pageSize = 10;
+    const totalPages = Math.max(1, Math.ceil(filteredTests.length / pageSize));
+    if (this.mcqPage > totalPages) this.mcqPage = totalPages;
+    if (this.mcqPage < 1) this.mcqPage = 1;
+    const startIndex = (this.mcqPage - 1) * pageSize;
+    const pagedTests = filteredTests.slice(startIndex, startIndex + pageSize);
+
+    tableContainer.innerHTML = `
       <div class="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
         <table class="w-full text-left text-xs min-w-[950px]">
           <thead>
@@ -2784,11 +3001,6 @@ This will remove the question paper, attached answer keys, and student submissio
     `;
 
     if (window.lucide) window.lucide.createIcons();
-  }
-
-  setMcqPage(page) {
-    this.mcqPage = page;
-    this.renderMCQTests();
   }
 
   openTestModal(testId = null) {

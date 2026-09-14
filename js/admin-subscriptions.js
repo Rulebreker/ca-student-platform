@@ -121,9 +121,26 @@
 
   // --- TAB 1: SUBSCRIPTIONS & MANUAL GRANTS ---
 
-  AdminDashboard.prototype.renderSubscriptions = async function(isSilent = false) {
+  AdminDashboard.prototype.renderSubscriptions = async function(isSilent = false, forceFullRender = false) {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
+
+    // Fast-path: if search input and table container already exist in DOM,
+    // only update table without destroying search input or stealing focus
+    if (!forceFullRender && document.getElementById('admin-sub-table-container') && document.getElementById('admin-sub-search-input')) {
+      try {
+        const data = await adminFetch('/api/admin/subscriptions');
+        if (data && data.success) {
+          const subs = normalizeSubsMap(data);
+          this._cachedSubs = subs;
+          if (window.store) window.store.saveSubscriptions(subs);
+        }
+      } catch (e) {
+        console.warn('[AdminSubscriptions] Fast-path subs fetch failed:', e);
+      }
+      this.renderSubscriptionsTableOnly();
+      return;
+    }
 
     if (!isSilent) {
       container.innerHTML = `
@@ -141,6 +158,7 @@
       const data = await adminFetch('/api/admin/subscriptions');
       if (data && data.success) {
         subs = normalizeSubsMap(data);
+        this._cachedSubs = subs;
         if (window.store) window.store.saveSubscriptions(subs);
       }
     } catch (e) {
@@ -328,16 +346,18 @@
             <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3"></i>
             <input 
               type="text" 
+              id="admin-sub-search-input"
               placeholder="Search by student name, email, phone, ID or pass tier..."
               value="${this.subSearch || ''}"
-              oninput="window.adminDashboard.subSearch = this.value; window.adminDashboard.renderSubscriptions();"
+              oninput="window.adminDashboard.subSearch = this.value; window.adminDashboard._subPage = 1; window.adminDashboard.renderSubscriptionsTableOnly();"
               class="w-full pl-9 pr-3.5 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500 bg-slate-50 focus:bg-white transition-colors"
             />
           </div>
 
           <div class="flex items-center gap-2">
             <select 
-              onchange="window.adminDashboard.subTierFilter = this.value; window.adminDashboard.renderSubscriptions();"
+              id="admin-sub-tier-filter"
+              onchange="window.adminDashboard.subTierFilter = this.value; window.adminDashboard._subPage = 1; window.adminDashboard.renderSubscriptionsTableOnly();"
               class="px-3 py-2 text-xs font-bold border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-rose-500"
             >
               <option value="all" ${tierFilter === 'all' ? 'selected' : ''}>All Tiers & Free</option>
@@ -352,7 +372,8 @@
           </div>
         </div>
 
-        <!-- Student Subscriptions Table -->
+        <!-- Student Subscriptions Table Container -->
+        <div id="admin-sub-table-container">
         <div class="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full text-left text-sm">
@@ -504,6 +525,7 @@
             </div>
           ` : ''}
         </div>
+        </div>
       </div>
     `;
 
@@ -512,7 +534,222 @@
 
   AdminDashboard.prototype.setSubPage = function(page) {
     this._subPage = page;
-    this.renderSubscriptions(true);
+    if (document.getElementById('admin-sub-table-container')) {
+      this.renderSubscriptionsTableOnly();
+    } else {
+      this.renderSubscriptions(true);
+    }
+  };
+
+  AdminDashboard.prototype.renderSubscriptionsTableOnly = function() {
+    const tableContainer = document.getElementById('admin-sub-table-container');
+    if (!tableContainer) {
+      this.renderSubscriptions(true);
+      return;
+    }
+
+    const students = (window.store ? window.store.getStudents() : []) || [];
+    const subs = this._cachedSubs || (window.store ? window.store.getSubscriptions() : {}) || {};
+    const plans = (window.store ? window.store.getSubscriptionPlans() : {}) || {};
+    const tierFilter = this.subTierFilter || 'all';
+    const search = (this.subSearch || '').toLowerCase().trim();
+    const now = new Date();
+
+    const filteredStudents = students.filter(st => {
+      const sub = subs[st.id];
+      const isSubActive = sub && (sub.status === 'active' || sub.status === 'manually_granted') && (!sub.expiresAt || new Date(sub.expiresAt) > now);
+      const tier = sub ? (sub.planTier || (plans[sub.planId] ? plans[sub.planId].tier : 'core')) : 'free';
+      const isTrial = sub ? (tier === 'trial' || sub.isTrial) : false;
+
+      if (tierFilter === 'active' && !isSubActive) return false;
+      if (tierFilter === 'free' && isSubActive) return false;
+      if (tierFilter === 'elite' && (!isSubActive || tier !== 'elite')) return false;
+      if (tierFilter === 'plus' && (!isSubActive || tier !== 'plus')) return false;
+      if (tierFilter === 'core' && (!isSubActive || tier !== 'core')) return false;
+      if (tierFilter === 'trial' && (!isSubActive || !isTrial)) return false;
+      if (tierFilter === 'expired' && (!sub || (sub.status !== 'expired' && (!sub.expiresAt || new Date(sub.expiresAt) >= now)))) return false;
+
+      if (search) {
+        const name = (st.name || '').toLowerCase();
+        const email = (st.email || '').toLowerCase();
+        const phone = (st.phone || '').toLowerCase();
+        const uid = (st.id || '').toLowerCase();
+        const uname = (st.username || '').toLowerCase();
+        const planName = (sub && sub.planName ? sub.planName : '').toLowerCase();
+        if (!name.includes(search) && !email.includes(search) && !phone.includes(search) && !uid.includes(search) && !uname.includes(search) && !planName.includes(search)) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    this._subPage = this._subPage || 1;
+    const pageSize = 10;
+    const totalFiltered = filteredStudents.length;
+    const totalPages = Math.ceil(totalFiltered / pageSize) || 1;
+    if (this._subPage > totalPages) this._subPage = totalPages;
+    if (this._subPage < 1) this._subPage = 1;
+
+    const startIndex = (this._subPage - 1) * pageSize;
+    const endIndex = Math.min(startIndex + pageSize, totalFiltered);
+    const pagedStudents = filteredStudents.slice(startIndex, endIndex);
+
+    tableContainer.innerHTML = `
+      <div class="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead>
+              <tr class="border-b border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <th class="py-3 px-3 w-8">
+                  <input 
+                    type="checkbox" 
+                    id="admin-sub-select-all" 
+                    onchange="window.adminDashboard.toggleSelectAllSubs(this.checked)" 
+                    class="rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer"
+                    title="Select all"
+                  />
+                </th>
+                <th class="py-3 px-4">Student</th>
+                <th class="py-3 px-4">Current Pass</th>
+                <th class="py-3 px-4">SLA / Quota</th>
+                <th class="py-3 px-4">Validity / Expiry</th>
+                <th class="py-3 px-4">Status</th>
+                <th class="py-3 px-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              ${filteredStudents.length === 0 ? `
+                <tr>
+                  <td colspan="7" class="py-12 text-center text-slate-400">
+                    <i data-lucide="users" class="w-8 h-8 mx-auto mb-2 opacity-40"></i>
+                    <p class="text-xs font-bold">No students found matching current filters.</p>
+                  </td>
+                </tr>
+              ` : pagedStudents.map(st => {
+                const sub = subs[st.id];
+                const isSubActive = sub && (sub.status === 'active' || sub.status === 'manually_granted') && (!sub.expiresAt || new Date(sub.expiresAt) > now);
+                
+                let badge = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">Free Tier</span>';
+                let slaDisplay = '<span class="text-xs text-slate-500">72h SLA • 0 Live MCQ</span>';
+                let validityDisplay = '<span class="text-xs text-slate-400">Standard Access</span>';
+                let statusBadge = '<span class="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">Free</span>';
+
+                if (isSubActive) {
+                  const tier = sub.planTier || (plans[sub.planId] ? plans[sub.planId].tier : 'core');
+                  const isTrial = tier === 'trial' || sub.isTrial;
+                  
+                  if (tier === 'elite') {
+                    badge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-black bg-purple-100 text-purple-800 border border-purple-200">${sub.planName || 'Elite Pass'}</span>`;
+                  } else if (tier === 'plus') {
+                    badge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-black bg-indigo-100 text-indigo-800 border border-indigo-200">${sub.planName || 'Plus Pass'}</span>`;
+                  } else if (isTrial) {
+                    badge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-100 text-amber-800 border border-amber-200">₹9 Elite Trial</span>`;
+                  } else {
+                    badge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-black bg-blue-100 text-blue-800 border border-blue-200">${sub.planName || 'Core Pass'}</span>`;
+                  }
+
+                  slaDisplay = `
+                    <span class="text-xs font-semibold text-slate-800 block">${sub.copyCheckSlaHours || 24}h SLA Copy Check</span>
+                    <span class="text-[11px] text-slate-500">${sub.liveMcqDailyLimit ? sub.liveMcqDailyLimit + ' Live MCQs/Day' : 'Weekly Mocks'}</span>
+                  `;
+
+                  if (sub.expiresAt) {
+                    const expDate = new Date(sub.expiresAt);
+                    const daysLeft = Math.max(0, Math.ceil((expDate - now) / (1000 * 60 * 60 * 24)));
+                    const isExpSoon = daysLeft <= 7;
+
+                    validityDisplay = `
+                      <span class="text-xs font-bold ${isExpSoon ? 'text-rose-700' : 'text-slate-800'} block">
+                        ${daysLeft} day${daysLeft === 1 ? '' : 's'} remaining
+                      </span>
+                      <span class="text-[11px] text-slate-500">Exp: ${expDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                    `;
+                  } else {
+                    validityDisplay = '<span class="text-xs font-bold text-emerald-700">Lifetime / Custom</span>';
+                  }
+
+                  statusBadge = sub.status === 'manually_granted'
+                    ? '<span class="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">Granted</span>'
+                    : '<span class="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Active</span>';
+                } else if (sub && (sub.status === 'expired' || (sub.expiresAt && new Date(sub.expiresAt) <= now))) {
+                  statusBadge = '<span class="inline-flex items-center gap-1 text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">Expired</span>';
+                  badge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-500 border border-slate-200">${sub.planName || 'Expired Pass'}</span>`;
+                  validityDisplay = `<span class="text-xs text-rose-600 font-semibold">Expired on ${new Date(sub.expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>`;
+                } else if (sub && sub.status === 'suspended') {
+                  statusBadge = '<span class="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">Suspended</span>';
+                }
+
+                return `
+                  <tr class="hover:bg-slate-50/70 transition-colors">
+                    <td class="py-3 px-3">
+                      <input 
+                        type="checkbox" 
+                        value="${st.id}" 
+                        onchange="window.adminDashboard.onSubRowCheckboxChange()" 
+                        class="admin-sub-select-user rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer"
+                      />
+                    </td>
+                    <td class="py-3 px-4">
+                      <span class="font-bold text-slate-900 block">${st.name || 'Unnamed Student'}</span>
+                      <span class="text-xs text-slate-500 font-mono">${st.email || st.phone || '@' + (st.username || 'student')}</span>
+                      <span class="text-[10px] font-bold text-blue-700 uppercase">${st.caLevel || 'CA Student'}</span>
+                    </td>
+                    <td class="py-3 px-4">${badge}</td>
+                    <td class="py-3 px-4">${slaDisplay}</td>
+                    <td class="py-3 px-4">${validityDisplay}</td>
+                    <td class="py-3 px-4">${statusBadge}</td>
+                    <td class="py-3 px-4 text-right">
+                      <div class="inline-flex items-center gap-1.5">
+                        <button 
+                          onclick="window.adminDashboard.openManageSubscriptionModal('${st.id}')"
+                          class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                          title="Manage pass tier & expiry"
+                        >
+                          <i data-lucide="settings" class="w-3.5 h-3.5"></i> Manage Pass
+                        </button>
+                        <button 
+                          onclick="window.adminDashboard.openUserAuditTrailModal('${st.id}')"
+                          class="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                          title="View Lifecycle Audit Trail"
+                        >
+                          <i data-lucide="history" class="w-4 h-4"></i>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+        ${totalPages > 1 ? `
+          <div class="px-4 py-3 bg-slate-50/70 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div class="text-slate-600">
+              Showing <span class="font-semibold text-slate-900">${totalFiltered === 0 ? 0 : startIndex + 1}</span> to <span class="font-semibold text-slate-900">${endIndex}</span> of <span class="font-bold text-slate-900">${totalFiltered}</span> students
+            </div>
+            <div class="flex items-center gap-1">
+              <button 
+                onclick="window.adminDashboard.setSubPage(${this._subPage - 1})"
+                ${this._subPage <= 1 ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 bg-white cursor-not-allowed text-xs"' : 'class="px-2.5 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-100 text-xs font-medium cursor-pointer"'}
+              >
+                Previous
+              </button>
+              <span class="px-3 py-1 font-bold text-xs text-slate-700 bg-white border border-slate-200 rounded">
+                Page ${this._subPage} of ${totalPages}
+              </span>
+              <button 
+                onclick="window.adminDashboard.setSubPage(${this._subPage + 1})"
+                ${this._subPage >= totalPages ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 bg-white cursor-not-allowed text-xs"' : 'class="px-2.5 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-100 text-xs font-medium cursor-pointer"'}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
   };
 
   // --- SELECTION & BULK ACTIONS FOR SUBSCRIPTIONS ---
@@ -1122,9 +1359,25 @@
 
   // --- TAB 2: PAYMENT VERIFICATIONS ---
 
-  AdminDashboard.prototype.renderPaymentVerifications = async function(isSilent = false) {
+  AdminDashboard.prototype.renderPaymentVerifications = async function(isSilent = false, forceFullRender = false) {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
+
+    // Fast-path: if search input and table container exist in DOM,
+    // only update table without destroying search input or stealing focus
+    if (!forceFullRender && document.getElementById('admin-payment-table-container') && document.getElementById('admin-payment-search-input')) {
+      try {
+        const data = await adminFetch('/api/admin/payments');
+        if (data && data.payments) {
+          this._cachedPaymentSessions = data.payments;
+          if (window.store) window.store.savePaymentSessions(data.payments);
+        }
+      } catch (e) {
+        console.warn('[AdminSubscriptions] Fast-path payments fetch failed:', e);
+      }
+      this.renderPaymentVerificationsTableOnly();
+      return;
+    }
 
     this.startTabPolling('payments', async () => {
       await this.renderPaymentVerifications(true);
@@ -1145,6 +1398,7 @@
       const data = await adminFetch('/api/admin/payments');
       if (data && data.payments) {
         payments = data.payments;
+        this._cachedPaymentSessions = payments;
         if (window.store) window.store.savePaymentSessions(payments);
       }
     } catch (e) {
@@ -1285,14 +1539,16 @@
           <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3"></i>
           <input 
             type="text" 
+            id="admin-payment-search-input"
             placeholder="Search by UTR number, student name, email, or session ID..."
             value="${this.paymentSearch || ''}"
-            oninput="window.adminDashboard.paymentSearch = this.value; window.adminDashboard.renderPaymentVerifications();"
+            oninput="window.adminDashboard.paymentSearch = this.value; window.adminDashboard._pvPage = 1; window.adminDashboard.renderPaymentVerificationsTableOnly();"
             class="w-full pl-9 pr-3.5 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white"
           />
         </div>
 
-        <!-- Payments Table -->
+        <!-- Payments Table Container -->
+        <div id="admin-payment-table-container">
         <div class="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full text-left text-sm">
@@ -1451,6 +1707,7 @@
             </div>
           ` : ''}
         </div>
+        </div>
       </div>
     `;
 
@@ -1459,7 +1716,224 @@
 
   AdminDashboard.prototype.setPvPage = function(page) {
     this._pvPage = page;
-    this.renderPaymentVerifications(true);
+    if (document.getElementById('admin-payment-table-container')) {
+      this.renderPaymentVerificationsTableOnly();
+    } else {
+      this.renderPaymentVerifications(true);
+    }
+  };
+
+  AdminDashboard.prototype.renderPaymentVerificationsTableOnly = function() {
+    const tableContainer = document.getElementById('admin-payment-table-container');
+    if (!tableContainer) {
+      this.renderPaymentVerifications(true);
+      return;
+    }
+
+    const payments = this._cachedPaymentSessions || (window.store ? window.store.getPaymentSessions() : []) || [];
+    const currentFilter = this.paymentFilter || 'pending';
+    const search = (this.paymentSearch || '').toLowerCase().trim();
+    const now = new Date();
+
+    const utrCounts = {};
+    payments.forEach(p => {
+      const u = (p.utr || '').trim().toUpperCase();
+      if (u && u !== 'N/A') utrCounts[u] = (utrCounts[u] || 0) + 1;
+    });
+
+    const filtered = payments.filter(p => {
+      if (currentFilter === 'pending' && p.status !== 'pending_verification' && p.status !== 'late_payment') return false;
+      if (currentFilter === 'approved' && p.status !== 'approved') return false;
+      if (currentFilter === 'rejected' && p.status !== 'rejected') return false;
+
+      if (search) {
+        const utr = (p.utr || '').toLowerCase();
+        const sName = (p.studentName || '').toLowerCase();
+        const sEmail = (p.studentEmail || '').toLowerCase();
+        const sid = (p.sessionId || '').toLowerCase();
+        const pName = (p.planName || '').toLowerCase();
+        if (!utr.includes(search) && !sName.includes(search) && !sEmail.includes(search) && !sid.includes(search) && !pName.includes(search)) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    this._pvPage = this._pvPage || 1;
+    const pageSize = 10;
+    const totalFiltered = filtered.length;
+    const totalPages = Math.ceil(totalFiltered / pageSize) || 1;
+    if (this._pvPage > totalPages) this._pvPage = totalPages;
+    if (this._pvPage < 1) this._pvPage = 1;
+
+    const startIndex = (this._pvPage - 1) * pageSize;
+    const endIndex = Math.min(startIndex + pageSize, totalFiltered);
+    const pagedSessions = filtered.slice(startIndex, endIndex);
+
+    tableContainer.innerHTML = `
+      <div class="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead>
+              <tr class="border-b border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <th class="py-3 px-4">Student & Plan</th>
+                <th class="py-3 px-4">Amount</th>
+                <th class="py-3 px-4">UTR Reference</th>
+                <th class="py-3 px-4">UPI Channel</th>
+                <th class="py-3 px-4">Submitted At</th>
+                <th class="py-3 px-4">Receipt Proof</th>
+                <th class="py-3 px-4">Status</th>
+                <th class="py-3 px-4 text-right">Verification Action</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              ${filtered.length === 0 ? `
+                <tr>
+                  <td colspan="8" class="py-12 text-center text-slate-400">
+                    <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 opacity-40"></i>
+                    <p class="text-xs font-bold">No payment sessions in this category.</p>
+                  </td>
+                </tr>
+              ` : pagedSessions.map(p => {
+                const isPending = p.status === 'pending_verification' || p.status === 'late_payment';
+                const isLate = p.status === 'late_payment';
+                const dateStr = p.submittedAt ? new Date(p.submittedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '--';
+                const pendingAgeDays = p.submittedAt ? (now - new Date(p.submittedAt)) / (1000 * 60 * 60 * 24) : 0;
+                const isPendingOverdue = isPending && pendingAgeDays >= 3;
+                const cleanUtr = (p.utr || '').trim().toUpperCase();
+                const isDupUtr = cleanUtr && cleanUtr !== 'N/A' && (utrCounts[cleanUtr] || 0) > 1;
+
+                let statusBadge = '';
+                if (p.status === 'approved') {
+                  statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200"><i data-lucide="check-circle" class="w-3 h-3"></i> Approved</span>';
+                } else if (p.status === 'late_payment') {
+                  statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-orange-100 text-orange-800 border border-orange-200 animate-pulse"><i data-lucide="alert-triangle" class="w-3 h-3"></i> Late Payment</span>';
+                } else if (p.status === 'pending_verification') {
+                  statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200"><i data-lucide="clock" class="w-3 h-3 animate-spin"></i> Pending Review</span>';
+                } else if (p.status === 'rejected') {
+                  statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200"><i data-lucide="x-circle" class="w-3 h-3"></i> Rejected</span>';
+                } else {
+                  statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">Incomplete</span>';
+                }
+
+                return `
+                  <tr class="hover:bg-slate-50/70 transition-colors ${isLate ? 'bg-orange-50/20' : ''}">
+                    <td class="py-3 px-4">
+                      <span class="font-bold text-slate-900 block">${p.studentName || 'Student'}</span>
+                      <span class="text-xs text-slate-500 block">${p.studentEmail || p.studentId}</span>
+                      <span class="text-[11px] font-bold text-rose-700 mt-0.5 inline-block">${p.planName || p.planId}</span>
+                    </td>
+                    <td class="py-3 px-4 font-black text-slate-900">₹${p.amount}</td>
+                    <td class="py-3 px-4 font-mono text-xs font-bold text-slate-800">
+                      <div class="flex items-center gap-1.5">
+                        <span>${p.utr || '<span class="text-slate-400 font-sans">N/A</span>'}</span>
+                        ${p.utr ? `
+                          <button 
+                            onclick="navigator.clipboard.writeText('${p.utr}'); window.app.showToast('UTR copied!', 'info');"
+                            class="text-slate-400 hover:text-slate-700 p-1"
+                            title="Copy UTR"
+                          >
+                            <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                          </button>
+                        ` : ''}
+                      </div>
+                      <span class="text-[10px] text-slate-400 font-mono block mt-0.5">ID: ${p.sessionId}</span>
+                      ${isDupUtr ? `
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200 mt-1 block w-fit" title="Duplicate UTR detected across ${utrCounts[cleanUtr]} sessions!">
+                          <i data-lucide="alert-triangle" class="w-3 h-3"></i> Duplicate UTR (${utrCounts[cleanUtr]}x)
+                        </span>
+                      ` : ''}
+                    </td>
+                    <td class="py-3 px-4 text-xs font-medium text-slate-600">
+                      <div class="font-bold text-slate-800">${p.channelTitle || p.channelId || 'UPI'}</div>
+                      <div class="text-[10px] text-slate-400 font-mono">${p.channelUpi || ''}</div>
+                    </td>
+                    <td class="py-3 px-4 text-xs text-slate-600">
+                      <div>${dateStr}</div>
+                      ${isPendingOverdue ? `
+                        <span class="text-[10px] font-bold text-rose-600 flex items-center gap-0.5 mt-0.5">
+                          <i data-lucide="alert-circle" class="w-3 h-3"></i> ${Math.floor(pendingAgeDays)}d overdue
+                        </span>
+                      ` : ''}
+                    </td>
+                    <td class="py-3 px-4">
+                      ${(p.screenshot || p.proofUrl) ? `
+                        <button 
+                          onclick="window.adminDashboard.viewPaymentProof('${p.sessionId}')" 
+                          class="px-2.5 py-1 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                        >
+                          <i data-lucide="image" class="w-3.5 h-3.5"></i> View Proof
+                        </button>
+                      ` : `
+                        <span class="text-xs text-slate-400 italic">No receipt attached</span>
+                      `}
+                    </td>
+                    <td class="py-3 px-4">
+                      ${statusBadge}
+                    </td>
+                    <td class="py-3 px-4 text-right">
+                      <div class="inline-flex items-center gap-1.5">
+                        ${isPending ? `
+                          <button 
+                            onclick="window.adminDashboard.promptApprovePayment('${p.sessionId}')"
+                            class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-2xs transition-colors flex items-center gap-1 cursor-pointer"
+                            title="Verify and activate student membership"
+                          >
+                            <i data-lucide="check" class="w-3.5 h-3.5"></i> Approve
+                          </button>
+                          <button 
+                            onclick="window.adminDashboard.promptRejectPayment('${p.sessionId}')"
+                            class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                            title="Reject payment proof"
+                          >
+                            <i data-lucide="x" class="w-3.5 h-3.5"></i> Reject
+                          </button>
+                        ` : `
+                          <span class="text-xs text-slate-400 font-medium mr-1">Settled</span>
+                          <button 
+                            onclick="window.adminDashboard.viewPaymentSessionDetails('${p.sessionId}')" 
+                            class="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                            title="View Session Details"
+                          >
+                            <i data-lucide="file-text" class="w-4 h-4"></i>
+                          </button>
+                        `}
+                      </div>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+        ${totalPages > 1 ? `
+          <div class="px-4 py-3 bg-slate-50/70 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div class="text-slate-600">
+              Showing <span class="font-semibold text-slate-900">${totalFiltered === 0 ? 0 : startIndex + 1}</span> to <span class="font-semibold text-slate-900">${endIndex}</span> of <span class="font-bold text-slate-900">${totalFiltered}</span> sessions
+            </div>
+            <div class="flex items-center gap-1">
+              <button 
+                onclick="window.adminDashboard.setPvPage(${this._pvPage - 1})"
+                ${this._pvPage <= 1 ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 bg-white cursor-not-allowed text-xs"' : 'class="px-2.5 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-100 text-xs font-medium cursor-pointer"'}
+              >
+                Previous
+              </button>
+              <span class="px-3 py-1 font-bold text-xs text-slate-700 bg-white border border-slate-200 rounded">
+                Page ${this._pvPage} of ${totalPages}
+              </span>
+              <button 
+                onclick="window.adminDashboard.setPvPage(${this._pvPage + 1})"
+                ${this._pvPage >= totalPages ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 bg-white cursor-not-allowed text-xs"' : 'class="px-2.5 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-100 text-xs font-medium cursor-pointer"'}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
   };
 
   AdminDashboard.prototype.viewPaymentProof = function(sessionId) {
@@ -1864,6 +2338,7 @@
                       <span class="text-base font-bold text-slate-900">${ch.title || ch.name || 'UPI Channel'}</span>
                       ${ch.isPrimary ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-rose-100 text-rose-800 border border-rose-200">PRIMARY</span>' : ''}
                       ${ch.isActive ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">ACTIVE</span>' : '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">INACTIVE</span>'}
+                      ${ch.needsReupload ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1"><i data-lucide="alert-triangle" class="w-3 h-3 text-amber-600"></i> RE-UPLOAD QR</span>' : ''}
                     </div>
 
                     <div class="font-mono text-xs font-black text-rose-700 bg-rose-50 px-2.5 py-1 rounded-lg inline-flex items-center gap-2 border border-rose-100">
@@ -1903,8 +2378,15 @@
                   </div>
 
                   <!-- QR Thumbnail -->
-                  <div class="w-24 h-24 bg-slate-50 border border-slate-200 rounded-xl p-1.5 flex-shrink-0 flex items-center justify-center">
-                    <img src="${qrSrc}" alt="QR" class="w-full h-full object-contain">
+                  <div class="w-24 h-24 bg-slate-50 border border-slate-200 rounded-xl p-1.5 flex-shrink-0 flex items-center justify-center relative overflow-hidden">
+                    ${ch.needsReupload ? `
+                      <div class="p-1 text-center text-amber-800 bg-amber-50 rounded flex flex-col items-center justify-center h-full w-full">
+                        <i data-lucide="alert-triangle" class="w-5 h-5 text-amber-600 mb-0.5"></i>
+                        <span class="text-[9px] font-bold leading-tight">Re-upload</span>
+                      </div>
+                    ` : `
+                      <img src="${qrSrc}" alt="QR" class="w-full h-full object-contain" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\\'p-1 text-center text-amber-800 bg-amber-50 rounded flex flex-col items-center justify-center h-full w-full\\\'><i data-lucide=\\\'alert-triangle\\\' class=\\\'w-5 h-5 text-amber-600 mb-0.5\\\'></i><span class=\\\'text-[9px] font-bold leading-tight\\\'>Re-upload</span></div>'; if(window.lucide) window.lucide.createIcons();" />
+                    `}
                   </div>
                 </div>
 
@@ -1965,7 +2447,7 @@
     if (!modalContent) return;
 
     modalContent.innerHTML = `
-      <div class="p-6 space-y-5">
+      <div class="p-6 space-y-5 overflow-y-auto max-h-[88vh]">
         <div class="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
             <span class="text-xs font-bold text-rose-700 uppercase tracking-wider">UPI Channel Configuration</span>
@@ -2142,20 +2624,56 @@
       e.target.value = '';
       return;
     }
+
+    // Client-side compression: resize QR images (between 300x300 and 600x600) and export
+    // as lossless PNG. Unlike lossy JPEG which causes compression artifacts and blurred
+    // module edges that fail on phone scanners, PNG preserves razor-sharp edges and high
+    // contrast while keeping the file size small (~20-60KB).
     const reader = new FileReader();
     reader.onload = (loadEvt) => {
-      const b64 = loadEvt.target.result;
-      this._pendingChannelQr = {
-        fileName: file.name,
-        fileData: b64
+      const origB64 = loadEvt.target.result;
+      const img = new Image();
+      img.onload = () => {
+        const MAX_DIM = 600;
+        const MIN_DIM = 300;
+        let w = img.width, h = img.height;
+        if (w > MAX_DIM || h > MAX_DIM) {
+          const ratio = Math.min(MAX_DIM / w, MAX_DIM / h);
+          w = Math.round(w * ratio);
+          h = Math.round(h * ratio);
+        }
+        if (w < MIN_DIM && h < MIN_DIM && w > 0 && h > 0) {
+          const ratio = Math.max(MIN_DIM / w, MIN_DIM / h);
+          w = Math.round(w * ratio);
+          h = Math.round(h * ratio);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, w, h);
+        // Lossless PNG guarantees 100% sharp module borders for phone cameras
+        const compressedB64 = canvas.toDataURL('image/png');
+
+        const cleanBaseName = file.name.replace(/\.[^/.]+$/, '') || 'channel_qr';
+        this._pendingChannelQr = {
+          fileName: `${cleanBaseName}.png`,
+          fileData: compressedB64
+        };
+        this._removeChannelQr = false;
+        const container = document.getElementById('admin-channel-qr-preview-container');
+        const previewImg = document.getElementById('admin-channel-qr-preview-img');
+        const fn = document.getElementById('admin-channel-qr-filename');
+        if (previewImg) previewImg.src = compressedB64;
+        if (fn) fn.textContent = file.name;
+        if (container) container.classList.remove('hidden');
       };
-      this._removeChannelQr = false;
-      const container = document.getElementById('admin-channel-qr-preview-container');
-      const img = document.getElementById('admin-channel-qr-preview-img');
-      const fn = document.getElementById('admin-channel-qr-filename');
-      if (img) img.src = b64;
-      if (fn) fn.textContent = file.name;
-      if (container) container.classList.remove('hidden');
+      img.onerror = () => {
+        window.app.showToast('Failed to process image. Try a different file.', 'error');
+      };
+      img.src = origB64;
     };
     reader.readAsDataURL(file);
   };
@@ -2648,9 +3166,25 @@
 
   // --- TAB 5: ADMIN AUDIT LOGS ---
 
-  AdminDashboard.prototype.renderAdminAuditLogs = async function(isSilent = false) {
+  AdminDashboard.prototype.renderAdminAuditLogs = async function(isSilent = false, forceFullRender = false) {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
+
+    // Fast-path: if search input and table container exist in DOM,
+    // only update table without destroying search input or stealing focus
+    if (!forceFullRender && document.getElementById('admin-audit-table-container') && document.getElementById('admin-audit-search-input')) {
+      try {
+        const data = await adminFetch('/api/admin/audit-logs');
+        if (data && data.logs) {
+          this._cachedAuditLogs = data.logs;
+          if (window.store) window.store.saveAdminAuditLogs(data.logs);
+        }
+      } catch (e) {
+        console.warn('[AdminSubscriptions] Fast-path audit logs fetch failed:', e);
+      }
+      this.renderAdminAuditLogsTableOnly();
+      return;
+    }
 
     if (!isSilent) {
       container.innerHTML = `
@@ -2667,6 +3201,7 @@
       const data = await adminFetch('/api/admin/audit-logs');
       if (data && data.logs) {
         logs = data.logs;
+        this._cachedAuditLogs = logs;
         if (window.store) window.store.saveAdminAuditLogs(logs);
       }
     } catch (e) {
@@ -2733,16 +3268,18 @@
             <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3"></i>
             <input 
               type="text" 
+              id="admin-audit-search-input"
               placeholder="Search audit trail by student target, admin, reason, or action..."
               value="${this.auditSearch || ''}"
-              oninput="window.adminDashboard.auditSearch = this.value; window.adminDashboard.auditPage = 1; window.adminDashboard.renderAdminAuditLogs();"
+              oninput="window.adminDashboard.auditSearch = this.value; window.adminDashboard.auditPage = 1; window.adminDashboard.renderAdminAuditLogsTableOnly();"
               class="w-full pl-9 pr-3.5 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500 bg-slate-50 focus:bg-white transition-colors" 
             />
           </div>
 
           <div class="flex items-center gap-2">
             <select 
-              onchange="window.adminDashboard.auditActionFilter = this.value; window.adminDashboard.auditPage = 1; window.adminDashboard.renderAdminAuditLogs();" 
+              id="admin-audit-action-filter"
+              onchange="window.adminDashboard.auditActionFilter = this.value; window.adminDashboard.auditPage = 1; window.adminDashboard.renderAdminAuditLogsTableOnly();" 
               class="px-3 py-2 text-xs font-bold border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-rose-500"
             >
               <option value="all">All Action Types</option>
@@ -2760,7 +3297,8 @@
           </div>
         </div>
 
-        <!-- Audit Table -->
+        <!-- Audit Table Container -->
+        <div id="admin-audit-table-container">
         <div class="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full text-left text-sm">
@@ -2852,6 +3390,7 @@
             </button>
           </div>
         </div>
+        </div>
       </div>
     `;
 
@@ -2860,7 +3399,142 @@
 
   AdminDashboard.prototype.setAuditPage = function(page) {
     this.auditPage = page;
-    this.renderAdminAuditLogs();
+    if (document.getElementById('admin-audit-table-container')) {
+      this.renderAdminAuditLogsTableOnly();
+    } else {
+      this.renderAdminAuditLogs(true);
+    }
+  };
+
+  AdminDashboard.prototype.renderAdminAuditLogsTableOnly = function() {
+    const tableContainer = document.getElementById('admin-audit-table-container');
+    if (!tableContainer) {
+      this.renderAdminAuditLogs(true);
+      return;
+    }
+
+    const logs = this._cachedAuditLogs || (window.store ? window.store.getAdminAuditLogs() : []) || [];
+    const actionFilter = this.auditActionFilter || 'all';
+    const search = (this.auditSearch || '').toLowerCase().trim();
+
+    const filtered = logs.filter(l => {
+      if (actionFilter !== 'all' && l.action !== actionFilter) return false;
+      if (search) {
+        const act = (l.action || '').toLowerCase();
+        const adm = (l.adminId || '').toLowerCase();
+        const tgt = (l.target || '').toLowerCase();
+        const rsn = (l.reason || '').toLowerCase();
+        if (!act.includes(search) && !adm.includes(search) && !tgt.includes(search) && !rsn.includes(search)) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    this.auditPage = this.auditPage || 1;
+    const pageSize = 10;
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    if (this.auditPage > totalPages) this.auditPage = totalPages;
+    if (this.auditPage < 1) this.auditPage = 1;
+
+    const startIndex = (this.auditPage - 1) * pageSize;
+    const pagedLogs = filtered.slice(startIndex, startIndex + pageSize);
+
+    tableContainer.innerHTML = `
+      <div class="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead>
+              <tr class="border-b border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <th class="py-3 px-4">Timestamp (IST)</th>
+                <th class="py-3 px-4">Action</th>
+                <th class="py-3 px-4">Admin</th>
+                <th class="py-3 px-4">Target Entity / Student</th>
+                <th class="py-3 px-4">Reason / Notes</th>
+                <th class="py-3 px-4 text-right">Details</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 font-mono text-xs">
+              ${filtered.length === 0 ? `
+                <tr>
+                  <td colspan="6" class="py-12 text-center text-slate-400 font-sans">
+                    <i data-lucide="shield-check" class="w-8 h-8 mx-auto mb-2 opacity-40"></i>
+                    <p class="text-xs font-bold">No audit records match current criteria.</p>
+                  </td>
+                </tr>
+              ` : pagedLogs.map(l => {
+                const dateStr = l.timestamp ? new Date(l.timestamp).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--';
+
+                let actionColor = 'bg-slate-100 text-slate-700 border-slate-200';
+                if (l.action && l.action.includes('APPROVE')) actionColor = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+                else if (l.action && l.action.includes('REJECT')) actionColor = 'bg-rose-100 text-rose-800 border-rose-200';
+                else if (l.action && l.action.includes('GRANT')) actionColor = 'bg-purple-100 text-purple-800 border-purple-200';
+                else if (l.action && l.action.includes('EXTEND')) actionColor = 'bg-blue-100 text-blue-800 border-blue-200';
+
+                const detailSnippet = l.details ? JSON.stringify(l.details).replace(/"/g, '') : '--';
+
+                return `
+                  <tr class="hover:bg-slate-50/70 transition-colors">
+                    <td class="py-3 px-4 text-slate-600">${dateStr}</td>
+                    <td class="py-3 px-4">
+                      <span class="px-2 py-0.5 rounded-full font-sans text-[11px] font-bold border ${actionColor}">
+                        ${l.action}
+                      </span>
+                    </td>
+                    <td class="py-3 px-4 font-bold text-slate-800">${l.adminId || 'admin'}</td>
+                    <td class="py-3 px-4 font-bold text-indigo-700">${l.target || '--'}</td>
+                    <td class="py-3 px-4 font-sans text-slate-700 text-xs">${l.reason || '--'}</td>
+                    <td class="py-3 px-4 text-right text-slate-500 font-mono text-[11px] max-w-xs truncate" title="${detailSnippet}">
+                      ${detailSnippet}
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Pagination Controls (10/page) -->
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-semibold text-slate-500 pt-2 px-1">
+        <div>
+          Showing <span class="font-bold text-slate-800">${filtered.length === 0 ? 0 : startIndex + 1}</span> to <span class="font-bold text-slate-800">${Math.min(startIndex + pageSize, filtered.length)}</span> of <span class="font-bold text-slate-800">${filtered.length}</span> audit records
+        </div>
+        <div class="flex items-center gap-1.5">
+          <button 
+            onclick="window.adminDashboard.setAuditPage(${this.auditPage - 1})"
+            ${this.auditPage <= 1 ? 'disabled' : ''}
+            class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 transition-colors cursor-pointer flex items-center gap-1"
+          >
+            <i data-lucide="chevron-left" class="w-3.5 h-3.5"></i> Prev
+          </button>
+          ${Array.from({ length: totalPages }, (_, i) => i + 1)
+            .filter(p => p === 1 || p === totalPages || Math.abs(p - this.auditPage) <= 2)
+            .map((p, idx, arr) => {
+              const prev = arr[idx - 1];
+              const showEllipsis = prev && p - prev > 1;
+              return `
+                ${showEllipsis ? '<span class="px-1.5 text-slate-400">...</span>' : ''}
+                <button 
+                  onclick="window.adminDashboard.setAuditPage(${p})"
+                  class="px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${this.auditPage === p ? 'bg-rose-700 text-white' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'}"
+                >
+                  ${p}
+                </button>
+              `;
+            }).join('')}
+          <button 
+            onclick="window.adminDashboard.setAuditPage(${this.auditPage + 1})"
+            ${this.auditPage >= totalPages ? 'disabled' : ''}
+            class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 transition-colors cursor-pointer flex items-center gap-1"
+          >
+            Next <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
   };
 
   AdminDashboard.prototype.exportAuditLogs = function() {

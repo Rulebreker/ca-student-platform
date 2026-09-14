@@ -98,7 +98,12 @@ class SubscriptionManager {
           this.userEntitlements = data.entitlements || null;
           if (window.store) {
             if (data.subscription) {
-              window.store.saveSubscription(data.subscription);
+              // Use saveSubscriptions (plural) to avoid circular loop:
+              // saveSubscription (singular) → firebaseSync.saveSubscription → Firebase .set()
+              // → listener .on('value') → onSubscriptionUpdate → renderPassesPage → syncMySubscription → ∞
+              const subs = window.store.getSubscriptions();
+              subs[data.subscription.userId] = data.subscription;
+              window.store.saveSubscriptions(subs);
             } else if (user.id) {
               const subs = window.store.getSubscriptions();
               if (subs && subs[user.id]) {
@@ -628,8 +633,16 @@ class SubscriptionManager {
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5 items-center">
         <!-- QR Code -->
         <div class="bg-white p-3 rounded-xl border border-slate-200 text-center flex flex-col items-center shadow-2xs">
-          <div class="w-40 h-40 bg-slate-100 rounded-lg overflow-hidden flex items-center justify-center p-1.5 border border-slate-100">
-            <img src="${channel.qrCodeUrl}" alt="UPI QR Code" class="w-full h-full object-contain">
+          <div class="w-40 h-40 bg-slate-100 rounded-lg overflow-hidden flex items-center justify-center p-1.5 border border-slate-100 relative">
+            ${channel.needsReupload ? `
+              <div class="p-3 text-center text-amber-800 bg-amber-50 rounded-md flex flex-col items-center justify-center h-full w-full">
+                <i data-lucide="alert-triangle" class="w-6 h-6 mb-1 text-amber-600"></i>
+                <p class="text-[10px] font-bold leading-tight">QR image unavailable</p>
+                <p class="text-[9px] text-slate-500 mt-1">Please pay using the UPI ID directly</p>
+              </div>
+            ` : `
+              <img src="${channel.qrCodeUrl || ''}" alt="UPI QR Code" class="w-full h-full object-contain" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\\'p-3 text-center text-amber-800 bg-amber-50 rounded-md flex flex-col items-center justify-center h-full w-full\\\'><i data-lucide=\\\'alert-triangle\\\' class=\\\'w-6 h-6 mb-1 text-amber-600\\\'></i><p class=\\\'text-[10px] font-bold leading-tight\\\'>QR image unavailable</p><p class=\\\'text-[9px] text-slate-500 mt-1\\\'>Please pay using the UPI ID directly</p></div>'; if(window.lucide) window.lucide.createIcons();" />
+            `}
           </div>
           <span class="text-[11px] font-semibold text-slate-500 mt-2">Scan with GPay, PhonePe, or Paytm</span>
         </div>
@@ -1666,13 +1679,13 @@ class SubscriptionManager {
     if (window.studentDashboard && typeof window.studentDashboard.renderPassBadge === 'function') {
       window.studentDashboard.renderPassBadge();
     }
-    // Update Payment History on Dashboard or Passes
-    if (window.studentDashboard && typeof window.studentDashboard.renderPaymentHistory === 'function') {
+    // Update Payment History only if user is viewing passes or dashboard
+    if ((curView === 'passes' || curView === 'dashboard') && window.studentDashboard && typeof window.studentDashboard.renderPaymentHistory === 'function') {
       window.studentDashboard.renderPaymentHistory();
     }
-    // Re-render Passes page if student is currently looking at passes
+    // Re-render Passes payment history silently (no spinner wipe) if on passes
     if (curView === 'passes') {
-      this.renderPassesPage();
+      this.renderPassesPaymentHistory(true);
     }
     // Re-render student dashboard if active
     if (curView === 'dashboard' && window.studentDashboard && typeof window.studentDashboard.render === 'function') {
@@ -1700,11 +1713,13 @@ class SubscriptionManager {
 
   onPaymentSessionsUpdate() {
     const curView = window.app ? window.app.currentView : '';
-    if (window.studentDashboard && typeof window.studentDashboard.renderPaymentHistory === 'function') {
+    // Update Payment History only if user is viewing passes or dashboard
+    if ((curView === 'passes' || curView === 'dashboard') && window.studentDashboard && typeof window.studentDashboard.renderPaymentHistory === 'function') {
       window.studentDashboard.renderPaymentHistory();
     }
+    // Silent re-render of payment history on passes (no spinner wipe)
     if (curView === 'passes') {
-      this.renderPassesPage();
+      this.renderPassesPaymentHistory(true);
     }
     // If admin is viewing payments verification
     if (window.adminDashboard && window.auth && window.auth.isAdmin()) {

@@ -25,6 +25,19 @@ class FirebaseSyncManager {
     this._isMergingXpTransactions = false;
     this._isMergingReferrals = false;
     this._knownUserIds = new Set();
+    this._profileRenderTimer = null; // Debounce timer for profile page re-renders
+  }
+
+  // Debounced profile re-render: coalesces multiple Firebase listener triggers
+  // (users, xp_transactions, referrals, user/:id) into a single 100ms render
+  _debouncedProfileRender() {
+    if (this._profileRenderTimer) clearTimeout(this._profileRenderTimer);
+    this._profileRenderTimer = setTimeout(() => {
+      this._profileRenderTimer = null;
+      if (window.app && window.app.currentView === 'profile' && typeof window.app.renderProfilePage === 'function') {
+        window.app.renderProfilePage();
+      }
+    }, 100);
   }
 
   init() {
@@ -317,7 +330,7 @@ class FirebaseSyncManager {
           window.studentDashboard.renderPassBadge();
         }
         if (window.adminDashboard && window.adminDashboard.currentTab === 'subscriptions') {
-          window.adminDashboard.renderSubscriptions();
+          window.adminDashboard.renderSubscriptions(true);
         }
       }
     });
@@ -332,7 +345,7 @@ class FirebaseSyncManager {
           window.subscriptionManager.onPaymentSessionsUpdate();
         }
         if (window.adminDashboard && window.adminDashboard.currentTab === 'payments') {
-          window.adminDashboard.renderPaymentVerifications();
+          window.adminDashboard.renderPaymentVerifications(true);
         }
       }
     });
@@ -366,8 +379,12 @@ class FirebaseSyncManager {
       if (val && window.store) {
         const logs = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
         window.store.saveAdminAuditLogs(logs);
-        if (window.adminDashboard && window.adminDashboard.currentTab === 'audit-logs') {
-          window.adminDashboard.renderAuditLogs();
+        if (window.adminDashboard && (window.adminDashboard.currentTab === 'audit-logs' || window.adminDashboard.currentTab === 'audit')) {
+          if (typeof window.adminDashboard.renderAdminAuditLogs === 'function') {
+            window.adminDashboard.renderAdminAuditLogs(true);
+          } else if (typeof window.adminDashboard.renderAuditLogs === 'function') {
+            window.adminDashboard.renderAuditLogs();
+          }
         }
       }
     });
@@ -467,8 +484,8 @@ class FirebaseSyncManager {
           if (window.app.currentView === 'dashboard' && window.studentDashboard && typeof window.studentDashboard.render === 'function') {
             window.studentDashboard.render();
           }
-          if (window.app.currentView === 'profile' && typeof window.app.renderProfilePage === 'function') {
-            window.app.renderProfilePage();
+          if (window.app.currentView === 'profile') {
+            this._debouncedProfileRender();
           }
         }
 
@@ -913,7 +930,7 @@ class FirebaseSyncManager {
         window.store.saveXpTransactions(localTxs);
         if (window.app && typeof window.app.renderProfilePage === 'function') {
           const u = window.auth ? window.auth.getCurrentUser() : null;
-          if (u && window.app.currentView === 'profile') window.app.renderProfilePage();
+          if (u && window.app.currentView === 'profile') this._debouncedProfileRender();
         }
         if (window.adminDashboard && window.auth && window.auth.isAdmin() && window.adminDashboard.currentTab === 'xp-management') {
           const tbody = document.getElementById('admin-xp-history-tbody');
@@ -951,8 +968,8 @@ class FirebaseSyncManager {
         window.store.saveReferrals(localRefs);
 
         // Real-time update for student profile page (referral card & table)
-        if (window.app && window.app.currentView === 'profile' && typeof window.app.renderProfilePage === 'function') {
-          window.app.renderProfilePage();
+        if (window.app && window.app.currentView === 'profile') {
+          this._debouncedProfileRender();
         }
         // Real-time update for admin referral audit tab
         if (window.adminDashboard && window.auth && window.auth.isAdmin() && window.adminDashboard.currentTab === 'referrals') {
@@ -1027,8 +1044,8 @@ class FirebaseSyncManager {
     if (refCountEl) {
       refCountEl.textContent = user.referralCount !== undefined ? user.referralCount : 0;
     }
-    if (window.app && window.app.currentView === 'profile' && typeof window.app.renderProfilePage === 'function') {
-      window.app.renderProfilePage();
+    if (window.app && window.app.currentView === 'profile') {
+      this._debouncedProfileRender();
     }
     if (window.app && window.app.currentView === 'dashboard' && window.studentDashboard && typeof window.studentDashboard.render === 'function') {
       window.studentDashboard.render();
