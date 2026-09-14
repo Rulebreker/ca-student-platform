@@ -52,6 +52,8 @@ class AdminDashboard {
   }
 
   switchTab(tab) {
+    if (this.stopTabPolling) this.stopTabPolling();
+    this._activePollingTab = null;
     this.currentTab = tab;
     if (tab === 'students') {
       this.studentPage = 1;
@@ -1749,6 +1751,7 @@ class AdminDashboard {
               <label class="block font-bold text-slate-700 mb-1">Required Subscription Tier</label>
               <select id="admin-paper-required-tier" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold focus:ring-2 focus:ring-blue-500 bg-white text-slate-800">
                 <option value="free" ${!paper || paper.requiredTier === 'free' ? 'selected' : ''}>Free (All Students)</option>
+                <option value="trial" ${paper && paper.requiredTier === 'trial' ? 'selected' : ''}>Trial Pass or Higher</option>
                 <option value="core" ${paper && paper.requiredTier === 'core' ? 'selected' : ''}>Core Pass or Higher</option>
                 <option value="plus" ${paper && paper.requiredTier === 'plus' ? 'selected' : ''}>Plus Pass or Higher</option>
                 <option value="elite" ${paper && paper.requiredTier === 'elite' ? 'selected' : ''}>Elite Pass Only</option>
@@ -3003,6 +3006,17 @@ This will remove the question paper, attached answer keys, and student submissio
     if (window.lucide) window.lucide.createIcons();
   }
 
+  toggleTestSchedulePicker(statusVal) {
+    const el = document.getElementById('tst-schedule-picker-container');
+    if (el) {
+      if (statusVal === 'Scheduled') {
+        el.classList.remove('hidden');
+      } else {
+        el.classList.add('hidden');
+      }
+    }
+  }
+
   openTestModal(testId = null) {
     const isEdit = !!testId;
     const test = isEdit ? window.store.getTestById(testId) : null;
@@ -3011,19 +3025,40 @@ This will remove the question paper, attached answer keys, and student submissio
 
     const subjects = window.store.getSubjects ? window.store.getSubjects() : [];
 
+    let scheduledDateVal = '';
+    let scheduledTimeVal = '17:00';
+    if (test && test.scheduledPublishTime) {
+      try {
+        const dt = new Date(test.scheduledPublishTime);
+        if (!isNaN(dt.getTime())) {
+          const istOffset = 5.5 * 60 * 60 * 1000;
+          const istDate = new Date(dt.getTime() + istOffset);
+          scheduledDateVal = istDate.toISOString().slice(0, 10);
+          scheduledTimeVal = istDate.toISOString().slice(11, 16);
+        }
+      } catch (e) {}
+    }
+    if (!scheduledDateVal) {
+      const tom = new Date(Date.now() + 24 * 60 * 60 * 1000 + 5.5 * 60 * 60 * 1000);
+      scheduledDateVal = tom.toISOString().slice(0, 10);
+      scheduledTimeVal = '17:00';
+    }
+
     modalContent.innerHTML = `
-      <div class="p-6">
-        <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-5">
+      <form onsubmit="window.adminDashboard.saveTest(event, '${testId || ''}')" class="flex flex-col max-h-[90vh] overflow-hidden">
+        <!-- Fixed Header -->
+        <div class="flex-shrink-0 flex items-center justify-between border-b border-slate-200 p-5 sm:p-6 bg-white">
           <div>
             <h3 class="text-base font-bold text-slate-900">${isEdit ? 'Edit MCQ Test' : 'Create New MCQ Test'}</h3>
             <p class="text-xs text-slate-500">Configure exam level, test parameters, academic marks, and platform points</p>
           </div>
-          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600 p-1">
+          <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors">
             <i data-lucide="x" class="w-5 h-5"></i>
           </button>
         </div>
 
-        <form onsubmit="window.adminDashboard.saveTest(event, '${testId || ''}')" class="space-y-4 text-xs">
+        <!-- Scrollable Form Body -->
+        <div class="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4 text-xs">
           <div>
             <label class="block font-bold text-slate-700 mb-1">Test Name / Title *</label>
             <input 
@@ -3147,13 +3182,42 @@ This will remove the question paper, attached answer keys, and student submissio
             </div>
             <div>
               <label class="block font-bold text-slate-700 mb-1">Initial Status *</label>
-              <select id="tst-status" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold">
+              <select id="tst-status" onchange="window.adminDashboard.toggleTestSchedulePicker(this.value)" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold bg-white">
                 <option value="Draft" ${test && test.status === 'Draft' ? 'selected' : ''}>Draft / Under Review</option>
                 <option value="Published" ${test && test.status === 'Published' ? 'selected' : (!test ? 'selected' : '')}>Published (Live for Students)</option>
-                <option value="Scheduled" ${test && test.status === 'Scheduled' ? 'selected' : ''}>Scheduled</option>
+                <option value="Scheduled" ${test && test.status === 'Scheduled' ? 'selected' : ''}>Scheduled (Automatic Release)</option>
                 <option value="Live" ${test && test.status === 'Live' ? 'selected' : ''}>Live Window</option>
                 <option value="Completed/Expired" ${test && test.status === 'Completed/Expired' ? 'selected' : ''}>Completed/Expired</option>
               </select>
+            </div>
+          </div>
+
+          <!-- Scheduled Publishing Date & Time Picker (Asia/Kolkata IST) -->
+          <div id="tst-schedule-picker-container" class="${test && test.status === 'Scheduled' ? '' : 'hidden'} p-3.5 bg-blue-50/80 border border-blue-200 rounded-xl space-y-2.5">
+            <div class="flex items-center gap-1.5 text-blue-900 font-bold text-xs">
+              <i data-lucide="calendar-clock" class="w-4 h-4 text-blue-600"></i>
+              <span>Scheduled Automatic Publishing (Asia/Kolkata IST)</span>
+            </div>
+            <p class="text-[11px] text-blue-700">When this scheduled time arrives, the server will automatically set this test to LIVE and notify eligible students.</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block font-bold text-slate-700 mb-1">Publish Date (IST) <span class="text-rose-500">*</span></label>
+                <input 
+                  type="date" 
+                  id="tst-scheduled-date" 
+                  value="${scheduledDateVal}"
+                  class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold bg-white"
+                />
+              </div>
+              <div>
+                <label class="block font-bold text-slate-700 mb-1">Publish Time (IST) <span class="text-rose-500">*</span></label>
+                <input 
+                  type="time" 
+                  id="tst-scheduled-time" 
+                  value="${scheduledTimeVal}"
+                  class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold bg-white"
+                />
+              </div>
             </div>
           </div>
 
@@ -3163,11 +3227,13 @@ This will remove the question paper, attached answer keys, and student submissio
               <div>
                 <label class="block font-bold text-slate-700 mb-1">Required Minimum Subscription Tier *</label>
                 <select id="tst-required-tier" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold bg-white text-slate-800 focus:ring-2 focus:ring-blue-500">
-                  <option value="free" ${!test || (test.requiredTier || test.tier) === 'free' ? 'selected' : ''}>Free (Open to All Students)</option>
+                  <option value="none" ${!test || (test.requiredTier || test.tier) === 'free' || (test.requiredTier || test.tier) === 'none' ? 'selected' : ''}>None (Open to All Students / Free)</option>
+                  <option value="trial" ${test && (test.requiredTier || test.tier) === 'trial' ? 'selected' : ''}>Trial Pass or Higher</option>
                   <option value="core" ${test && (test.requiredTier || test.tier) === 'core' ? 'selected' : ''}>Core Pass or Higher</option>
                   <option value="plus" ${test && (test.requiredTier || test.tier) === 'plus' ? 'selected' : ''}>Plus Pass or Higher</option>
                   <option value="elite" ${test && (test.requiredTier || test.tier) === 'elite' ? 'selected' : ''}>Elite Pass Only</option>
                 </select>
+                <p class="text-[10px] text-slate-400 mt-1">Students must possess at least this pass level or higher to open the test.</p>
               </div>
               <div class="flex items-center pt-5">
                 <label class="flex items-center gap-2 cursor-pointer">
@@ -3219,24 +3285,25 @@ This will remove the question paper, attached answer keys, and student submissio
               placeholder="Explain the topic coverage, syllabus focus, and guidelines for students..."
             >${test ? test.description : ''}</textarea>
           </div>
+        </div>
 
-          <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
-            <button 
-              type="button" 
-              onclick="window.app.closeModal('admin-generic-modal')" 
-              class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button 
-              type="submit" 
-              class="px-5 py-2 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors cursor-pointer"
-            >
-              ${isEdit ? 'Save Changes' : 'Create Test & Proceed to Questions →'}
-            </button>
-          </div>
-        </form>
-      </div>
+        <!-- Sticky Footer -->
+        <div class="flex-shrink-0 flex items-center justify-end gap-3 p-4 sm:p-5 border-t border-slate-200 bg-slate-50">
+          <button 
+            type="button" 
+            onclick="window.app.closeModal('admin-generic-modal')" 
+            class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button 
+            type="submit" 
+            class="px-5 py-2 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors cursor-pointer"
+          >
+            ${isEdit ? 'Save Changes' : 'Create Test & Proceed to Questions →'}
+          </button>
+        </div>
+      </form>
     `;
 
     if (window.lucide) window.lucide.createIcons();
@@ -3269,6 +3336,17 @@ This will remove the question paper, attached answer keys, and student submissio
       ? Array.from(planCheckboxes).map(c => c.value) 
       : ['free', 'trial', 'core', 'plus', 'elite'];
 
+    let scheduledPublishTime = null;
+    if (status === 'Scheduled') {
+      const sDate = document.getElementById('tst-scheduled-date')?.value;
+      const sTime = document.getElementById('tst-scheduled-time')?.value || '17:00';
+      if (!sDate) {
+        window.app.showToast('Please select a scheduled publish date.', 'error');
+        return;
+      }
+      scheduledPublishTime = `${sDate}T${sTime.length === 5 ? sTime + ':00' : sTime}+05:30`;
+    }
+
     const testPayload = {
       id: existingId || ('tst-' + Date.now()),
       title,
@@ -3285,7 +3363,9 @@ This will remove the question paper, attached answer keys, and student submissio
       unattemptedMarks: 0.0,
       maxAttempts,
       status,
+      scheduledPublishTime,
       isPublished: (status === 'Published' || status === 'Live'),
+      isLive: (status === 'Live'),
       allowedPlans,
       requiredTier,
       tier: requiredTier,

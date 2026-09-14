@@ -313,6 +313,16 @@ def get_payment_channels(data):
             c['subscriptionTier'] = 'all'
     return channels
 
+def append_notification(data, notif):
+    """Safely append a notification regardless of whether notifications is stored as a dict or list."""
+    if 'notifications' not in data or data['notifications'] is None:
+        data['notifications'] = {}
+    notifs = data['notifications']
+    if isinstance(notifs, dict):
+        notifs[notif['id']] = notif
+    elif isinstance(notifs, list):
+        notifs.insert(0, notif)
+
 def get_all_plans(data):
     """Retrieve all plans from backend data, falling back to authoritative defaults."""
     stored = data.get('subscription_plans')
@@ -527,40 +537,63 @@ def create_payment_session(user, plan_id, data, sync_fn=None):
     plan_tier = str(plan.get('tier', '')).strip().lower()
     clean_plan_id = str(plan_id).strip().lower()
 
-    # Priority 1: Channel specifically assigned to this exact plan_id or plan tier
-    specific_channels = [
+    # Priority 1: Channel specifically assigned to this exact targetPlanId
+    exact_plan_channels = [
+        c for c in active_channels 
+        if str(c.get('targetPlanId', '')).strip().lower() == clean_plan_id
+    ]
+    # Priority 2: Channel assigned to this plan tier
+    tier_channels = [
         c for c in active_channels 
         if str(c.get('subscriptionTier', '')).strip().lower() in (clean_plan_id, plan_tier)
     ]
-    # Priority 2: Universal channels assigned to 'all' or with no tier specified
+    # Priority 3: Universal channels assigned to 'all' or with no tier specified
     universal_channels = [
         c for c in active_channels 
         if str(c.get('subscriptionTier', 'all')).strip().lower() in ('all', '', 'none')
     ]
 
-    candidate_channels = specific_channels if specific_channels else universal_channels
+    candidate_channels = exact_plan_channels if exact_plan_channels else (tier_channels if tier_channels else universal_channels)
     if not candidate_channels:
         candidate_channels = active_channels
 
+    amount = float(plan['price'])
     if not candidate_channels:
+        default_upi = 'excellenceca@okhdfcbank'
+        default_payee = 'ExcellenceCA'
+        default_upi_uri = f"upi://pay?pa={default_upi}&pn={urllib.parse.quote(default_payee)}&am={amount:.2f}&cu=INR&tn={urllib.parse.quote(plan['name'])}"
         selected_channel = {
             'id': 'default-primary',
             'name': 'Primary UPI',
             'title': 'Primary UPI',
-            'upiId': 'excellenceca@okhdfcbank',
-            'qrCodeUrl': 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR',
-            'subscriptionTier': 'all'
+            'upiId': default_upi,
+            'payeeName': default_payee,
+            'qrCodeUrl': f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(default_upi_uri)}",
+            'subscriptionTier': 'all',
+            'expectedAmount': amount
         }
     else:
         primary = next((c for c in candidate_channels if c.get('isPrimary')), None)
         selected_channel = primary if primary else candidate_channels[0]
 
+    payee_name = selected_channel.get('payeeName') or 'ExcellenceCA'
+    upi_id = selected_channel.get('upiId') or 'excellenceca@okhdfcbank'
+    encoded_upi_uri = f"upi://pay?pa={urllib.parse.quote(upi_id)}&pn={urllib.parse.quote(payee_name)}&am={amount:.2f}&cu=INR&tn={urllib.parse.quote(plan['name'])}"
+
+    qr_url = selected_channel.get('qrCodeUrl')
+    if not qr_url or 'api.qrserver.com' in qr_url:
+        qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(encoded_upi_uri)}"
+
     channel_snapshot = {
         'id': selected_channel.get('id'),
         'name': selected_channel.get('name') or selected_channel.get('title', 'Primary UPI'),
         'title': selected_channel.get('title') or selected_channel.get('name', 'Primary UPI'),
-        'upiId': selected_channel.get('upiId'),
-        'qrCodeUrl': selected_channel.get('qrCodeUrl'),
+        'upiId': upi_id,
+        'payeeName': payee_name,
+        'qrCodeUrl': qr_url,
+        'targetPlanId': selected_channel.get('targetPlanId'),
+        'targetPassTitle': selected_channel.get('targetPassTitle'),
+        'expectedAmount': selected_channel.get('expectedAmount') or amount,
         'subscriptionTier': selected_channel.get('subscriptionTier', 'all'),
         'needsReupload': bool(selected_channel.get('needsReupload', False))
     }
@@ -583,6 +616,7 @@ def create_payment_session(user, plan_id, data, sync_fn=None):
         'amount': plan['price'],
         'currency': plan.get('currency', 'INR'),
         'durationDays': plan.get('durationDays', 30),
+        'upiPayUri': encoded_upi_uri,
         'channelId': channel_snapshot.get('id'),
         'channelSnapshot': channel_snapshot,
         'qrData': channel_snapshot.get('qrCodeUrl') or f"upi://pay?pa={channel_snapshot.get('upiId')}&pn={channel_snapshot.get('name') or 'ExcellenceCA'}&am={plan['price']}&cu=INR",
@@ -793,7 +827,7 @@ def verify_payment(admin_user, session_id, action, rejection_reason, data, sync_
             'createdAt': now_iso,
             'isRead': False
         }
-        data.setdefault('notifications', []).insert(0, notif)
+        append_notification(data, notif)
         if sync_fn:
             sync_fn(f"notifications/{notif['id']}", notif)
             sync_fn(f"subscriptions/{user_id}", new_sub)
@@ -842,7 +876,7 @@ def verify_payment(admin_user, session_id, action, rejection_reason, data, sync_
             'createdAt': now_iso,
             'isRead': False
         }
-        data.setdefault('notifications', []).insert(0, notif)
+        append_notification(data, notif)
         if sync_fn:
             sync_fn(f"notifications/{notif['id']}", notif)
             sync_fn(f"payment_sessions/{session_id}", session)
@@ -917,7 +951,7 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
             'createdAt': now_iso,
             'isRead': False
         }
-        data.setdefault('notifications', []).insert(0, notif)
+        append_notification(data, notif)
         if sync_fn:
             sync_fn(f"notifications/{notif['id']}", notif)
 
@@ -951,7 +985,7 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
             'createdAt': now_iso,
             'isRead': False
         }
-        data.setdefault('notifications', []).insert(0, notif)
+        append_notification(data, notif)
         if sync_fn:
             sync_fn(f"notifications/{notif['id']}", notif)
         log_audit_action(admin_user, 'EXTEND_SUBSCRIPTION', user_id, old_sub_copy, existing, details=f"Extended by {days} days", data=data, sync_fn=sync_fn)
@@ -983,7 +1017,7 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
             'createdAt': now_iso,
             'isRead': False
         }
-        data.setdefault('notifications', []).insert(0, notif)
+        append_notification(data, notif)
         if sync_fn:
             sync_fn(f"notifications/{notif['id']}", notif)
         log_audit_action(admin_user, 'SHORTEN_SUBSCRIPTION', user_id, old_sub_copy, existing, details=f"Shortened by {days} days", data=data, sync_fn=sync_fn)
@@ -1014,7 +1048,7 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
                 'createdAt': now_iso,
                 'isRead': False
             }
-            data.setdefault('notifications', []).insert(0, notif)
+            append_notification(data, notif)
             if sync_fn:
                 sync_fn(f"notifications/{notif['id']}", notif)
             log_audit_action(admin_user, 'SET_CUSTOM_EXPIRY', user_id, old_sub_copy, existing, details=f"Set expiry to {existing['expiresAt']}", data=data, sync_fn=sync_fn)
@@ -1048,7 +1082,7 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
             'createdAt': now_iso,
             'isRead': False
         }
-        data.setdefault('notifications', []).insert(0, notif)
+        append_notification(data, notif)
         if sync_fn:
             sync_fn(f"notifications/{notif['id']}", notif)
         log_audit_action(admin_user, 'CHANGE_SUBSCRIPTION_PLAN', user_id, old_sub_copy, existing, details=f"Switched plan to {plan['name']}", data=data, sync_fn=sync_fn)
@@ -1073,7 +1107,7 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
             'createdAt': now_iso,
             'isRead': False
         }
-        data.setdefault('notifications', []).insert(0, notif)
+        append_notification(data, notif)
         if sync_fn:
             sync_fn(f"notifications/{notif['id']}", notif)
         log_audit_action(admin_user, 'SUSPEND_SUBSCRIPTION', user_id, old_sub_copy, existing, details="Suspended subscription", data=data, sync_fn=sync_fn)
@@ -1101,7 +1135,7 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
             'createdAt': now_iso,
             'isRead': False
         }
-        data.setdefault('notifications', []).insert(0, notif)
+        append_notification(data, notif)
         if sync_fn:
             sync_fn(f"notifications/{notif['id']}", notif)
         log_audit_action(admin_user, 'REACTIVATE_SUBSCRIPTION', user_id, old_sub_copy, existing, details="Reactivated subscription", data=data, sync_fn=sync_fn)
@@ -1127,7 +1161,7 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
             'createdAt': now_iso,
             'isRead': False
         }
-        data.setdefault('notifications', []).insert(0, notif)
+        append_notification(data, notif)
         if sync_fn:
             sync_fn(f"notifications/{notif['id']}", notif)
         log_audit_action(admin_user, 'CANCEL_SUBSCRIPTION', user_id, old_sub_copy, existing, details="Cancelled subscription", data=data, sync_fn=sync_fn)
@@ -1164,6 +1198,10 @@ def manage_payment_channel(admin_user, action, params, data, sync_fn=None):
             for c in channels:
                 c['isPrimary'] = False
 
+        target_plan_id = (params.get('targetPlanId') or '').strip().lower()
+        target_pass_title = (params.get('targetPassTitle') or '').strip()
+        expected_amount = float(params['expectedAmount']) if params.get('expectedAmount') is not None and str(params.get('expectedAmount')).strip() != '' else None
+
         new_chan = {
             'id': f"chan_{int(time.time()*1000)}_{uuid.uuid4().hex[:4]}",
             'name': name,
@@ -1172,6 +1210,9 @@ def manage_payment_channel(admin_user, action, params, data, sync_fn=None):
             'payeeName': payee_name,
             'qrCodeUrl': qr_url,
             'subscriptionTier': sub_tier,
+            'targetPlanId': target_plan_id,
+            'targetPassTitle': target_pass_title,
+            'expectedAmount': expected_amount,
             'bankAccountNumber': (params.get('bankAccountNumber') or params.get('accountNumber') or '').strip(),
             'bankIfsc': (params.get('bankIfsc') or params.get('ifsc') or '').strip(),
             'bankAccountHolder': (params.get('bankAccountHolder') or params.get('accountHolderName') or payee_name).strip(),
@@ -1210,6 +1251,12 @@ def manage_payment_channel(admin_user, action, params, data, sync_fn=None):
         if params.get('qrCodeUrl'): target['qrCodeUrl'] = params['qrCodeUrl'].strip()
         if 'subscriptionTier' in params or 'planTier' in params:
             target['subscriptionTier'] = (params.get('subscriptionTier') or params.get('planTier') or 'all').strip().lower()
+        if 'targetPlanId' in params:
+            target['targetPlanId'] = (params.get('targetPlanId') or '').strip().lower()
+        if 'targetPassTitle' in params:
+            target['targetPassTitle'] = (params.get('targetPassTitle') or '').strip()
+        if 'expectedAmount' in params:
+            target['expectedAmount'] = float(params['expectedAmount']) if params.get('expectedAmount') is not None and str(params.get('expectedAmount')).strip() != '' else None
         if 'bankAccountNumber' in params or 'accountNumber' in params:
             target['bankAccountNumber'] = (params.get('bankAccountNumber') or params.get('accountNumber') or '').strip()
         if 'bankIfsc' in params or 'ifsc' in params:

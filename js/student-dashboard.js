@@ -475,7 +475,7 @@ class StudentDashboard {
 
   renderPaymentHistory() {
     if (window.subscriptionManager && typeof window.subscriptionManager.renderPassesPaymentHistory === 'function') {
-      window.subscriptionManager.renderPassesPaymentHistory();
+      window.subscriptionManager.renderPassesPaymentHistory(true);
     }
   }
 }

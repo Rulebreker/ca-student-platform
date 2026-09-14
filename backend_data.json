@@ -26,7 +26,7 @@
       "caLevel": "CA FOUNDATION",
       "referralPoints": 600,
       "referralCount": 6,
-      "totalXp": 5500
+      "totalXp": 6000
     },
     "priya.patel@castudent.in": {
       "id": "usr-student-2",
@@ -619,7 +619,8 @@
       "questionPdfName": "CA_Foundation_BusinessLaw_QP.pdf",
       "answerPdfId": "ans_law_paper2.pdf",
       "answerPdfName": "CA_Foundation_BusinessLaw_ModelAnswer.pdf",
-      "createdAt": "2026-09-05T10:00:00.000Z"
+      "createdAt": "2026-09-05T10:00:00.000Z",
+      "requiredTier": null
     },
     {
       "id": "paper-3",
@@ -4157,6 +4158,20 @@
   ],
   "xp_transactions": [
     {
+      "id": "tx_sub_psess_1789371343638_e64d5033",
+      "userId": "usr-student-1",
+      "userName": "Rohan Sharma",
+      "activityName": "Bonus XP: Core Pass (Monthly) Activation",
+      "points": 500,
+      "timestamp": "2026-09-14T07:35:43.896725+00:00",
+      "createdAt": "2026-09-14T07:35:43.896725+00:00",
+      "metadata": {
+        "paymentSessionId": "psess_1789371343638_e64d5033",
+        "planId": "core_monthly",
+        "amount": 500
+      }
+    },
+    {
       "id": "tx_sub_psess_1789366404793_5443950b",
       "userId": "usr-student-1",
       "userName": "Rohan Sharma",
@@ -6433,8 +6448,8 @@
       "createdAt": "2026-09-12T09:39:55.101241+00:00"
     }
   ],
-  "notifications": [
-    {
+  "notifications": {
+    "notif_sub_1789366405146": {
       "id": "notif_sub_1789366405146",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -6443,7 +6458,7 @@
       "createdAt": "2026-09-14T06:13:25.145017+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_cexp_1789366300310_722c": {
       "id": "notif_sub_cexp_1789366300310_722c",
       "userId": "usr-student-1",
       "title": "Subscription Expiry Updated",
@@ -6452,7 +6467,7 @@
       "createdAt": "2026-09-14T06:11:40.310248+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_ext_1789366300040_6fe3": {
       "id": "notif_sub_ext_1789366300040_6fe3",
       "userId": "usr-student-1",
       "title": "Subscription Extended",
@@ -6461,7 +6476,7 @@
       "createdAt": "2026-09-14T06:11:40.040577+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_grant_1789366299712_b058": {
       "id": "notif_sub_grant_1789366299712_b058",
       "userId": "usr-student-1",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -6470,7 +6485,7 @@
       "createdAt": "2026-09-14T06:11:39.712547+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_1789366299167": {
       "id": "notif_sub_1789366299167",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -6479,7 +6494,7 @@
       "createdAt": "2026-09-14T06:11:39.167845+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_cexp_1789366232027_b12d": {
       "id": "notif_sub_cexp_1789366232027_b12d",
       "userId": "usr-student-1",
       "title": "Subscription Expiry Updated",
@@ -6488,7 +6503,7 @@
       "createdAt": "2026-09-14T06:10:32.027416+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_ext_1789366231619_fc7b": {
       "id": "notif_sub_ext_1789366231619_fc7b",
       "userId": "usr-student-1",
       "title": "Subscription Extended",
@@ -6497,7 +6512,7 @@
       "createdAt": "2026-09-14T06:10:31.619279+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_grant_1789366231241_23c0": {
       "id": "notif_sub_grant_1789366231241_23c0",
       "userId": "usr-student-1",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -6506,7 +6521,7 @@
       "createdAt": "2026-09-14T06:10:31.241742+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_1789366230464": {
       "id": "notif_sub_1789366230464",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -6515,7 +6530,7 @@
       "createdAt": "2026-09-14T06:10:30.463441+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_cexp_1789366211804_91c1": {
       "id": "notif_sub_cexp_1789366211804_91c1",
       "userId": "usr-student-1",
       "title": "Subscription Expiry Updated",
@@ -6524,7 +6539,7 @@
       "createdAt": "2026-09-14T06:10:11.803986+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_ext_1789366211449_c01b": {
       "id": "notif_sub_ext_1789366211449_c01b",
       "userId": "usr-student-1",
       "title": "Subscription Extended",
@@ -6533,7 +6548,7 @@
       "createdAt": "2026-09-14T06:10:11.449944+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_grant_1789366210994_2119": {
       "id": "notif_sub_grant_1789366210994_2119",
       "userId": "usr-student-1",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -6542,7 +6557,7 @@
       "createdAt": "2026-09-14T06:10:10.994386+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_1789366210162": {
       "id": "notif_sub_1789366210162",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -6551,7 +6566,7 @@
       "createdAt": "2026-09-14T06:10:10.161476+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_1789365023045": {
       "id": "notif_sub_1789365023045",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -6560,7 +6575,7 @@
       "createdAt": "2026-09-14T05:50:23.044434+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_cexp_1789364901962_0df9": {
       "id": "notif_sub_cexp_1789364901962_0df9",
       "userId": "usr_lifecycle_test_student",
       "title": "Subscription Expiry Updated",
@@ -6569,7 +6584,7 @@
       "createdAt": "2026-09-14T05:48:21.962701+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_grant_1789364901716_54da": {
       "id": "notif_sub_grant_1789364901716_54da",
       "userId": "usr_lifecycle_test_student",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -6578,7 +6593,7 @@
       "createdAt": "2026-09-14T05:48:21.716026+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_cexp_1789364880151_91d1": {
       "id": "notif_sub_cexp_1789364880151_91d1",
       "userId": "usr_lifecycle_test_student",
       "title": "Subscription Expiry Updated",
@@ -6587,7 +6602,7 @@
       "createdAt": "2026-09-14T05:48:00.151119+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_grant_1789364879895_cd38": {
       "id": "notif_sub_grant_1789364879895_cd38",
       "userId": "usr_lifecycle_test_student",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -6596,7 +6611,7 @@
       "createdAt": "2026-09-14T05:47:59.894426+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_grant_1789364864970_807b": {
       "id": "notif_sub_grant_1789364864970_807b",
       "userId": "usr_lifecycle_test_student",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -6605,7 +6620,7 @@
       "createdAt": "2026-09-14T05:47:44.970361+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_1789362302998": {
       "id": "notif_sub_1789362302998",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -6614,7 +6629,7 @@
       "createdAt": "2026-09-14T05:05:02.998772+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_1789362132646": {
       "id": "notif_sub_1789362132646",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -6623,7 +6638,7 @@
       "createdAt": "2026-09-14T05:02:12.645715+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_canc_1789359391751_f1ef": {
       "id": "notif_sub_canc_1789359391751_f1ef",
       "userId": "usr-student-1",
       "title": "Subscription Cancelled",
@@ -6632,7 +6647,7 @@
       "createdAt": "2026-09-14T04:16:31.751971+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_1789358777383": {
       "id": "notif_sub_1789358777383",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -6641,7 +6656,7 @@
       "createdAt": "2026-09-14T04:06:17.382598+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_1789332293433": {
       "id": "notif_sub_1789332293433",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -6650,7 +6665,7 @@
       "createdAt": "2026-09-13T20:44:53.433883+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_1789330977235": {
       "id": "notif_sub_1789330977235",
       "userId": "usr-admin-1",
       "title": "Trial Pass Activated!",
@@ -6660,7 +6675,7 @@
       "isRead": false,
       "read": true
     },
-    {
+    "notif_sub_canc_1789330555776_9c7c": {
       "id": "notif_sub_canc_1789330555776_9c7c",
       "userId": "usr-student-1789308468650",
       "title": "Subscription Cancelled",
@@ -6669,7 +6684,7 @@
       "createdAt": "2026-09-13T20:15:55.776517+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_1789329430913": {
       "id": "notif_sub_1789329430913",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -6678,7 +6693,7 @@
       "createdAt": "2026-09-13T19:57:10.912598+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_1789329331818": {
       "id": "notif_sub_1789329331818",
       "userId": "usr-student-1",
       "title": "Core Pass Activated!",
@@ -6687,7 +6702,7 @@
       "createdAt": "2026-09-13T19:55:31.817879+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_canc_1789323009194_ccef": {
       "id": "notif_sub_canc_1789323009194_ccef",
       "userId": "usr-student-4",
       "title": "Subscription Cancelled",
@@ -6696,7 +6711,7 @@
       "createdAt": "2026-09-13T18:10:09.194755+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_grant_1789323008496_f61c": {
       "id": "notif_sub_grant_1789323008496_f61c",
       "userId": "usr-student-4",
       "title": "Pass Granted: Elite Pass (Monthly)",
@@ -6705,7 +6720,7 @@
       "createdAt": "2026-09-13T18:10:08.496697+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_rej_1789322999779": {
       "id": "notif_sub_rej_1789322999779",
       "userId": "usr-student-2",
       "title": "Payment Verification Failed",
@@ -6714,7 +6729,7 @@
       "createdAt": "2026-09-13T18:09:59.779537+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_1789322999128": {
       "id": "notif_sub_1789322999128",
       "userId": "usr-student-2",
       "title": "Core Pass Activated!",
@@ -6723,7 +6738,7 @@
       "createdAt": "2026-09-13T18:09:59.127640+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_ext_1789322984046_4d97": {
       "id": "notif_sub_ext_1789322984046_4d97",
       "userId": "usr-student-2",
       "title": "Subscription Extended",
@@ -6732,7 +6747,7 @@
       "createdAt": "2026-09-13T18:09:44.046823+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_ext_1789322983973_f624": {
       "id": "notif_sub_ext_1789322983973_f624",
       "userId": "usr-student-1",
       "title": "Subscription Extended",
@@ -6741,7 +6756,7 @@
       "createdAt": "2026-09-13T18:09:43.973177+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_grant_1789322983741_7ef9": {
       "id": "notif_sub_grant_1789322983741_7ef9",
       "userId": "usr-student-1",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -6750,7 +6765,7 @@
       "createdAt": "2026-09-13T18:09:43.741015+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_canc_1789322973929_0602": {
       "id": "notif_sub_canc_1789322973929_0602",
       "userId": "usr-student-4",
       "title": "Subscription Cancelled",
@@ -6759,7 +6774,7 @@
       "createdAt": "2026-09-13T18:09:33.929454+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_grant_1789322973250_1d60": {
       "id": "notif_sub_grant_1789322973250_1d60",
       "userId": "usr-student-4",
       "title": "Pass Granted: Elite Pass (Monthly)",
@@ -6768,7 +6783,7 @@
       "createdAt": "2026-09-13T18:09:33.250613+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_grant_1789322951069_75d9": {
       "id": "notif_sub_grant_1789322951069_75d9",
       "userId": "usr-student-4",
       "title": "Pass Granted: Elite Pass (Monthly)",
@@ -6777,7 +6792,7 @@
       "createdAt": "2026-09-13T18:09:11.068092+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_grant_1789320165169_e033": {
       "id": "notif_sub_grant_1789320165169_e033",
       "userId": "usr-student-1789308468650",
       "title": "Pass Granted: Elite Pass (Monthly)",
@@ -6786,7 +6801,7 @@
       "createdAt": "2026-09-13T17:22:45.168943+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_ext_1789318714232_4634": {
       "id": "notif_sub_ext_1789318714232_4634",
       "userId": "usr-student-2",
       "title": "Subscription Extended",
@@ -6795,7 +6810,7 @@
       "createdAt": "2026-09-13T16:58:34.232362+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_ext_1789318714121_a7d9": {
       "id": "notif_sub_ext_1789318714121_a7d9",
       "userId": "usr-student-1",
       "title": "Subscription Extended",
@@ -6805,7 +6820,7 @@
       "isRead": false,
       "read": true
     },
-    {
+    "notif_sub_grant_1789318713827_aeb0": {
       "id": "notif_sub_grant_1789318713827_aeb0",
       "userId": "usr-student-1",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -6815,7 +6830,7 @@
       "isRead": false,
       "read": true
     },
-    {
+    "notif_sub_rej_1789318708952": {
       "id": "notif_sub_rej_1789318708952",
       "userId": "usr-student-2",
       "title": "Payment Verification Failed",
@@ -6824,7 +6839,7 @@
       "createdAt": "2026-09-13T16:58:28.952157+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_1789318708209": {
       "id": "notif_sub_1789318708209",
       "userId": "usr-student-2",
       "title": "Core Pass Activated!",
@@ -6833,7 +6848,7 @@
       "createdAt": "2026-09-13T16:58:28.208211+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_ext_1789318549249_bbac": {
       "id": "notif_sub_ext_1789318549249_bbac",
       "userId": "usr-student-1",
       "title": "Subscription Extended",
@@ -6842,7 +6857,7 @@
       "createdAt": "2026-09-13T16:55:49.249701+00:00",
       "isRead": false
     },
-    {
+    "notif_sub_grant_1789318548999_2e9e": {
       "id": "notif_sub_grant_1789318548999_2e9e",
       "userId": "usr-student-1",
       "title": "Pass Granted: Plus Pass (Monthly)",
@@ -6850,8 +6865,17 @@
       "type": "subscription",
       "createdAt": "2026-09-13T16:55:48.999248+00:00",
       "isRead": false
+    },
+    "notif_sub_1789371343896": {
+      "id": "notif_sub_1789371343896",
+      "userId": "usr-student-1",
+      "title": "Core Pass Activated!",
+      "message": "Your payment of \u20b949 (UTR: UTR1789371343735) has been verified. Welcome to Core Pass (Monthly)! You received +500 bonus XP. Note: Verified with Institutional HDFC Bank Statement",
+      "type": "subscription",
+      "createdAt": "2026-09-14T07:35:43.896725+00:00",
+      "isRead": false
     }
-  ],
+  },
   "bookmarks": [],
   "subjects": [
     {
@@ -9171,18 +9195,18 @@
       "utr": "78945612366"
     },
     "usr-student-1": {
-      "id": "sub_usr-student-1_1789366405",
+      "id": "sub_usr-student-1_1789371343",
       "userId": "usr-student-1",
       "planId": "core_monthly",
       "planName": "Core Pass (Monthly)",
       "planTier": "core",
       "isTrial": false,
       "status": "active",
-      "startedAt": "2026-09-14T06:13:25.145017+00:00",
-      "expiresAt": "2026-10-14T06:13:25.145017+00:00",
+      "startedAt": "2026-09-14T07:35:43.896725+00:00",
+      "expiresAt": "2026-11-13T06:13:25.145017+00:00",
       "purchasedAmount": 49,
-      "paymentSessionId": "psess_1789366404793_5443950b",
-      "utr": "UTR1789366404926",
+      "paymentSessionId": "psess_1789371343638_e64d5033",
+      "utr": "UTR1789371343735",
       "history": [
         {
           "action": "payment_approved",
@@ -9190,6 +9214,14 @@
           "adminId": "usr-admin-1",
           "adminName": "Administrator",
           "timestamp": "2026-09-14T06:13:25.145017+00:00",
+          "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement"
+        },
+        {
+          "action": "payment_approved",
+          "paymentSessionId": "psess_1789371343638_e64d5033",
+          "adminId": "usr-admin-1",
+          "adminName": "Administrator",
+          "timestamp": "2026-09-14T07:35:43.896725+00:00",
           "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement"
         }
       ]

@@ -2675,7 +2675,7 @@ class AppStore {
     const user = window.auth ? window.auth.getCurrentUser() : null;
     const entitlements = user ? this.getUserEntitlements(user.id) : null;
     const userTier = entitlements ? entitlements.tier.toLowerCase() : 'free';
-    const tierLevels = { free: 0, core: 1, plus: 2, elite: 3, trial: 3, admin: 99, teacher: 99 };
+    const tierLevels = { none: 0, free: 0, trial: 1, core: 2, plus: 3, elite: 4, teacher: 99, admin: 99 };
     const userLevel = tierLevels[userTier] ?? 0;
 
     return questions.map(q => {

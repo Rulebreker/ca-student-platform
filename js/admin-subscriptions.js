@@ -95,13 +95,24 @@
     return subs;
   }
 
-  AdminDashboard.prototype.startTabPolling = function(tabName, callback, intervalMs = 7000) {
+  AdminDashboard.prototype.startTabPolling = function(tabName, callback, intervalMs = 12000) {
     this.stopTabPolling();
+    // Do not poll on payment-channels, plans-config, or audit-logs where realtime listeners / manual actions handle state
+    if (tabName === 'payment-channels' || tabName === 'plans-config' || tabName === 'audit-logs') {
+      return;
+    }
     this._activePollingTab = tabName;
     this._pollingIntervalId = setInterval(async () => {
       if (document.hidden) return;
       if (this.currentTab !== tabName) {
         this.stopTabPolling();
+        return;
+      }
+      // If modal is open or user is actively typing, skip background re-renders
+      const modal = document.getElementById('admin-generic-modal');
+      if (modal && !modal.classList.contains('hidden')) return;
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
         return;
       }
       try {
@@ -117,6 +128,7 @@
       clearInterval(this._pollingIntervalId);
       this._pollingIntervalId = null;
     }
+    this._activePollingTab = null;
   };
 
   // --- TAB 1: SUBSCRIPTIONS & MANUAL GRANTS ---
@@ -130,6 +142,7 @@
     if (!forceFullRender && document.getElementById('admin-sub-table-container') && document.getElementById('admin-sub-search-input')) {
       try {
         const data = await adminFetch('/api/admin/subscriptions');
+        if (this.currentTab !== 'subscriptions') return;
         if (data && data.success) {
           const subs = normalizeSubsMap(data);
           this._cachedSubs = subs;
@@ -138,6 +151,7 @@
       } catch (e) {
         console.warn('[AdminSubscriptions] Fast-path subs fetch failed:', e);
       }
+      if (this.currentTab !== 'subscriptions') return;
       this.renderSubscriptionsTableOnly();
       return;
     }
@@ -156,12 +170,14 @@
     let subs = {};
     try {
       const data = await adminFetch('/api/admin/subscriptions');
+      if (this.currentTab !== 'subscriptions') return;
       if (data && data.success) {
         subs = normalizeSubsMap(data);
         this._cachedSubs = subs;
         if (window.store) window.store.saveSubscriptions(subs);
       }
     } catch (e) {
+      if (this.currentTab !== 'subscriptions') return;
       console.warn('[AdminSubscriptions] Backend fetch failed, falling back to store:', e);
       if (window.store) subs = window.store.getSubscriptions() || {};
       if (Object.keys(subs).length === 0 && !isSilent) {
@@ -169,6 +185,8 @@
         return;
       }
     }
+
+    if (this.currentTab !== 'subscriptions') return;
 
     // Start background live polling (refreshes silently every 7s)
     this.startTabPolling('subscriptions', async () => {
@@ -1379,6 +1397,7 @@
     if (!forceFullRender && document.getElementById('admin-payment-table-container') && document.getElementById('admin-payment-search-input')) {
       try {
         const data = await adminFetch('/api/admin/payments');
+        if (this.currentTab !== 'payments') return;
         if (data && data.payments) {
           this._cachedPaymentSessions = data.payments;
           if (window.store) window.store.savePaymentSessions(data.payments);
@@ -1386,6 +1405,7 @@
       } catch (e) {
         console.warn('[AdminSubscriptions] Fast-path payments fetch failed:', e);
       }
+      if (this.currentTab !== 'payments') return;
       this.renderPaymentVerificationsTableOnly();
       return;
     }
@@ -1407,12 +1427,14 @@
     let payments = [];
     try {
       const data = await adminFetch('/api/admin/payments');
+      if (this.currentTab !== 'payments') return;
       if (data && data.payments) {
         payments = data.payments;
         this._cachedPaymentSessions = payments;
         if (window.store) window.store.savePaymentSessions(payments);
       }
     } catch (e) {
+      if (this.currentTab !== 'payments') return;
       console.warn('[AdminSubscriptions] Backend payments fetch failed, using store:', e);
       if (window.store) payments = window.store.getPaymentSessions();
       if (!payments || payments.length === 0) {
@@ -1420,6 +1442,8 @@
         return;
       }
     }
+
+    if (this.currentTab !== 'payments') return;
 
     const currentFilter = this.paymentFilter || 'pending';
     const search = (this.paymentSearch || '').toLowerCase().trim();
@@ -2290,10 +2314,6 @@
     const container = document.getElementById('admin-content-area');
     if (!container) return;
 
-    this.startTabPolling('payment-channels', async () => {
-      await this.renderPaymentChannels(true);
-    });
-
     if (!isSilent) {
       container.innerHTML = `
         <div class="p-8 text-center text-slate-500">
@@ -2307,11 +2327,13 @@
     let channels = [];
     try {
       const data = await adminFetch('/api/payments/channels');
+      if (this.currentTab !== 'payment-channels') return;
       if (data && data.channels) {
         channels = data.channels;
         if (window.store) window.store.savePaymentChannels(channels);
       }
     } catch (e) {
+      if (this.currentTab !== 'payment-channels') return;
       console.warn('[AdminSubscriptions] Channels fetch failed, using store:', e);
       if (window.store) channels = window.store.getPaymentChannels();
       if (!channels || channels.length === 0) {
@@ -2319,6 +2341,8 @@
         return;
       }
     }
+
+    if (this.currentTab !== 'payment-channels') return;
 
     container.innerHTML = `
       <div class="space-y-6 animate-in fade-in duration-150">
@@ -2353,15 +2377,24 @@
         <!-- Channels Grid -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
           ${channels.map(ch => {
-            const qrSrc = ch.qrCodeUrl || ch.qrData || `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent('upi://pay?pa=' + ch.upiId + '&pn=' + encodeURIComponent(ch.payeeName || 'ExcellenceCA'))}`;
-            const tierMap = {
-              'all': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-purple-100 text-purple-800 border border-purple-200">PASS: ALL</span>',
-              'trial': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-100 text-blue-800 border border-blue-200">PASS: TRIAL</span>',
-              'core': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-200">PASS: CORE</span>',
+            const qrSrc = ch.qrCodeUrl || ch.qrData || `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent('upi://pay?pa=' + ch.upiId + '&pn=' + encodeURIComponent(ch.payeeName || 'ExcellenceCA') + (ch.expectedAmount ? '&am=' + Number(ch.expectedAmount).toFixed(2) + '&cu=INR' : ''))}`;
+            const planBadgeMap = {
+              'all': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-purple-100 text-purple-800 border border-purple-200">PASS: ALL (UNIVERSAL)</span>',
+              'elite_trial': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 text-amber-900 border border-amber-300">TRIAL PASS (₹9)</span>',
+              'trial': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 text-amber-900 border border-amber-300">TRIAL PASS (₹9)</span>',
+              'core_monthly': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-100 text-blue-800 border border-blue-200">CORE PASS — 30D (₹49)</span>',
+              'core_4_month': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-100 text-blue-900 border border-blue-300">CORE PASS — 4M (₹149)</span>',
+              'plus_monthly': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-indigo-100 text-indigo-800 border border-indigo-200">PLUS PASS — 30D (₹99)</span>',
+              'plus_4_month': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-indigo-100 text-indigo-900 border border-indigo-300">PLUS PASS — 4M (₹299)</span>',
+              'elite_monthly': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-purple-100 text-purple-800 border border-purple-200">ELITE PASS — 30D (₹149)</span>',
+              'elite_4_month': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-purple-100 text-purple-900 border border-purple-300">ELITE PASS — 4M (₹499)</span>',
+              'core': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-100 text-blue-800 border border-blue-200">PASS: CORE</span>',
               'plus': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-indigo-100 text-indigo-800 border border-indigo-200">PASS: PLUS</span>',
-              'elite': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-200">PASS: ELITE</span>'
+              'elite': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-purple-100 text-purple-800 border border-purple-200">PASS: ELITE</span>'
             };
-            const tierBadge = tierMap[(ch.subscriptionTier || 'all').toLowerCase()] || `<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-purple-100 text-purple-800 border border-purple-200">PASS: ${(ch.subscriptionTier || 'ALL').toUpperCase()}</span>`;
+            const planKey = (ch.targetPlanId || ch.subscriptionTier || 'all').toLowerCase();
+            const tierBadge = planBadgeMap[planKey] || `<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-slate-100 text-slate-800 border border-slate-200">PASS: ${ch.targetPassTitle || (ch.subscriptionTier || 'ALL').toUpperCase()}</span>`;
+            const amountLabel = ch.expectedAmount ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">Amount: ₹${Number(ch.expectedAmount).toFixed(0)}</span>` : '';
 
             return `
               <div class="bg-white border ${ch.isPrimary ? 'border-rose-400 ring-2 ring-rose-200' : 'border-slate-200'} rounded-2xl p-5 shadow-xs flex flex-col justify-between space-y-4">
@@ -2371,6 +2404,7 @@
                       <span class="text-base font-bold text-slate-900">${ch.title || ch.name || 'UPI Channel'}</span>
                       ${ch.isPrimary ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-rose-100 text-rose-800 border border-rose-200">PRIMARY</span>' : ''}
                       ${tierBadge}
+                      ${amountLabel}
                       ${ch.isActive ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">ACTIVE</span>' : '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">INACTIVE</span>'}
                       ${ch.needsReupload ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1"><i data-lucide="alert-triangle" class="w-3 h-3 text-amber-600"></i> RE-UPLOAD QR</span>' : ''}
                     </div>
@@ -2531,14 +2565,31 @@
 
           <div>
             <label class="block text-xs font-bold text-slate-700 mb-1">Target Subscription / Pass Tier Mapping</label>
-            <select id="admin-channel-tier" class="w-full px-3.5 py-2.5 text-xs font-bold border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white">
-              <option value="all" ${(channel && (channel.subscriptionTier === 'all' || !channel.subscriptionTier)) ? 'selected' : ''}>All Passes (Universal / Fallback)</option>
-              <option value="trial" ${channel && channel.subscriptionTier === 'trial' ? 'selected' : ''}>Trial Pass Only</option>
-              <option value="core" ${channel && channel.subscriptionTier === 'core' ? 'selected' : ''}>Core Pass Only</option>
-              <option value="plus" ${channel && channel.subscriptionTier === 'plus' ? 'selected' : ''}>Plus Pass Only</option>
-              <option value="elite" ${channel && channel.subscriptionTier === 'elite' ? 'selected' : ''}>Elite Pass Only</option>
+            <select id="admin-channel-tier" onchange="window.adminDashboard.onChannelTargetTierChanged(this.value)" class="w-full px-3.5 py-2.5 text-xs font-bold border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white">
+              <option value="all" data-amount="" ${(channel && (!channel.targetPlanId && (channel.subscriptionTier === 'all' || !channel.subscriptionTier))) ? 'selected' : ''}>All Passes (Universal / Fallback)</option>
+              <option value="elite_trial" data-amount="9" ${(channel && (channel.targetPlanId === 'elite_trial' || channel.subscriptionTier === 'trial')) ? 'selected' : ''}>Trial Pass Only (₹9)</option>
+              <option value="core_monthly" data-amount="49" ${(channel && channel.targetPlanId === 'core_monthly') ? 'selected' : ''}>Core Pass — 30 Days Only (₹49)</option>
+              <option value="plus_monthly" data-amount="99" ${(channel && channel.targetPlanId === 'plus_monthly') ? 'selected' : ''}>Plus Pass — 30 Days Only (₹99)</option>
+              <option value="elite_monthly" data-amount="149" ${(channel && channel.targetPlanId === 'elite_monthly') ? 'selected' : ''}>Elite Pass — 30 Days Only (₹149)</option>
+              <option value="core_4_month" data-amount="149" ${(channel && channel.targetPlanId === 'core_4_month') ? 'selected' : ''}>Core Pass — 4 Months Only (₹149)</option>
+              <option value="plus_4_month" data-amount="299" ${(channel && channel.targetPlanId === 'plus_4_month') ? 'selected' : ''}>Plus Pass — 4 Months Only (₹299)</option>
+              <option value="elite_4_month" data-amount="499" ${(channel && channel.targetPlanId === 'elite_4_month') ? 'selected' : ''}>Elite Pass — 4 Months Only (₹499)</option>
             </select>
             <p class="text-[10px] text-slate-400 mt-1">Directs checkout for students buying this specific pass tier to this UPI/QR channel.</p>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Configured Payment Amount (₹) <span class="text-rose-600">*</span></label>
+            <input 
+              type="number" 
+              id="admin-channel-expected-amount" 
+              step="1"
+              min="1"
+              value="${channel && channel.expectedAmount ? channel.expectedAmount : (channel && channel.targetPlanId === 'elite_trial' ? '9' : (channel && channel.targetPlanId === 'core_monthly' ? '49' : (channel && channel.targetPlanId === 'plus_monthly' ? '99' : (channel && channel.targetPlanId === 'elite_monthly' ? '149' : (channel && channel.targetPlanId === 'core_4_month' ? '149' : (channel && channel.targetPlanId === 'plus_4_month' ? '299' : (channel && channel.targetPlanId === 'elite_4_month' ? '499' : '')))))))}" 
+              placeholder="e.g. 49 (Auto-filled from pass tier or customize)" 
+              class="w-full px-3.5 py-2.5 text-xs font-bold text-slate-900 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white" 
+            />
+            <p class="text-[10px] text-slate-400 mt-1">Expected pass amount. Encoded directly into UPI QR URIs (am=XX.00&cu=INR) for pre-filling student payment apps.</p>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2735,6 +2786,16 @@
     if (img) img.src = '';
   };
 
+  AdminDashboard.prototype.onChannelTargetTierChanged = function(val) {
+    const sel = document.getElementById('admin-channel-tier');
+    const opt = sel ? sel.options[sel.selectedIndex] : null;
+    const defaultAmt = opt ? opt.getAttribute('data-amount') : '';
+    const amtInput = document.getElementById('admin-channel-expected-amount');
+    if (amtInput && defaultAmt) {
+      amtInput.value = defaultAmt;
+    }
+  };
+
   AdminDashboard.prototype.submitSaveChannel = async function(event, channelId) {
     event.preventDefault();
     const title = document.getElementById('admin-channel-title').value.trim();
@@ -2746,7 +2807,30 @@
     const amountLimit = parseFloat(document.getElementById('admin-channel-limit')?.value) || 0;
     const isActive = document.getElementById('admin-channel-active').checked;
     const isPrimary = document.getElementById('admin-channel-primary').checked;
-    const subscriptionTier = (document.getElementById('admin-channel-tier')?.value || 'all').trim();
+    const targetTierVal = (document.getElementById('admin-channel-tier')?.value || 'all').trim();
+    const expectedAmount = parseFloat(document.getElementById('admin-channel-expected-amount')?.value) || 0;
+
+    let targetPlanId = '';
+    let targetPassTitle = 'All Passes (Universal / Fallback)';
+    let subscriptionTier = 'all';
+
+    const planMeta = {
+      'elite_trial': { planId: 'elite_trial', title: 'Trial Pass Only (₹9)', tier: 'trial' },
+      'core_monthly': { planId: 'core_monthly', title: 'Core Pass — 30 Days Only (₹49)', tier: 'core' },
+      'plus_monthly': { planId: 'plus_monthly', title: 'Plus Pass — 30 Days Only (₹99)', tier: 'plus' },
+      'elite_monthly': { planId: 'elite_monthly', title: 'Elite Pass — 30 Days Only (₹149)', tier: 'elite' },
+      'core_4_month': { planId: 'core_4_month', title: 'Core Pass — 4 Months Only (₹149)', tier: 'core' },
+      'plus_4_month': { planId: 'plus_4_month', title: 'Plus Pass — 4 Months Only (₹299)', tier: 'plus' },
+      'elite_4_month': { planId: 'elite_4_month', title: 'Elite Pass — 4 Months Only (₹499)', tier: 'elite' }
+    };
+
+    if (planMeta[targetTierVal]) {
+      targetPlanId = planMeta[targetTierVal].planId;
+      targetPassTitle = planMeta[targetTierVal].title;
+      subscriptionTier = planMeta[targetTierVal].tier;
+    } else {
+      subscriptionTier = targetTierVal;
+    }
 
     const submitBtn = document.getElementById('admin-save-channel-btn');
     if (submitBtn) {
@@ -2786,6 +2870,9 @@
         upiId: upiId,
         payeeName: payeeName,
         subscriptionTier: subscriptionTier,
+        targetPlanId: targetPlanId,
+        targetPassTitle: targetPassTitle,
+        expectedAmount: expectedAmount > 0 ? expectedAmount : undefined,
         bankAccountNumber: bankAccountNumber,
         bankIfsc: bankIfsc,
         bankAccountHolder: bankAccountHolder,
@@ -2884,11 +2971,13 @@
     let plans = {};
     try {
       const data = await adminFetch('/api/subscriptions/plans');
+      if (this.currentTab !== 'plans-config') return;
       if (data && data.plans) {
         plans = data.plans;
         if (window.store) window.store.saveSubscriptionPlans(plans);
       }
     } catch (e) {
+      if (this.currentTab !== 'plans-config') return;
       console.warn('[AdminSubscriptions] Plans fetch failed, using store:', e);
       if (window.store) plans = window.store.getSubscriptionPlans();
       if (!plans || Object.keys(plans).length === 0) {
@@ -2896,6 +2985,8 @@
         return;
       }
     }
+
+    if (this.currentTab !== 'plans-config') return;
 
     const planList = Object.values(plans);
 
@@ -3223,6 +3314,7 @@
     if (!forceFullRender && document.getElementById('admin-audit-table-container') && document.getElementById('admin-audit-search-input')) {
       try {
         const data = await adminFetch('/api/admin/audit-logs');
+        if (this.currentTab !== 'audit-logs') return;
         if (data && data.logs) {
           this._cachedAuditLogs = data.logs;
           if (window.store) window.store.saveAdminAuditLogs(data.logs);
@@ -3230,6 +3322,7 @@
       } catch (e) {
         console.warn('[AdminSubscriptions] Fast-path audit logs fetch failed:', e);
       }
+      if (this.currentTab !== 'audit-logs') return;
       this.renderAdminAuditLogsTableOnly();
       return;
     }
@@ -3247,12 +3340,14 @@
     let logs = [];
     try {
       const data = await adminFetch('/api/admin/audit-logs');
+      if (this.currentTab !== 'audit-logs') return;
       if (data && data.logs) {
         logs = data.logs;
         this._cachedAuditLogs = logs;
         if (window.store) window.store.saveAdminAuditLogs(logs);
       }
     } catch (e) {
+      if (this.currentTab !== 'audit-logs') return;
       console.warn('[AdminSubscriptions] Audit logs fetch failed, using store:', e);
       if (window.store) logs = window.store.getAdminAuditLogs();
       if (!logs || logs.length === 0) {
@@ -3260,6 +3355,8 @@
         return;
       }
     }
+
+    if (this.currentTab !== 'audit-logs') return;
 
     const actionFilter = this.auditActionFilter || 'all';
     const search = (this.auditSearch || '').toLowerCase().trim();

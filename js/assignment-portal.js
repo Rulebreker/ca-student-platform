@@ -222,7 +222,7 @@ class AssignmentPortal {
       const curUser = window.auth ? window.auth.getCurrentUser() : null;
       const curEntitlements = window.store && curUser ? window.store.getUserEntitlements(curUser.id) : null;
       const curUserTier = curEntitlements ? curEntitlements.tier.toLowerCase() : 'free';
-      const tierLevels = { free: 0, core: 1, plus: 2, elite: 3, trial: 3, admin: 99, teacher: 99 };
+      const tierLevels = { none: 0, free: 0, trial: 1, core: 2, plus: 3, elite: 4, teacher: 99, admin: 99 };
       const curUserLevel = curUser && (curUser.role === 'admin' || curUser.role === 'teacher') ? 99 : (tierLevels[curUserTier] ?? 0);
       const rawReq = (asg.requiredTier || 'free').toString().trim().toLowerCase();
       const reqTier = (rawReq === 'none' || rawReq === 'null' || !rawReq) ? 'free' : rawReq;
@@ -813,7 +813,7 @@ class AssignmentPortal {
     // Tier Access Check
     const curEntitlements = window.store && user ? window.store.getUserEntitlements(user.id) : null;
     const curUserTier = curEntitlements ? curEntitlements.tier.toLowerCase() : 'free';
-    const tierLevels = { free: 0, core: 1, plus: 2, elite: 3, trial: 3, admin: 99, teacher: 99 };
+    const tierLevels = { none: 0, free: 0, trial: 1, core: 2, plus: 3, elite: 4, teacher: 99, admin: 99 };
     const curUserLevel = user && (user.role === 'admin' || user.role === 'teacher') ? 99 : (tierLevels[curUserTier] ?? 0);
     const rawReq = (asg.requiredTier || 'free').toString().trim().toLowerCase();
     const paperReqTier = (rawReq === 'none' || rawReq === 'null' || !rawReq) ? 'free' : rawReq;
@@ -1218,7 +1218,7 @@ class AssignmentPortal {
     if (reqTier !== 'free' && user.role === 'student') {
       const entitlements = window.store ? window.store.getUserEntitlements(user.id) : null;
       const userTier = entitlements ? entitlements.tier.toLowerCase() : 'free';
-      const tierLevels = { free: 0, core: 1, plus: 2, elite: 3, trial: 3, admin: 99, teacher: 99 };
+      const tierLevels = { none: 0, free: 0, trial: 1, core: 2, plus: 3, elite: 4, teacher: 99, admin: 99 };
       if ((tierLevels[userTier] ?? 0) < (tierLevels[reqTier] ?? 0)) {
         window.app.showToast(`Submission Blocked: This test paper requires an active ${reqTier.toUpperCase()} Pass or higher.`, 'error');
         return;

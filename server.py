@@ -763,11 +763,12 @@ def sync_historical_xp(d):
     save_backend_data(d)
 
 TIER_LEVELS = {
+    'none': 0,
     'free': 0,
-    'core': 1,
-    'plus': 2,
-    'elite': 3,
-    'trial': 3,
+    'trial': 1,
+    'core': 2,
+    'plus': 3,
+    'elite': 4,
     'teacher': 99,
     'admin': 99
 }
@@ -785,6 +786,7 @@ def get_user_tier(user_id, data):
             if 'elite' in plan_id: return 'elite'
             if 'plus' in plan_id: return 'plus'
             if 'core' in plan_id: return 'core'
+            if 'trial' in plan_id: return 'trial'
     except Exception as e:
         print(f"[GET_USER_TIER_ERROR] {e}", flush=True)
     return 'free'
@@ -796,6 +798,88 @@ def check_tier_access(user_tier, required_tier):
     u_level = TIER_LEVELS.get(str(user_tier or 'free').strip().lower(), 0)
     r_level = TIER_LEVELS.get(req, 0)
     return u_level >= r_level
+
+def check_scheduled_mcq_tests(data, sync_fn=None):
+    """
+    Server-side background executor for scheduled MCQ tests.
+    Checks all tests with status 'Scheduled'. When scheduledPublishTime arrives,
+    transitions test to 'Live', syncs to Firebase RTDB,
+    and dispatches idempotent notifications to eligible users based on tier.
+    """
+    tests = data.get('tests', [])
+    if not tests:
+        return False
+
+    now_utc = datetime.now(timezone.utc)
+    now_iso = now_utc.isoformat()
+    dirty = False
+
+    for test in tests:
+        status = str(test.get('status', '')).strip()
+        sched_str = test.get('scheduledPublishTime')
+        if status == 'Scheduled' and sched_str:
+            try:
+                clean_sched = str(sched_str).replace('Z', '+00:00')
+                sched_dt = datetime.fromisoformat(clean_sched)
+                if sched_dt.tzinfo is None:
+                    # Timezone-naive treated as Asia/Kolkata (+05:30)
+                    ist_tz = timezone(timedelta(hours=5, minutes=30))
+                    sched_dt = sched_dt.replace(tzinfo=ist_tz)
+
+                if now_utc >= sched_dt:
+                    test['status'] = 'Live'
+                    test['isPublished'] = True
+                    test['isLive'] = True
+                    test['publishedAt'] = now_iso
+                    dirty = True
+                    print(f"[MCQ_SCHEDULE] Test '{test.get('title')}' ({test.get('id')}) transitioned to LIVE at {now_iso}", flush=True)
+
+                    if sync_fn:
+                        sync_fn(f"tests/{test['id']}", test)
+
+                    # Dispatch idempotent notifications to eligible students
+                    req_tier = str(test.get('requiredTier') or test.get('tier') or 'none').strip().lower()
+                    allowed_plans = test.get('allowedPlans') or ['free', 'trial', 'core', 'plus', 'elite']
+                    raw_users = data.get('users', [])
+                    user_list = list(raw_users.values()) if isinstance(raw_users, dict) else (raw_users if isinstance(raw_users, list) else [])
+                    notifs = data.setdefault('notifications', {})
+                    if isinstance(notifs, list):
+                        notifs_dict = {n.get('id', f"notif_{i}"): n for i, n in enumerate(notifs)}
+                        data['notifications'] = notifs_dict
+                        notifs = notifs_dict
+
+                    for u in user_list:
+                        if isinstance(u, dict) and u.get('role') == 'student':
+                            u_tier = get_user_tier(u.get('id'), data)
+                            eligible = False
+                            if req_tier in ('none', 'free', '', 'null'):
+                                eligible = True
+                            elif check_tier_access(u_tier, req_tier):
+                                eligible = True
+
+                            if allowed_plans and u_tier not in allowed_plans and 'all' not in allowed_plans:
+                                eligible = False
+
+                            if eligible:
+                                notif_id = f"notif_mcq_live_{test['id']}_{u['id']}"
+                                if notif_id not in notifs:
+                                    notif_obj = {
+                                        'id': notif_id,
+                                        'userId': u['id'],
+                                        'title': f"New Live Assessment: {test.get('title', 'MCQ Test')}",
+                                        'message': f"The scheduled test '{test.get('title')}' is now LIVE! Begin your examination now.",
+                                        'type': 'test_live',
+                                        'testId': test['id'],
+                                        'read': False,
+                                        'createdAt': now_iso
+                                    }
+                                    notifs[notif_id] = notif_obj
+                                    if sync_fn:
+                                        sync_fn(f"notifications/{notif_id}", notif_obj)
+            except Exception as e:
+                print(f"[MCQ_SCHEDULE_ERROR] Error checking test {test.get('id')}: {e}", flush=True)
+
+    return dirty
 
 _backend_data_lock = threading.RLock()
 _collection_last_synced = {}
@@ -1139,13 +1223,14 @@ _last_checked_schedule_time = None
 
 
 def subscription_background_worker():
-    """Background thread that automatically expires subscriptions and timed-out payment sessions."""
+    """Background thread that automatically expires subscriptions, timed-out payment sessions, and publishes scheduled tests."""
     while True:
         try:
-            time.sleep(30)
+            time.sleep(10)
             data = load_backend_data()
             modified = subscription_manager.auto_expire_worker(data, sync_to_firebase)
-            if modified:
+            sched_modified = check_scheduled_mcq_tests(data, sync_to_firebase)
+            if modified or sched_modified:
                 save_backend_data(data)
         except Exception as e:
             print(f"[SUBSCRIPTION_WORKER_EXCEPTION] {e}", flush=True)
@@ -1899,6 +1984,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             user = authenticate_token(token)
             is_admin = user and user.get('role') == 'admin'
             data = load_backend_data()
+            if check_scheduled_mcq_tests(data, sync_to_firebase):
+                save_backend_data(data)
             tests = data.get('tests', [])
             test_id = query.get('testId', [None])[0]
             user_tier = get_user_tier(user.get('id') if user else None, data) if not is_admin else 'admin'
@@ -2132,11 +2219,45 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             paper_id = query.get('paperId', [None])[0]
             doc_type = query.get('type', ['question'])[0]
 
-            if user.get('role') == 'student' and paper_id:
+            if not file_id:
+                self.send_json(400, {'error': 'Missing fileId parameter', 'code': 400})
+                return
+
+            safe_file_id = os.path.basename(file_id)
+            file_path = os.path.join(PRIVATE_STORAGE_DIR, safe_file_id)
+
+            id_map = {
+                'asg-1': 'qp_accounting_paper1.pdf',
+                'paper-1': 'qp_accounting_paper1.pdf',
+                'asg-2': 'qp_law_paper2.pdf',
+                'paper-2': 'qp_law_paper2.pdf',
+                'asg-3': 'qp_economics_paper3.pdf',
+                'paper-3': 'qp_economics_paper3.pdf',
+                'asg-4': 'qp_qa_paper4.pdf',
+                'paper-4': 'qp_qa_paper4.pdf',
+                'qp.pdf': 'qp_accounting_paper1.pdf'
+            }
+            mapped = id_map.get(safe_file_id) or (paper_id and id_map.get(paper_id))
+            if mapped and os.path.exists(os.path.join(PRIVATE_STORAGE_DIR, mapped)):
+                file_path = os.path.join(PRIVATE_STORAGE_DIR, mapped)
+
+            if user.get('role') == 'student':
                 data = load_backend_data()
-                paper = next((p for p in data.get('papers', []) if p.get('id') == paper_id), None)
-                if paper:
-                    req_tier = str(paper.get('requiredTier', 'free')).lower()
+                target_paper = None
+                if paper_id:
+                    target_paper = next((p for p in data.get('papers', []) if p.get('id') == paper_id), None)
+                if not target_paper:
+                    target_paper = next((p for p in data.get('papers', []) if (
+                        p.get('id') == safe_file_id or
+                        p.get('questionPdfId') == safe_file_id or
+                        p.get('answerPdfId') == safe_file_id or
+                        p.get('questionPdfName') == safe_file_id or
+                        p.get('answerPdfName') == safe_file_id or
+                        (mapped and (p.get('questionPdfId') == mapped or p.get('answerPdfId') == mapped))
+                    )), None)
+
+                if target_paper:
+                    req_tier = str(target_paper.get('requiredTier') or 'free').lower()
                     user_tier = get_user_tier(user.get('id'), data)
                     if not check_tier_access(user_tier, req_tier):
                         self.send_json(403, {
@@ -2147,48 +2268,20 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         })
                         return
 
-            if not file_id:
-                self.send_json(400, {'error': 'Missing fileId parameter', 'code': 400})
-                return
-
-            safe_file_id = os.path.basename(file_id)
-            file_path = os.path.join(PRIVATE_STORAGE_DIR, safe_file_id)
-
-            if not os.path.exists(file_path):
-                id_map = {
-                    'asg-1': 'qp_accounting_paper1.pdf',
-                    'paper-1': 'qp_accounting_paper1.pdf',
-                    'asg-2': 'qp_law_paper2.pdf',
-                    'paper-2': 'qp_law_paper2.pdf',
-                    'asg-3': 'qp_economics_paper3.pdf',
-                    'paper-3': 'qp_economics_paper3.pdf',
-                    'asg-4': 'qp_qa_paper4.pdf',
-                    'paper-4': 'qp_qa_paper4.pdf',
-                    'qp.pdf': 'qp_accounting_paper1.pdf'
-                }
-                mapped = id_map.get(safe_file_id) or (paper_id and id_map.get(paper_id))
-                if mapped and os.path.exists(os.path.join(PRIVATE_STORAGE_DIR, mapped)):
-                    file_path = os.path.join(PRIVATE_STORAGE_DIR, mapped)
-
-            if user.get('role') == 'student' and paper_id:
-                data = load_backend_data()
-                paper = next((p for p in data.get('papers', []) if p.get('id') == paper_id), None)
-                if paper:
-
                     now_iso = datetime.now(timezone.utc).isoformat()
-                    if paper.get('status') == 'Draft':
+                    if target_paper.get('status') == 'Draft':
                         self.send_json(403, {'error': 'Paper is currently in Draft mode and cannot be downloaded.', 'code': 403})
                         return
-                    sched = paper.get('scheduledPublishTime')
-                    if paper.get('status') == 'Scheduled' and sched and now_iso < sched:
+                    sched = target_paper.get('scheduledPublishTime')
+                    if target_paper.get('status') == 'Scheduled' and sched and now_iso < sched:
                         self.send_json(403, {'error': f'Paper is scheduled for release at {sched}. Access blocked.', 'code': 403})
                         return
-                    live_start = paper.get('liveStartTime')
-                    live_end = paper.get('liveEndTime')
-                    if (paper.get('isLive') or paper.get('status') == 'Live') and live_start and now_iso < live_start:
+                    live_start = target_paper.get('liveStartTime')
+                    live_end = target_paper.get('liveEndTime')
+                    if (target_paper.get('isLive') or target_paper.get('status') == 'Live') and live_start and now_iso < live_start:
                         self.send_json(403, {'error': f'Live test has not started yet. Starts at {live_start}.', 'code': 403})
                         return
-                    if doc_type == 'answer' and paper.get('isLive') and live_end and now_iso < live_end:
+                    if doc_type == 'answer' and target_paper.get('isLive') and live_end and now_iso < live_end:
                         self.send_json(403, {'error': 'Model answer sheet is not available until the live test concludes.', 'code': 403})
                         return
 

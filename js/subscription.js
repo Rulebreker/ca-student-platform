@@ -656,13 +656,25 @@ class SubscriptionManager {
               <span id="checkout-upi-id" class="text-xs font-mono font-bold text-slate-900 flex-1 truncate">${channel.upiId}</span>
               <button 
                 onclick="window.subscriptionManager.copyUpiId('${channel.upiId}')"
-                class="px-2 py-1 text-[11px] font-bold bg-white hover:bg-slate-100 text-slate-700 rounded border border-slate-200 shadow-2xs transition-colors flex items-center gap-1 flex-shrink-0"
+                class="px-2 py-1 text-[11px] font-bold bg-white hover:bg-slate-100 text-slate-700 rounded border border-slate-200 shadow-2xs transition-colors flex items-center gap-1 flex-shrink-0 cursor-pointer"
               >
                 <i data-lucide="copy" class="w-3.5 h-3.5"></i>
                 <span id="copy-btn-text">Copy</span>
               </button>
             </div>
           </div>
+
+          ${(session.upiPayUri || channel.upiId) ? `
+            <div>
+              <a 
+                href="${session.upiPayUri || `upi://pay?pa=${encodeURIComponent(channel.upiId)}&pn=ExcellenceCA&am=${encodeURIComponent(session.amount)}&cu=INR`}"
+                class="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer no-underline text-center"
+              >
+                <i data-lucide="smartphone" class="w-4 h-4"></i>
+                <span>Pay ₹${session.amount} via UPI App</span>
+              </a>
+            </div>
+          ` : ''}
 
           <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-[11px] text-slate-600 space-y-1">
             <div class="font-bold text-slate-900 flex items-center gap-1">
@@ -1429,7 +1441,14 @@ class SubscriptionManager {
         </div>
 
         <!-- 5. PAYMENT & MEMBERSHIP TRANSACTION HISTORY -->
-        <div id="passes-payment-history-container" class="pt-4"></div>
+        <div id="passes-payment-history-container" class="pt-4">
+          ${user && user.role !== 'admin' ? `
+            <div class="p-8 text-center bg-white rounded-2xl border border-slate-200 shadow-xs">
+              <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-slate-200 border-t-indigo-600 mb-2"></div>
+              <p class="text-xs text-slate-500 font-medium">Loading your payment & membership history...</p>
+            </div>
+          ` : ''}
+        </div>
       </div>
     `;
 
@@ -1469,14 +1488,13 @@ class SubscriptionManager {
       return;
     }
 
-    if (!isSilent && !this._historySessions) {
+    if (!isSilent) {
       mount.innerHTML = `
         <div class="p-8 text-center bg-white rounded-2xl border border-slate-200 shadow-xs">
-          <i data-lucide="loader-2" class="w-6 h-6 animate-spin mx-auto text-amber-600 mb-2"></i>
-          <p class="text-xs text-slate-500 font-medium">Loading your payment transactions...</p>
+          <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-slate-200 border-t-indigo-600 mb-2"></div>
+          <p class="text-xs text-slate-500 font-medium">Loading your payment & membership history...</p>
         </div>
       `;
-      if (window.lucide) window.lucide.createIcons();
     }
 
     let sessions = [];
@@ -1712,7 +1730,20 @@ class SubscriptionManager {
   setHistorySearch(q) {
     this._historySearch = q;
     this._historyPage = 1;
-    this.renderPassesPaymentHistory(true);
+    const input = document.getElementById('history-search-input');
+    const isFocused = document.activeElement === input;
+    const start = input ? input.selectionStart : null;
+    const end = input ? input.selectionEnd : null;
+
+    this.renderPassesPaymentHistory(true).then(() => {
+      if (isFocused && start !== null) {
+        const restored = document.getElementById('history-search-input');
+        if (restored) {
+          restored.focus();
+          restored.setSelectionRange(start, end);
+        }
+      }
+    });
   }
 
   // --- REALTIME SYNC HANDLERS ---
@@ -1723,10 +1754,6 @@ class SubscriptionManager {
     // Update Pass Badge on Navbar & Dashboard
     if (window.studentDashboard && typeof window.studentDashboard.renderPassBadge === 'function') {
       window.studentDashboard.renderPassBadge();
-    }
-    // Update Payment History only if user is viewing passes or dashboard
-    if ((curView === 'passes' || curView === 'dashboard') && window.studentDashboard && typeof window.studentDashboard.renderPaymentHistory === 'function') {
-      window.studentDashboard.renderPaymentHistory();
     }
     // Re-render Passes payment history silently (no spinner wipe) if on passes
     if (curView === 'passes') {
@@ -1758,10 +1785,6 @@ class SubscriptionManager {
 
   onPaymentSessionsUpdate() {
     const curView = window.app ? window.app.currentView : '';
-    // Update Payment History only if user is viewing passes or dashboard
-    if ((curView === 'passes' || curView === 'dashboard') && window.studentDashboard && typeof window.studentDashboard.renderPaymentHistory === 'function') {
-      window.studentDashboard.renderPaymentHistory();
-    }
     // Silent re-render of payment history on passes (no spinner wipe)
     if (curView === 'passes') {
       this.renderPassesPaymentHistory(true);
