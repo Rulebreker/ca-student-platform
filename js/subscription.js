@@ -1660,23 +1660,57 @@ class SubscriptionManager {
   // --- REALTIME SYNC HANDLERS ---
 
   onSubscriptionUpdate() {
+    const curView = window.app ? window.app.currentView : '';
+
+    // Update Pass Badge on Navbar & Dashboard
     if (window.studentDashboard && typeof window.studentDashboard.renderPassBadge === 'function') {
       window.studentDashboard.renderPassBadge();
     }
+    // Update Payment History on Dashboard or Passes
     if (window.studentDashboard && typeof window.studentDashboard.renderPaymentHistory === 'function') {
       window.studentDashboard.renderPaymentHistory();
     }
-    if (window.app && window.app.currentView === 'passes') {
+    // Re-render Passes page if student is currently looking at passes
+    if (curView === 'passes') {
       this.renderPassesPage();
+    }
+    // Re-render student dashboard if active
+    if (curView === 'dashboard' && window.studentDashboard && typeof window.studentDashboard.render === 'function') {
+      window.studentDashboard.render();
+    }
+    // Refresh MCQ test access badges if tests view is open
+    if (curView === 'tests' && window.testEngine && typeof window.testEngine.renderTestList === 'function') {
+      window.testEngine.renderTestList();
+    }
+    // Refresh Test papers access badges if assignments view is open
+    if (curView === 'assignments' && window.assignmentPortal && typeof window.assignmentPortal.render === 'function') {
+      window.assignmentPortal.render();
+    }
+    // Refresh Leaderboard rank & tier badge if leaderboard is open
+    if (curView === 'leaderboard' && window.leaderboardManager && typeof window.leaderboardManager.render === 'function') {
+      window.leaderboardManager.render();
+    }
+    // If admin is viewing subscriptions
+    if (window.adminDashboard && window.auth && window.auth.isAdmin()) {
+      if (window.adminDashboard.currentTab === 'subscriptions' && typeof window.adminDashboard.renderSubscriptions === 'function') {
+        window.adminDashboard.renderSubscriptions();
+      }
     }
   }
 
   onPaymentSessionsUpdate() {
+    const curView = window.app ? window.app.currentView : '';
     if (window.studentDashboard && typeof window.studentDashboard.renderPaymentHistory === 'function') {
       window.studentDashboard.renderPaymentHistory();
     }
-    if (window.app && window.app.currentView === 'passes') {
+    if (curView === 'passes') {
       this.renderPassesPage();
+    }
+    // If admin is viewing payments verification
+    if (window.adminDashboard && window.auth && window.auth.isAdmin()) {
+      if (window.adminDashboard.currentTab === 'payments' && typeof window.adminDashboard.renderPaymentVerifications === 'function') {
+        window.adminDashboard.renderPaymentVerifications();
+      }
     }
   }
 }

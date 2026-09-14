@@ -2301,6 +2301,38 @@ class AppStore {
 
     return notifObj;
   }
+  addNotificationsBulk(notifications) {
+    if (!Array.isArray(notifications) || notifications.length === 0) return [];
+    const nowIso = new Date().toISOString();
+    const nowTs = Date.now();
+    const preparedList = notifications.map((notif, idx) => ({
+      id: notif.id || 'notif-' + nowTs + '-' + idx + '-' + Math.random().toString(36).substring(2, 6),
+      userId: notif.userId,
+      type: notif.type || 'general',
+      title: notif.title || '',
+      message: notif.message || '',
+      link: notif.link || '',
+      read: false,
+      metadata: notif.metadata || {},
+      createdAt: notif.createdAt || nowIso
+    }));
+
+    const list = this.getNotifications();
+    list.unshift(...preparedList);
+    this.saveNotifications(list);
+
+    fetch('/api/notifications/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notifications: preparedList })
+    }).catch(() => {});
+
+    if (window.app && typeof window.app.updateNotificationBadge === 'function') {
+      window.app.updateNotificationBadge();
+    }
+
+    return preparedList;
+  }
   markNotificationRead(id) {
     const list = this.getNotifications();
     const item = list.find(n => n.id === id);

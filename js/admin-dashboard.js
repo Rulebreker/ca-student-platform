@@ -1919,6 +1919,7 @@ class AdminDashboard {
     // Trigger notification to students matching exam level if newly created and published
     if (!isEdit && paperObj.isPublished) {
       const allStudents = window.store.getStudents ? window.store.getStudents() : [];
+      const bulkNotifs = [];
       allStudents.forEach(st => {
         const stLevel = (st.caLevel || '').toUpperCase();
         const pLevel = (examLevel || '').toUpperCase();
@@ -1926,7 +1927,7 @@ class AdminDashboard {
             stLevel.includes('INTER') && pLevel.includes('INTER') ||
             stLevel.includes('FINAL') && pLevel.includes('FINAL') ||
             !st.caLevel) {
-          window.store.addNotification({
+          bulkNotifs.push({
             userId: st.id,
             type: 'new_paper',
             title: 'New Test Paper Uploaded!',
@@ -1936,6 +1937,9 @@ class AdminDashboard {
           });
         }
       });
+      if (bulkNotifs.length > 0 && window.store && typeof window.store.addNotificationsBulk === 'function') {
+        window.store.addNotificationsBulk(bulkNotifs);
+      }
     }
 
     window.app.closeModal('admin-generic-modal');
@@ -3105,6 +3109,7 @@ This will remove the question paper, attached answer keys, and student submissio
       const allStudents = window.store.getStudents ? window.store.getStudents() : [];
       const subs = window.store.getSubscriptions ? window.store.getSubscriptions() : {};
       const now = new Date();
+      const bulkNotifs = [];
       allStudents.forEach(st => {
         const stLevel = (st.caLevel || '').toUpperCase();
         const tLevel = (examLevel || '').toUpperCase();
@@ -3125,7 +3130,7 @@ This will remove the question paper, attached answer keys, and student submissio
         }
 
         if (testPayload.allowedPlans.includes(studentTier)) {
-          window.store.addNotification({
+          bulkNotifs.push({
             userId: st.id,
             type: 'new_test',
             title: 'New MCQ Test Published!',
@@ -3135,6 +3140,9 @@ This will remove the question paper, attached answer keys, and student submissio
           });
         }
       });
+      if (bulkNotifs.length > 0 && window.store && typeof window.store.addNotificationsBulk === 'function') {
+        window.store.addNotificationsBulk(bulkNotifs);
+      }
     }
 
     window.app.showToast(existingId ? 'Test updated successfully!' : 'Test created! You can now add questions.', 'success');

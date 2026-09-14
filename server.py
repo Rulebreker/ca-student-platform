@@ -53,21 +53,31 @@ def verify_password(plain_password, stored_password):
 
 FIREBASE_RTDB_URL = "https://excellenceca-45a9d-default-rtdb.firebaseio.com"
 
-def sync_to_firebase(path, data, method='PUT'):
-    """Asynchronously sync updates to Firebase Realtime Database via REST API"""
+def sync_to_firebase(path, data, method='PUT', sync=None):
+    """Sync updates to Firebase Realtime Database via REST API.
+    In serverless environments (Vercel / Lambda), background daemon threads freeze 
+    immediately upon HTTP response, so we execute synchronously with a tight timeout."""
     def _do_sync():
         try:
             import urllib.request
             url = f"{FIREBASE_RTDB_URL}/{path.lstrip('/')}.json"
-            body = json.dumps(data).encode('utf-8')
+            if method == 'DELETE' and data is None:
+                body = None
+            else:
+                body = json.dumps(data).encode('utf-8')
             req = urllib.request.Request(url, data=body, method=method)
             req.add_header('Content-Type', 'application/json')
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
                 pass
         except Exception as e:
-            # Silent fallback if offline
+            # Silent fallback if offline / timed out
             pass
-    threading.Thread(target=_do_sync, daemon=True).start()
+
+    should_sync = sync if sync is not None else IS_SERVERLESS
+    if should_sync:
+        _do_sync()
+    else:
+        threading.Thread(target=_do_sync, daemon=True).start()
 
 INITIAL_USERS = {
     'adminrulebreker@rulebrekerdothunter.com': {
@@ -799,6 +809,19 @@ def load_backend_data():
                     shutil.copyfile(bundled_seed, DATA_STORE_FILE)
                 except Exception as _seed_err:
                     print(f"[SEED_COPY_WARNING] {_seed_err}", flush=True)
+            try:
+                import urllib.request
+                req = urllib.request.Request(f"{FIREBASE_RTDB_URL}/subscriptions.json")
+                with urllib.request.urlopen(req, timeout=2.0) as resp:
+                    cloud_subs = json.loads(resp.read().decode('utf-8'))
+                    if cloud_subs and isinstance(cloud_subs, dict) and os.path.exists(DATA_STORE_FILE):
+                        with open(DATA_STORE_FILE, 'r', encoding='utf-8') as f:
+                            cur_data = json.load(f)
+                        cur_data.setdefault('subscriptions', {}).update(cloud_subs)
+                        with open(DATA_STORE_FILE, 'w', encoding='utf-8') as f:
+                            json.dump(cur_data, f, indent=2)
+            except Exception as _cloud_seed_err:
+                pass
 
         if os.path.exists(DATA_STORE_FILE):
             d = None
@@ -2831,6 +2854,56 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             except Exception as e:
                 self.send_json(500, {'error': f'Notification error: {str(e)}', 'code': 500})
+                return
+
+        # Bulk Student Notifications Management
+        if path == '/api/notifications/bulk':
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+                raw_notifs = req_data.get('notifications', [])
+                if not isinstance(raw_notifs, list) or not raw_notifs:
+                    self.send_json(400, {'success': False, 'error': 'No notifications provided.'})
+                    return
+
+                data = load_backend_data()
+                notifs = data.get('notifications', [])
+                added_notifs = []
+                now_iso = datetime.now(timezone.utc).isoformat()
+                now_ts = int(datetime.now().timestamp() * 1000)
+
+                for idx, n in enumerate(raw_notifs):
+                    if not isinstance(n, dict):
+                        continue
+                    notif_id = n.get('id') or f"notif-{now_ts}-{idx}-{uuid.uuid4().hex[:4]}"
+                    notif = {
+                        'id': notif_id,
+                        'userId': n.get('userId'),
+                        'type': n.get('type', 'general'),
+                        'title': n.get('title', ''),
+                        'message': n.get('message', ''),
+                        'link': n.get('link', ''),
+                        'read': bool(n.get('read', False)),
+                        'metadata': n.get('metadata', {}),
+                        'createdAt': n.get('createdAt') or now_iso
+                    }
+                    notifs.insert(0, notif)
+                    added_notifs.append(notif)
+
+                # Keep max 1000 notifications in storage
+                data['notifications'] = notifs[:1000]
+                save_backend_data(data)
+
+                # Sync bulk to Firebase RTDB in one request
+                if added_notifs:
+                    firebase_payload = {n['id']: n for n in added_notifs}
+                    sync_to_firebase('notifications', firebase_payload, method='PATCH')
+
+                self.send_json(200, {'success': True, 'count': len(added_notifs)})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Bulk notification error: {str(e)}', 'code': 500})
                 return
 
         if path == '/api/notifications/read':

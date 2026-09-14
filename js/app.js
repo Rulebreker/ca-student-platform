@@ -1480,7 +1480,7 @@ class App {
                 </button>
               </div>
             </div>
-            <p class="text-[11px] text-slate-600 leading-snug line-clamp-2">${n.message || ''}</p>
+            <p class="text-[11px] text-slate-600 leading-snug line-clamp-2 break-words">${n.message || ''}</p>
             ${!n.read ? '<span class="inline-block w-1.5 h-1.5 rounded-full bg-blue-600 mt-1"></span>' : ''}
           </div>
         </div>

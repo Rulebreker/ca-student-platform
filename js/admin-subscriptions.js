@@ -18,7 +18,7 @@
 
   // --- CORE RESILIENCE & NETWORKING HELPERS ---
 
-  async function adminFetch(url, options = {}, timeoutMs = 10000) {
+  async function adminFetch(url, options = {}, timeoutMs = 15000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const user = window.auth ? window.auth.getCurrentUser() : null;
