@@ -29,6 +29,28 @@ class AssignmentPortal {
     this.sortBy = 'new';
   }
 
+  formatRequiredPlans(allowedPlans, requiredTier = 'trial') {
+    if (Array.isArray(allowedPlans) && allowedPlans.length > 0) {
+      const clean = allowedPlans.map(p => String(p).toLowerCase().trim()).filter(p => p !== 'free' && p !== 'all');
+      const planNames = {
+        'trial': 'Trial Pass (₹9)',
+        'core': 'Core Pass',
+        'plus': 'Plus Pass',
+        'elite': 'Elite Pass'
+      };
+      const names = clean.filter(p => planNames[p]).map(p => planNames[p]);
+      if (names.length === 1) return names[0];
+      if (names.length === 2) return `${names[0]} or ${names[1]}`;
+      if (names.length > 2) return `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+    }
+    const req = String(requiredTier || 'trial').toLowerCase().trim();
+    if (req === 'trial') return 'Trial Pass (₹9)';
+    if (req === 'core') return 'Core Pass or higher';
+    if (req === 'plus') return 'Plus Pass or higher';
+    if (req === 'elite') return 'Elite Pass';
+    return 'Subscription Pass';
+  }
+
   render() {
     const user = window.auth ? window.auth.getCurrentUser() : null;
     const serverTime = window.secureBackend ? window.secureBackend.getAuthoritativeTime() : new Date();
@@ -210,21 +232,26 @@ class AssignmentPortal {
         ? window.secureBackend.computePaperStatus(asg, serverTime) 
         : { statusKey: asg.status || 'Published', badgeText: asg.status || 'Published', badgeClass: 'bg-emerald-50 text-emerald-800', canAttempt: true, canDownloadQP: true };
 
-      // Date / Window string display (truncated with tooltip for 1-line guaranteed alignment)
-      let timeInfoHtml = '';
+      // Date / Window string display (for 2-column structured info box)
+      let dueShortText = '';
+      let dueSubText = 'Status: Open / Active';
       if (evalStatus.statusKey === 'Live' || evalStatus.statusKey === 'Live-Upcoming' || evalStatus.statusKey === 'Live-Ended') {
+        dueShortText = evalStatus.statusKey === 'Live' ? 'Live Now' : evalStatus.badgeText;
         if (asg.liveStartTime && asg.liveEndTime) {
           const s = new Date(asg.liveStartTime).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
           const e = new Date(asg.liveEndTime).toLocaleDateString('en-IN', { hour: '2-digit', minute: '2-digit' });
-          timeInfoHtml = `<span class="text-[11px] font-semibold text-rose-700 flex items-center gap-1 truncate" title="Window: ${s} - ${e}"><i data-lucide="clock" class="w-3.5 h-3.5 flex-shrink-0"></i> <span class="truncate">Window: ${s} - ${e}</span></span>`;
+          dueSubText = `${s} - ${e}`;
+        } else {
+          dueSubText = 'Live Exam Window';
         }
       } else if (evalStatus.statusKey === 'Scheduled') {
-        const schedStr = asg.scheduledPublishTime ? new Date(asg.scheduledPublishTime).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Soon';
-        timeInfoHtml = `<span class="text-[11px] font-semibold text-indigo-700 flex items-center gap-1 truncate" title="Release: ${schedStr}"><i data-lucide="calendar" class="w-3.5 h-3.5 flex-shrink-0"></i> <span class="truncate">Release: ${schedStr}</span></span>`;
+        const schedStr = asg.scheduledPublishTime ? new Date(asg.scheduledPublishTime).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Soon';
+        dueShortText = 'Scheduled';
+        dueSubText = `Releases: ${schedStr}`;
       } else {
         const deadlineDate = new Date(asg.expiryTime || asg.deadline || Date.now() + 30 * 86400000);
-        const dStr = deadlineDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-        timeInfoHtml = `<span class="text-[11px] font-medium text-slate-500 flex items-center gap-1 truncate" title="Due: ${dStr}"><i data-lucide="calendar" class="w-3.5 h-3.5 flex-shrink-0"></i> <span class="truncate">Due: ${dStr}</span></span>`;
+        dueShortText = deadlineDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+        dueSubText = 'Status: Open / Active';
       }
 
       // Concise badge text for top badge
@@ -274,8 +301,8 @@ class AssignmentPortal {
         }
 
         if (Array.isArray(asg.allowedPlans) && asg.allowedPlans.length > 0) {
-          const allowed = asg.allowedPlans.map(p => String(p).toLowerCase().trim());
-          if (!allowed.includes('all') && !allowed.includes('free')) {
+          const allowed = asg.allowedPlans.map(p => String(p).toLowerCase().trim()).filter(p => p !== 'free' && p !== 'all');
+          if (allowed.length > 0) {
             reqBadgeText = allowed.map(p => p.toUpperCase()).join('/') + ' PASS';
           }
         } else {
@@ -286,138 +313,153 @@ class AssignmentPortal {
         }
       }
 
+      const requiredPlansText = this.formatRequiredPlans(asg.allowedPlans, asg.requiredTier);
       const isUntimed = !!(asg.isUntimed || asg.hasTimeLimit === false || asg.durationMinutes === 0);
 
       return `
-        <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-xs hover:shadow-md transition-all flex flex-col h-full group box-border">
-          <!-- 1. Top Badges/Status (Exact h-8 flex-shrink-0) -->
-          <div class="flex items-center justify-between gap-2 mb-3 h-8 flex-shrink-0">
-            <div class="flex items-center gap-1.5 flex-wrap overflow-hidden max-w-[60%]">
-              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-100 truncate" title="${subject.name}">
-                ${subject.name}
-              </span>
-              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                ${examLevel}
-              </span>
-              ${reqBadgeText ? `
-                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-indigo-100 text-indigo-800 border-indigo-200 flex-shrink-0">
-                  ${reqBadgeText}
+        <div class="bg-white border ${isTierLocked ? 'border-amber-200/90' : 'border-slate-200'} rounded-xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between relative group">
+          <div>
+            <!-- Header Badges & Actions -->
+            <div class="flex items-center justify-between gap-2 mb-3">
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
+                  ${subject.name}
                 </span>
-              ` : ''}
-            </div>
-            <div class="flex items-center gap-1.5 justify-end flex-shrink-0">
-              <button 
-                type="button"
-                onclick="event.stopPropagation(); window.assignmentPortal.toggleBookmark('${asg.id}')"
-                class="p-1.5 rounded-lg transition-colors cursor-pointer ${isBm ? 'text-amber-500 bg-amber-50 hover:bg-amber-100' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}"
-                title="${isBm ? 'Bookmarked (Click to remove)' : 'Bookmark this test paper'}"
-              >
-                <i data-lucide="bookmark" class="w-4 h-4 ${isBm ? 'fill-current' : ''}"></i>
-              </button>
-              ${userSubBadge}
-              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${evalStatus.badgeClass} flex-shrink-0" title="${evalStatus.badgeText}">
-                ${badgeLabel}
-              </span>
-            </div>
-          </div>
-
-          <!-- 2. Assignment Title (Exact h-12 flex-shrink-0 line-clamp-2) -->
-          <h3 class="text-base font-bold text-slate-900 mb-1.5 group-hover:text-blue-600 transition-colors h-12 line-clamp-2 leading-snug flex-shrink-0" title="${asg.title}">
-            ${asg.title}
-          </h3>
-
-          <!-- 3. Subject/Topic (Exact h-5 flex-shrink-0 mb-3) -->
-          <div class="h-5 mb-3 flex-shrink-0">
-            <span class="text-xs text-slate-500 font-semibold block font-mono truncate" title="${asg.topic || 'CA Foundation Syllabus'}">
-              ${asg.topic || 'CA Foundation Syllabus'}
-            </span>
-          </div>
-
-          <!-- 4. Description (Exact h-28 flex-shrink-0 scrollable box preserving all text) -->
-          <div class="h-28 overflow-y-auto pr-1.5 mb-4 bg-slate-50/60 p-2.5 rounded-lg border border-slate-100 text-xs text-slate-600 leading-relaxed scrollbar-thin flex-shrink-0">
-            <p class="whitespace-pre-line">${(asg.description || '').replace(/###/g, '')}</p>
-          </div>
-
-          <!-- 5. Question Paper (PDF) Section (Exact h-16 flex-shrink-0 mb-4) -->
-          <div class="mb-4 bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex items-center justify-between h-16 flex-shrink-0 box-border">
-            <div class="flex items-center gap-2 overflow-hidden mr-2">
-              <div class="w-8 h-8 rounded-lg ${isTierLocked ? 'bg-indigo-100 text-indigo-600' : 'bg-rose-100 text-rose-600'} flex items-center justify-center font-bold flex-shrink-0">
-                <i data-lucide="${isTierLocked ? 'lock' : 'file-text'}" class="w-4 h-4"></i>
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                  ${examLevel}
+                </span>
+                ${isTierLocked ? `
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                    <i data-lucide="lock" class="w-3 h-3 text-amber-700"></i> Locked
+                  </span>
+                ` : (userSubBadge ? userSubBadge : `
+                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold ${evalStatus.badgeClass}">
+                    ${badgeLabel}
+                  </span>
+                `)}
               </div>
-              <div class="truncate">
-                <span class="text-xs font-bold text-slate-800 block leading-tight">Question Paper (PDF)</span>
-                <span class="text-[10px] text-slate-500 font-mono truncate block" title="${asg.questionPdfName || 'Official_QP.pdf'}">
-                  ${isTierLocked ? (reqBadgeText ? `${reqBadgeText} Required` : 'Pass Required') : (asg.questionPdfName || 'Official_QP.pdf')}
+              
+              <div class="flex items-center gap-1.5">
+                <button 
+                  type="button"
+                  onclick="event.stopPropagation(); window.assignmentPortal.toggleBookmark('${asg.id}')"
+                  class="p-1.5 rounded-lg transition-colors cursor-pointer ${isBm ? 'text-amber-500 bg-amber-50 hover:bg-amber-100' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}"
+                  title="${isBm ? 'Bookmarked (Click to remove)' : 'Bookmark this test paper'}"
+                >
+                  <i data-lucide="bookmark" class="w-4 h-4 ${isBm ? 'fill-current' : ''}"></i>
+                </button>
+                <span class="text-xs font-semibold text-slate-500 flex items-center gap-1">
+                  <i data-lucide="clock" class="w-3.5 h-3.5"></i> ${isUntimed ? 'Untimed' : `${asg.durationMinutes || 180}m`}
                 </span>
               </div>
             </div>
+
+            <!-- Title & Description -->
+            <h3 class="text-base font-bold text-slate-900 mb-1.5 leading-snug group-hover:text-blue-600 transition-colors line-clamp-2" title="${asg.title}">
+              ${asg.title}
+            </h3>
+            <p class="text-xs text-slate-600 line-clamp-2 mb-3 leading-relaxed" title="${(asg.description || asg.topic || '').replace(/"/g, '&quot;')}">
+              ${(asg.description || asg.topic || 'Practice descriptive question paper with comprehensive model answers.').replace(/###/g, '')}
+            </p>
+
+            <!-- Locked Tier Requirement Notice -->
             ${isTierLocked ? `
-              <button 
-                type="button"
-                onclick="window.app.navigate('passes')"
-                class="flex-shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-xs transition-colors flex items-center gap-1 cursor-pointer"
-                title="Requires ${reqBadgeText || 'Pass'} to unlock and download"
-              >
-                <i data-lucide="lock" class="w-3.5 h-3.5"></i> ${reqBadgeText || 'Pass Required'}
-              </button>
-            ` : `
-              <button 
-                type="button"
-                onclick="window.secureBackend.downloadProtectedFile('${asg.questionPdfId || 'qp.pdf'}', '${asg.id}', 'question', '${asg.questionPdfName || 'QuestionPaper.pdf'}')"
-                class="flex-shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg ${evalStatus.canDownloadQP ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer' : 'bg-slate-200 text-slate-400 cursor-not-allowed'} transition-colors flex items-center gap-1"
-                ${!evalStatus.canDownloadQP ? 'title="Locked until published/live"' : ''}
-              >
-                <i data-lucide="download" class="w-3.5 h-3.5"></i> Download PDF
-              </button>
-            `}
-          </div>
-
-          <!-- 6. Metadata & 7. Bottom Action Button (Exact horizontal and vertical alignment) -->
-          <div class="mt-auto pt-4 border-t border-slate-100 flex-shrink-0">
-            <div class="flex items-center justify-between text-xs text-slate-500 mb-3 h-6">
-              <div class="overflow-hidden mr-2">
-                ${timeInfoHtml}
+              <div class="mb-3 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200/90 flex items-center gap-2 text-xs text-amber-900">
+                <i data-lucide="shield-alert" class="w-4 h-4 text-amber-600 shrink-0"></i>
+                <span class="font-medium">Requires ${requiredPlansText}</span>
               </div>
-              <div class="flex items-center gap-2 font-bold text-slate-700 text-xs flex-shrink-0">
-                <span>${isUntimed ? '<i data-lucide="infinity" class="w-3.5 h-3.5 inline"></i> No Time Limit' : `<i data-lucide="clock" class="w-3.5 h-3.5 inline"></i> ${asg.durationMinutes || 180}m`}</span>
-                <span>•</span>
-                <span>${asg.maximumMarks} Marks</span>
+            ` : ''}
+
+            <!-- Structured Two-Column Metadata Box -->
+            <div class="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-lg text-xs mb-4">
+              <div>
+                <span class="text-slate-400 block text-[11px]">Submission Due</span>
+                <span class="font-bold text-slate-800 truncate block">${dueShortText}</span>
+                <span class="text-[10px] text-slate-500 block mt-0.5 truncate" title="${dueSubText}">${dueSubText}</span>
+              </div>
+              <div>
+                <span class="text-slate-400 block text-[11px]">Duration & Marks</span>
+                <span class="font-bold text-slate-800">${isUntimed ? 'No Time Limit' : `${asg.durationMinutes || 180} Mins`}</span>
+                <span class="text-[10px] text-slate-500 block mt-0.5">${asg.maximumMarks || 100} Max Marks</span>
               </div>
             </div>
 
-            ${submission ? `
-              <button 
-                type="button"
-                onclick="window.assignmentPortal.openAssignmentModal('${asg.id}')"
-                class="w-full h-10 px-4 text-xs font-bold rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors flex items-center justify-center gap-1.5 cursor-pointer box-border"
-              >
-                <i data-lucide="check-circle" class="w-4 h-4 text-emerald-600 flex-shrink-0"></i> <span class="truncate">Answer Sheet Submitted • View Details</span>
-              </button>
-            ` : isTierLocked ? `
-              <button 
-                type="button"
-                onclick="window.app.navigate('passes')"
-                class="w-full h-10 px-4 text-xs font-bold rounded-lg bg-gradient-to-r from-indigo-50 to-purple-50 hover:from-indigo-100 hover:to-purple-100 text-indigo-900 border border-indigo-200 transition-colors flex items-center justify-center gap-1.5 cursor-pointer box-border"
-              >
-                <i data-lucide="lock" class="w-4 h-4 text-indigo-600 flex-shrink-0"></i> <span class="truncate">Requires ${reqBadgeText || 'Pass'} → Upgrade</span>
-              </button>
-            ` : evalStatus.canAttempt ? `
-              <button 
-                type="button"
-                onclick="window.assignmentPortal.openAssignmentModal('${asg.id}')"
-                class="w-full h-10 px-4 text-xs font-bold rounded-lg ${evalStatus.statusKey === 'Live' ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-md animate-pulse border border-rose-600' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm border border-blue-600'} transition-all flex items-center justify-center gap-1.5 cursor-pointer box-border"
-              >
-                <i data-lucide="upload-cloud" class="w-4 h-4 flex-shrink-0"></i> <span class="truncate">${evalStatus.statusKey === 'Live' ? 'Attempt Live Test & Submit PDF →' : 'Solve & Upload Answer Sheet (PDF) →'}</span>
-              </button>
-            ` : `
-              <button 
-                type="button"
-                disabled
-                class="w-full h-10 px-4 text-xs font-bold rounded-lg bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed flex items-center justify-center gap-1.5 box-border"
-              >
-                <i data-lucide="lock" class="w-4 h-4 flex-shrink-0"></i> <span class="truncate">${evalStatus.badgeText}</span>
-              </button>
-            `}
+            <!-- Unlocked State Question Paper PDF Resource Row -->
+            ${(!isTierLocked && asg.questionPdfName) ? `
+              <div class="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-50/70 border border-slate-200/70 text-xs mb-3">
+                <div class="flex items-center gap-2 truncate mr-2">
+                  <i data-lucide="file-text" class="w-4 h-4 text-rose-600 shrink-0"></i>
+                  <span class="truncate font-medium text-slate-700 text-xs" title="${asg.questionPdfName}">${asg.questionPdfName}</span>
+                </div>
+                <button 
+                  type="button"
+                  onclick="event.stopPropagation(); window.secureBackend.downloadProtectedFile('${asg.questionPdfId || 'qp.pdf'}', '${asg.id}', 'question', '${asg.questionPdfName}')"
+                  class="text-rose-600 hover:text-rose-700 font-bold text-xs flex items-center gap-1 shrink-0 cursor-pointer ${evalStatus.canDownloadQP ? '' : 'opacity-50 pointer-events-none'}"
+                  title="${evalStatus.canDownloadQP ? 'Download Question Paper PDF' : 'Locked until published'}"
+                >
+                  <i data-lucide="download" class="w-3.5 h-3.5"></i> Download
+                </button>
+              </div>
+            ` : ''}
+          </div>
+
+          <!-- Bottom Status & CTA Action Button -->
+          <div>
+            <div class="text-xs py-2 border-t border-slate-100 mb-3 space-y-1">
+              <div class="flex items-center justify-between">
+                ${isTierLocked ? `
+                  <span class="text-amber-800 font-semibold flex items-center gap-1.5">
+                    <i data-lucide="lock" class="w-3.5 h-3.5 text-amber-600"></i> Pass Required to Attempt
+                  </span>
+                ` : submission ? `
+                  <span class="text-emerald-700 font-semibold flex items-center gap-1.5">
+                    <i data-lucide="check-circle" class="w-3.5 h-3.5 text-emerald-600"></i> Answer Sheet Submitted
+                  </span>
+                  ${submission.status === 'Evaluated' ? `<span class="text-emerald-700 font-semibold text-[11px]">${submission.marksObtained}/${asg.maximumMarks} Marks</span>` : ''}
+                ` : `
+                  <span class="text-slate-600 flex items-center gap-1.5">
+                    <i data-lucide="file-edit" class="w-3.5 h-3.5 text-blue-600"></i> Descriptive PDF Submission
+                  </span>
+                  <span class="text-slate-500 font-medium text-[11px]">${evalStatus.badgeText}</span>
+                `}
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              ${isTierLocked ? `
+                <button 
+                  type="button"
+                  onclick="window.app.navigate('passes')"
+                  class="w-full py-2.5 text-xs font-bold rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <i data-lucide="lock" class="w-3.5 h-3.5"></i> Requires ${reqBadgeText || 'Pass'} → Upgrade
+                </button>
+              ` : submission ? `
+                <button 
+                  type="button"
+                  onclick="window.assignmentPortal.openAssignmentModal('${asg.id}')"
+                  class="w-full py-2.5 text-xs font-bold rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <i data-lucide="check-circle" class="w-3.5 h-3.5 text-emerald-600"></i> Answer Sheet Submitted • View Details
+                </button>
+              ` : evalStatus.canAttempt ? `
+                <button 
+                  type="button"
+                  onclick="window.assignmentPortal.openAssignmentModal('${asg.id}')"
+                  class="w-full py-2.5 text-xs font-bold rounded-lg ${evalStatus.statusKey === 'Live' ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-md animate-pulse' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm'} transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <i data-lucide="${evalStatus.statusKey === 'Live' ? 'play-circle' : 'upload-cloud'}" class="w-3.5 h-3.5"></i> ${evalStatus.statusKey === 'Live' ? 'Attempt Live Test & Submit PDF →' : 'Solve & Upload Answer Sheet (PDF) →'}
+                </button>
+              ` : `
+                <button 
+                  type="button"
+                  disabled
+                  class="w-full py-2.5 text-xs font-bold rounded-lg bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  <i data-lucide="lock" class="w-3.5 h-3.5"></i> ${evalStatus.badgeText}
+                </button>
+              `}
+            </div>
           </div>
         </div>
       `;

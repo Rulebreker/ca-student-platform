@@ -2847,18 +2847,34 @@ class AppStore {
     return this.getAssignments().find(a => a.id === id);
   }
   addAssignment(asg) {
+    if (!asg) return;
+    Object.keys(asg).forEach(k => {
+      if (asg[k] === undefined) asg[k] = null;
+    });
     const assignments = this.getAssignments();
     assignments.unshift(asg);
     this.saveAssignments(assignments);
     if (window.firebaseSync && typeof window.firebaseSync.saveAssignment === 'function') {
-      window.firebaseSync.saveAssignment(asg);
+      try {
+        window.firebaseSync.saveAssignment(asg);
+      } catch (fbErr) {
+        console.warn('[Store] Firebase sync saveAssignment error:', fbErr);
+      }
     }
   }
   updateAssignment(asg) {
+    if (!asg) return;
+    Object.keys(asg).forEach(k => {
+      if (asg[k] === undefined) asg[k] = null;
+    });
     const assignments = this.getAssignments().map(a => a.id === asg.id ? asg : a);
     this.saveAssignments(assignments);
     if (window.firebaseSync && typeof window.firebaseSync.saveAssignment === 'function') {
-      window.firebaseSync.saveAssignment(asg);
+      try {
+        window.firebaseSync.saveAssignment(asg);
+      } catch (fbErr) {
+        console.warn('[Store] Firebase sync updateAssignment error:', fbErr);
+      }
     }
   }
   deleteAssignment(id) {

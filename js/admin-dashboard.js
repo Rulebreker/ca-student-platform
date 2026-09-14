@@ -2052,19 +2052,26 @@ class AdminDashboard {
       hideFromNonEligible,
       isPublished: status !== 'Draft',
       isLive: status === 'Live',
-      scheduledPublishTime: existing ? existing.scheduledPublishTime : (status === 'Scheduled' ? new Date(Date.now() + 86400000).toISOString() : null),
-      liveStartTime: existing ? existing.liveStartTime : (status === 'Live' ? new Date().toISOString() : null),
-      liveEndTime: existing ? existing.liveEndTime : (status === 'Live' ? new Date(Date.now() + (durationMinutes || 180) * 60000).toISOString() : null),
-      expiryTime: existing ? existing.expiryTime : new Date(Date.now() + 30 * 86400000).toISOString(),
-      deadline: existing ? existing.deadline : new Date(Date.now() + 30 * 86400000).toISOString(),
-      questionPdfName,
-      questionPdfId,
-      questionPdfData,
-      answerPdfName,
-      answerPdfId,
-      answerPdfData,
-      createdAt: existing ? existing.createdAt : new Date().toISOString()
+      scheduledPublishTime: (existing && existing.scheduledPublishTime) ? existing.scheduledPublishTime : (status === 'Scheduled' ? new Date(Date.now() + 86400000).toISOString() : null),
+      liveStartTime: (existing && existing.liveStartTime) ? existing.liveStartTime : (status === 'Live' ? new Date().toISOString() : null),
+      liveEndTime: (existing && existing.liveEndTime) ? existing.liveEndTime : (status === 'Live' ? new Date(Date.now() + (durationMinutes || 180) * 60000).toISOString() : null),
+      expiryTime: (existing && existing.expiryTime) ? existing.expiryTime : new Date(Date.now() + 30 * 86400000).toISOString(),
+      deadline: (existing && existing.deadline) ? existing.deadline : new Date(Date.now() + 30 * 86400000).toISOString(),
+      questionPdfName: questionPdfName || null,
+      questionPdfId: questionPdfId || null,
+      questionPdfData: questionPdfData || null,
+      answerPdfName: answerPdfName || null,
+      answerPdfId: answerPdfId || null,
+      answerPdfData: answerPdfData || null,
+      createdAt: (existing && existing.createdAt) ? existing.createdAt : new Date().toISOString()
     };
+
+    // Strict sanitization: ensure no field in paperObj is undefined (Firebase RTDB throws on undefined)
+    Object.keys(paperObj).forEach(k => {
+      if (paperObj[k] === undefined) {
+        paperObj[k] = null;
+      }
+    });
 
     try {
       const curUser = window.auth ? window.auth.getCurrentUser() : null;

@@ -1132,9 +1132,18 @@ class FirebaseSyncManager {
 
   saveAssignment(assignment) {
     if (!this.db || !assignment || !assignment.id) return Promise.resolve();
-    return this.db.ref('assignments/' + assignment.id).set(assignment).catch(err => {
-      console.warn('[FirebaseSync] saveAssignment error:', err);
-    });
+    try {
+      const clean = {};
+      for (const [k, v] of Object.entries(assignment)) {
+        clean[k] = v === undefined ? null : v;
+      }
+      return this.db.ref('assignments/' + clean.id).set(clean).catch(err => {
+        console.warn('[FirebaseSync] saveAssignment error:', err);
+      });
+    } catch (e) {
+      console.warn('[FirebaseSync] saveAssignment synchronous error caught:', e);
+      return Promise.resolve();
+    }
   }
 
   deleteAssignment(assignmentId) {
@@ -1146,16 +1155,34 @@ class FirebaseSyncManager {
 
   saveSubmission(submission) {
     if (!this.db || !submission || !submission.id) return Promise.resolve();
-    return this.db.ref('submissions/' + submission.id).set(submission).catch(err => {
-      console.warn('[FirebaseSync] saveSubmission error:', err);
-    });
+    try {
+      const clean = {};
+      for (const [k, v] of Object.entries(submission)) {
+        clean[k] = v === undefined ? null : v;
+      }
+      return this.db.ref('submissions/' + clean.id).set(clean).catch(err => {
+        console.warn('[FirebaseSync] saveSubmission error:', err);
+      });
+    } catch (e) {
+      console.warn('[FirebaseSync] saveSubmission synchronous error caught:', e);
+      return Promise.resolve();
+    }
   }
 
   saveTest(test) {
     if (!this.db || !test || !test.id) return Promise.resolve();
-    return this.db.ref('tests/' + test.id).set(test).catch(err => {
-      console.warn('[FirebaseSync] saveTest error:', err);
-    });
+    try {
+      const clean = {};
+      for (const [k, v] of Object.entries(test)) {
+        clean[k] = v === undefined ? null : v;
+      }
+      return this.db.ref('tests/' + clean.id).set(clean).catch(err => {
+        console.warn('[FirebaseSync] saveTest error:', err);
+      });
+    } catch (e) {
+      console.warn('[FirebaseSync] saveTest synchronous error caught:', e);
+      return Promise.resolve();
+    }
   }
 
   deleteTest(testId) {
