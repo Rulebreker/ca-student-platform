@@ -1196,7 +1196,7 @@ def manage_payment_channel(admin_user, action, params, data, sync_fn=None):
 
     old_copy = dict(target)
 
-    if action == 'edit':
+    if action in ('edit', 'update'):
         if params.get('name') or params.get('title'):
             target['name'] = (params.get('name') or params.get('title')).strip()
             target['title'] = target['name']
