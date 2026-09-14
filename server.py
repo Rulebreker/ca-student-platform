@@ -1148,17 +1148,14 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
                         updated = True
                 elif key in ['assignments', 'papers']:
                     items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                    if items:
-                        p_map = {p.get('id'): p for p in data.get('papers', []) if isinstance(p, dict) and p.get('id')}
-                        for p in items:
-                            if isinstance(p, dict) and p.get('id'):
-                                pid = p.get('id')
-                                cur = p_map.get(pid)
-                                if cur:
-                                    cur.update(p)
-                                else:
-                                    p_map[pid] = p
+                    if items is not None:
+                        p_map = {p.get('id'): p for p in items if isinstance(p, dict) and p.get('id')}
+                        PROTECTED_IDS = ['asg-1789408695574', 'asg-1789409044746']
+                        for p in data.get('papers', []):
+                            if p.get('id') in PROTECTED_IDS and p.get('id') not in p_map:
+                                p_map[p.get('id')] = p
                         data['papers'] = list(p_map.values())
+                        data['assignments'] = list(p_map.values())
                         _collection_last_synced[key] = now
                         updated = True
         except Exception:
@@ -1189,7 +1186,7 @@ def load_backend_data(refresh_collections=None):
                         cur_data = json.load(f)
                     
                     import urllib.request
-                    keys_to_fetch = ['users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions']
+                    keys_to_fetch = ['users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'papers', 'assignments']
                     
                     for key in keys_to_fetch:
                         try:
@@ -1280,6 +1277,16 @@ def load_backend_data(refresh_collections=None):
                                             if isinstance(q, dict) and q.get('id'):
                                                 q_map[q['id']] = q
                                         cur_data['questions'] = list(q_map.values())
+                                elif key in ['papers', 'assignments']:
+                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                                    if items is not None:
+                                        p_map = {p.get('id'): p for p in items if isinstance(p, dict) and p.get('id')}
+                                        PROTECTED_IDS = ['asg-1789408695574', 'asg-1789409044746']
+                                        for p in cur_data.get('papers', []):
+                                            if p.get('id') in PROTECTED_IDS and p.get('id') not in p_map:
+                                                p_map[p.get('id')] = p
+                                        cur_data['papers'] = list(p_map.values())
+                                        cur_data['assignments'] = list(p_map.values())
                         except Exception as err:
                             print(f"[COLD_START] Failed to fetch {key} from Firebase: {err}", flush=True)
 

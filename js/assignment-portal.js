@@ -483,7 +483,6 @@ class AssignmentPortal {
     if (!subjectContainer && !levelContainer) return;
 
     const allAssignments = window.store.getAssignments();
-    const subjects = window.store.getSubjects();
     const user = window.auth ? window.auth.getCurrentUser() : null;
     const isStaff = user && (user.role === 'admin' || user.role === 'teacher');
     const curEntitlements = window.store && user ? window.store.getUserEntitlements(user.id) : null;
@@ -503,7 +502,32 @@ class AssignmentPortal {
       return (tierLevels[curUserTier] ?? 0) >= (tierLevels[reqTier] ?? 0);
     });
 
-    const bmCount = user && window.store && window.store.getBookmarks ? window.store.getBookmarks(user.id).filter(b => b.itemType === 'paper' || visibleAssignments.some(a => a.id === b.itemId)).length : 0;
+    // Filter assignments by active exam level
+    let levelAssignments = visibleAssignments;
+    if (this.selectedLevel && this.selectedLevel !== 'all') {
+      const targetLvl = this.selectedLevel.toUpperCase();
+      levelAssignments = visibleAssignments.filter(a => {
+        const aLvl = (a.examLevel || 'CA Foundation').toUpperCase();
+        if (targetLvl.includes('FOUNDATION')) return aLvl.includes('FOUNDATION');
+        if (targetLvl.includes('INTER')) return aLvl.includes('INTER');
+        if (targetLvl.includes('FINAL')) return aLvl.includes('FINAL');
+        return aLvl === targetLvl;
+      });
+    }
+
+    // Get ONLY valid descriptive subjects for the selected exam level
+    // Test Papers section is for descriptive papers {PDF} only - exclude Quantitative Aptitude and Business Economics
+    const descriptiveSubjects = window.store.getDescriptiveSubjectsByLevel(this.selectedLevel || 'all');
+
+    // Auto-reset selectedSubject to 'all' if it is not valid for the current level's descriptive subjects
+    if (this.selectedSubject && this.selectedSubject !== 'all') {
+      const isValid = descriptiveSubjects.some(s => s.id === this.selectedSubject || s.name === this.selectedSubject);
+      if (!isValid) {
+        this.selectedSubject = 'all';
+      }
+    }
+
+    const bmCount = user && window.store && window.store.getBookmarks ? window.store.getBookmarks(user.id).filter(b => b.itemType === 'paper' || levelAssignments.some(a => a.id === b.itemId)).length : 0;
     const examLevels = ['all', 'CA Foundation', 'CA Intermediate', 'CA Final'];
 
     if (levelContainer) {
@@ -536,7 +560,7 @@ class AssignmentPortal {
           }"
         >
           <span>All Test Papers</span>
-          <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono ${this.selectedSubject === 'all' && !this.filterBookmarkedOnly ? 'bg-blue-700/90 text-white' : 'bg-slate-100 text-slate-600'}">${visibleAssignments.length}</span>
+          <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono ${this.selectedSubject === 'all' && !this.filterBookmarkedOnly ? 'bg-blue-700/90 text-white' : 'bg-slate-100 text-slate-600'}">${levelAssignments.length}</span>
         </button>
 
         <!-- Bookmarked Filter Button -->
@@ -554,8 +578,8 @@ class AssignmentPortal {
           <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono ${this.filterBookmarkedOnly ? 'bg-amber-700 text-white' : 'bg-amber-100 text-amber-800'}">${bmCount}</span>
         </button>
 
-        ${subjects.map(s => {
-          const count = visibleAssignments.filter(a => a.subjectId === s.id || a.subject === s.name).length;
+        ${descriptiveSubjects.map(s => {
+          const count = levelAssignments.filter(a => a.subjectId === s.id || a.subject === s.name).length;
           const isActive = this.selectedSubject === s.id && !this.filterBookmarkedOnly;
           return `
             <button 
@@ -581,6 +605,10 @@ class AssignmentPortal {
   filterLevel(lvl) {
     this.selectedLevel = lvl;
     this.currentPage = 1;
+    const allowed = window.store.getDescriptiveSubjectsByLevel(lvl || 'all');
+    if (this.selectedSubject !== 'all' && !allowed.some(s => s.id === this.selectedSubject || s.name === this.selectedSubject)) {
+      this.selectedSubject = 'all';
+    }
     this.renderSubjectFilters();
     this.render();
   }
