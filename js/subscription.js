@@ -111,8 +111,9 @@ class SubscriptionManager {
                 window.store.saveSubscriptions(subs);
               }
             }
-            if (data.paymentHistory) {
-              window.store.savePaymentSessions(data.paymentHistory);
+            if (Array.isArray(data.paymentHistory)) {
+              const otherSessions = (window.store.getPaymentSessions() || []).filter(s => s.userId !== user.id && (!user.email || s.userEmail !== user.email));
+              window.store.savePaymentSessions([...data.paymentHistory, ...otherSessions]);
             }
           }
           if (window.studentDashboard && typeof window.studentDashboard.renderPassBadge === 'function') {
@@ -1488,14 +1489,11 @@ class SubscriptionManager {
       if (resp.ok) {
         const data = await resp.json();
         if (data.success && Array.isArray(data.sessions)) {
-          if (data.sessions.length > 0 || localFallback.length === 0) {
-            sessions = data.sessions;
-            this._historySessions = sessions;
-            if (window.store) {
-              window.store.savePaymentSessions(sessions);
-            }
-          } else {
-            sessions = localFallback;
+          sessions = data.sessions;
+          this._historySessions = sessions;
+          if (window.store) {
+            const otherSessions = (window.store.getPaymentSessions() || []).filter(s => s.userId !== user.id && (!user.email || s.userEmail !== user.email));
+            window.store.savePaymentSessions([...sessions, ...otherSessions]);
           }
         }
       }

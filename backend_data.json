@@ -8513,137 +8513,6 @@
     }
   ],
   "subscriptions": {
-    "usr-student-1": {
-      "id": "sub_usr-student-1_1789365023",
-      "userId": "usr-student-1",
-      "planId": "core_monthly",
-      "planName": "Core Pass (Monthly)",
-      "planTier": "core",
-      "isTrial": false,
-      "status": "active",
-      "startedAt": "2026-09-14T05:50:23.044434+00:00",
-      "expiresAt": "2026-12-13T05:02:12.645715+00:00",
-      "purchasedAmount": 49,
-      "paymentSessionId": "psess_1789365022808_d62b5ecd",
-      "utr": "UTR1789365022835",
-      "history": [
-        {
-          "action": "payment_approved",
-          "adminId": "usr-admin-1",
-          "adminName": "Administrator",
-          "details": "Approved payment of \u20b99 for \u20b99 Elite 10-Day Trial",
-          "paymentSessionId": "psess_1789311613843_ba9f8799",
-          "timestamp": "2026-09-13T15:00:14.126228+00:00"
-        },
-        {
-          "action": "admin_extended",
-          "adminId": "usr-admin-1",
-          "details": "Extended by 15 days to 2026-10-08T15:00:14.126228+00:00",
-          "timestamp": "2026-09-13T15:00:14.446401+00:00"
-        },
-        {
-          "action": "admin_granted",
-          "adminId": "usr-admin-1",
-          "adminName": "Administrator",
-          "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass",
-          "timestamp": "2026-09-13T16:55:48.999248+00:00"
-        },
-        {
-          "action": "admin_extended",
-          "adminId": "usr-admin-1",
-          "details": "Extended by 15 days to 2026-10-28T16:55:48.999248+00:00",
-          "timestamp": "2026-09-13T16:55:49.249701+00:00"
-        },
-        {
-          "action": "admin_granted",
-          "adminId": "usr-admin-1",
-          "adminName": "Administrator",
-          "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass",
-          "timestamp": "2026-09-13T16:58:33.827106+00:00"
-        },
-        {
-          "action": "admin_extended",
-          "adminId": "usr-admin-1",
-          "details": "Extended by 15 days to 2026-10-28T16:58:33.827106+00:00",
-          "timestamp": "2026-09-13T16:58:34.121234+00:00"
-        },
-        {
-          "action": "admin_granted",
-          "adminId": "usr-admin-1",
-          "adminName": "Administrator",
-          "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass",
-          "timestamp": "2026-09-13T18:09:43.741015+00:00"
-        },
-        {
-          "action": "admin_extended",
-          "adminId": "usr-admin-1",
-          "details": "Extended by 15 days to 2026-10-28T18:09:43.741015+00:00",
-          "timestamp": "2026-09-13T18:09:43.973177+00:00"
-        },
-        {
-          "action": "payment_approved",
-          "adminId": "usr-admin-1",
-          "adminName": "Administrator",
-          "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement",
-          "paymentSessionId": "psess_1789329331602_7514d33f",
-          "timestamp": "2026-09-13T19:55:31.817879+00:00"
-        },
-        {
-          "action": "payment_approved",
-          "adminId": "usr-admin-1",
-          "adminName": "Administrator",
-          "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement",
-          "paymentSessionId": "psess_1789329430713_813c0084",
-          "timestamp": "2026-09-13T19:57:10.912598+00:00"
-        },
-        {
-          "action": "payment_approved",
-          "adminId": "usr-admin-1",
-          "adminName": "Administrator",
-          "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement",
-          "paymentSessionId": "psess_1789332293228_9383fd01",
-          "timestamp": "2026-09-13T20:44:53.433883+00:00"
-        },
-        {
-          "action": "payment_approved",
-          "adminId": "usr-admin-1",
-          "adminName": "Administrator",
-          "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement",
-          "paymentSessionId": "psess_1789358777046_ac05c30e",
-          "timestamp": "2026-09-14T04:06:17.382598+00:00"
-        },
-        {
-          "action": "admin_cancelled",
-          "adminId": "usr-admin-1",
-          "details": "Admin cancelled subscription. Reason: s",
-          "timestamp": "2026-09-14T04:16:31.751971+00:00"
-        },
-        {
-          "action": "payment_approved",
-          "adminId": "usr-admin-1",
-          "adminName": "Administrator",
-          "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement",
-          "paymentSessionId": "psess_1789362132429_97215630",
-          "timestamp": "2026-09-14T05:02:12.645715+00:00"
-        },
-        {
-          "action": "payment_approved",
-          "adminId": "usr-admin-1",
-          "adminName": "Administrator",
-          "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement",
-          "paymentSessionId": "psess_1789362302799_951b167c",
-          "timestamp": "2026-09-14T05:05:02.998772+00:00"
-        },
-        {
-          "action": "payment_approved",
-          "paymentSessionId": "psess_1789365022808_d62b5ecd",
-          "adminId": "usr-admin-1",
-          "adminName": "Administrator",
-          "timestamp": "2026-09-14T05:50:23.044434+00:00",
-          "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement"
-        }
-      ]
-    },
     "usr-student-2": {
       "expiresAt": "2026-12-12T16:58:28.208211+00:00",
       "history": [
@@ -8790,6 +8659,149 @@
     }
   },
   "admin_audit_logs": [
+    {
+      "id": "audit_1789365821229_68d9cd",
+      "adminId": "usr-admin-1",
+      "adminName": "Administrator",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "action": "DELETE_SUBSCRIPTION",
+      "targetId": "usr-student-1",
+      "target": "usr-student-1",
+      "details": "Admin deleted subscription record for user usr-student-1",
+      "oldValue": {
+        "id": "sub_usr-student-1_1789365023",
+        "userId": "usr-student-1",
+        "planId": "core_monthly",
+        "planName": "Core Pass (Monthly)",
+        "planTier": "core",
+        "isTrial": false,
+        "status": "active",
+        "startedAt": "2026-09-14T05:50:23.044434+00:00",
+        "expiresAt": "2026-12-13T05:02:12.645715+00:00",
+        "purchasedAmount": 49,
+        "paymentSessionId": "psess_1789365022808_d62b5ecd",
+        "utr": "UTR1789365022835",
+        "history": [
+          {
+            "action": "payment_approved",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "details": "Approved payment of \u20b99 for \u20b99 Elite 10-Day Trial",
+            "paymentSessionId": "psess_1789311613843_ba9f8799",
+            "timestamp": "2026-09-13T15:00:14.126228+00:00"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "details": "Extended by 15 days to 2026-10-08T15:00:14.126228+00:00",
+            "timestamp": "2026-09-13T15:00:14.446401+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass",
+            "timestamp": "2026-09-13T16:55:48.999248+00:00"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "details": "Extended by 15 days to 2026-10-28T16:55:48.999248+00:00",
+            "timestamp": "2026-09-13T16:55:49.249701+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass",
+            "timestamp": "2026-09-13T16:58:33.827106+00:00"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "details": "Extended by 15 days to 2026-10-28T16:58:33.827106+00:00",
+            "timestamp": "2026-09-13T16:58:34.121234+00:00"
+          },
+          {
+            "action": "admin_granted",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "details": "Admin granted Plus Pass (Monthly) (30 days). Reason: Test grant for Plus Pass",
+            "timestamp": "2026-09-13T18:09:43.741015+00:00"
+          },
+          {
+            "action": "admin_extended",
+            "adminId": "usr-admin-1",
+            "details": "Extended by 15 days to 2026-10-28T18:09:43.741015+00:00",
+            "timestamp": "2026-09-13T18:09:43.973177+00:00"
+          },
+          {
+            "action": "payment_approved",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement",
+            "paymentSessionId": "psess_1789329331602_7514d33f",
+            "timestamp": "2026-09-13T19:55:31.817879+00:00"
+          },
+          {
+            "action": "payment_approved",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement",
+            "paymentSessionId": "psess_1789329430713_813c0084",
+            "timestamp": "2026-09-13T19:57:10.912598+00:00"
+          },
+          {
+            "action": "payment_approved",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement",
+            "paymentSessionId": "psess_1789332293228_9383fd01",
+            "timestamp": "2026-09-13T20:44:53.433883+00:00"
+          },
+          {
+            "action": "payment_approved",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement",
+            "paymentSessionId": "psess_1789358777046_ac05c30e",
+            "timestamp": "2026-09-14T04:06:17.382598+00:00"
+          },
+          {
+            "action": "admin_cancelled",
+            "adminId": "usr-admin-1",
+            "details": "Admin cancelled subscription. Reason: s",
+            "timestamp": "2026-09-14T04:16:31.751971+00:00"
+          },
+          {
+            "action": "payment_approved",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement",
+            "paymentSessionId": "psess_1789362132429_97215630",
+            "timestamp": "2026-09-14T05:02:12.645715+00:00"
+          },
+          {
+            "action": "payment_approved",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement",
+            "paymentSessionId": "psess_1789362302799_951b167c",
+            "timestamp": "2026-09-14T05:05:02.998772+00:00"
+          },
+          {
+            "action": "payment_approved",
+            "paymentSessionId": "psess_1789365022808_d62b5ecd",
+            "adminId": "usr-admin-1",
+            "adminName": "Administrator",
+            "timestamp": "2026-09-14T05:50:23.044434+00:00",
+            "details": "Approved payment of \u20b949 for Core Pass (Monthly) with note: Verified with Institutional HDFC Bank Statement"
+          }
+        ]
+      },
+      "newValue": null,
+      "timestamp": "2026-09-14T06:03:41.229374+00:00"
+    },
     {
       "id": "audit_1789365023254_c77dad",
       "adminId": "usr-admin-1",
