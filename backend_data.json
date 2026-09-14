@@ -7176,7 +7176,7 @@
         "needsReupload": false
       },
       "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%20EduTech%20LLP%26cu=INR",
-      "status": "pending",
+      "status": "expired",
       "createdAt": "2026-09-14T06:11:37.415701+00:00",
       "expiresAt": "2026-09-14T06:21:37.415701+00:00",
       "utr": null,
@@ -7184,7 +7184,7 @@
       "submittedAt": null,
       "verifiedAt": null,
       "verifiedBy": null,
-      "rejectionReason": null
+      "rejectionReason": "Payment session timed out (5 minutes)."
     },
     {
       "paymentSessionId": "psess_1789366228826_2c3e5d04",
@@ -7248,7 +7248,7 @@
         "needsReupload": false
       },
       "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%20EduTech%20LLP%26cu=INR",
-      "status": "pending",
+      "status": "expired",
       "createdAt": "2026-09-14T06:10:28.427185+00:00",
       "expiresAt": "2026-09-14T06:20:28.427185+00:00",
       "utr": null,
@@ -7256,7 +7256,7 @@
       "submittedAt": null,
       "verifiedAt": null,
       "verifiedBy": null,
-      "rejectionReason": null
+      "rejectionReason": "Payment session timed out (5 minutes)."
     },
     {
       "paymentSessionId": "psess_1789366208561_b2e37e06",
@@ -7320,7 +7320,7 @@
         "needsReupload": false
       },
       "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%20EduTech%20LLP%26cu=INR",
-      "status": "pending",
+      "status": "expired",
       "createdAt": "2026-09-14T06:10:08.160355+00:00",
       "expiresAt": "2026-09-14T06:20:08.160355+00:00",
       "utr": null,
@@ -7328,7 +7328,7 @@
       "submittedAt": null,
       "verifiedAt": null,
       "verifiedBy": null,
-      "rejectionReason": null
+      "rejectionReason": "Payment session timed out (5 minutes)."
     },
     {
       "paymentSessionId": "psess_1789366177709_0584307a",
@@ -7390,7 +7390,7 @@
         "needsReupload": false
       },
       "qrData": "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%20EduTech%20LLP%26cu=INR",
-      "status": "pending",
+      "status": "expired",
       "createdAt": "2026-09-14T06:09:37.317568+00:00",
       "expiresAt": "2026-09-14T06:19:37.317568+00:00",
       "utr": null,
@@ -7398,7 +7398,7 @@
       "submittedAt": null,
       "verifiedAt": null,
       "verifiedBy": null,
-      "rejectionReason": null
+      "rejectionReason": "Payment session timed out (5 minutes)."
     },
     {
       "paymentSessionId": "psess_1789366101212_dc72bee8",
@@ -7425,7 +7425,7 @@
         "needsReupload": false
       },
       "qrData": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-      "status": "pending",
+      "status": "expired",
       "createdAt": "2026-09-14T06:08:21.212137+00:00",
       "expiresAt": "2026-09-14T06:18:21.212137+00:00",
       "utr": null,
@@ -7433,7 +7433,7 @@
       "submittedAt": null,
       "verifiedAt": null,
       "verifiedBy": null,
-      "rejectionReason": null
+      "rejectionReason": "Payment session timed out (5 minutes)."
     },
     {
       "paymentSessionId": "psess_1789365022808_d62b5ecd",
