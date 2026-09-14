@@ -742,24 +742,56 @@ class SubscriptionManager {
   }
 
   handleScreenshotSelect(event) {
-    const file = event.target.files[0];
+    const file = event.target.files && event.target.files[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      window.app.showToast('Screenshot image must be under 5MB.', 'error');
+    if (file.size > 10 * 1024 * 1024) {
+      window.app.showToast('Screenshot image must be under 10MB.', 'error');
       event.target.value = '';
       return;
     }
 
     const reader = new FileReader();
     reader.onload = (e) => {
-      this.selectedScreenshotBase64 = e.target.result;
-      const previewImg = document.getElementById('screenshot-preview-img');
-      const container = document.getElementById('screenshot-preview-container');
-      if (previewImg && container) {
-        previewImg.src = e.target.result;
-        container.classList.remove('hidden');
-      }
+      const origDataUrl = e.target.result;
+      const img = new Image();
+      img.onload = () => {
+        const MAX_DIM = 1000;
+        let w = img.width;
+        let h = img.height;
+        if (w > MAX_DIM || h > MAX_DIM) {
+          const ratio = Math.min(MAX_DIM / w, MAX_DIM / h);
+          w = Math.round(w * ratio);
+          h = Math.round(h * ratio);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, w, h);
+
+        const compressedB64 = canvas.toDataURL('image/jpeg', 0.82);
+        this.selectedScreenshotBase64 = compressedB64;
+
+        const previewImg = document.getElementById('screenshot-preview-img');
+        const container = document.getElementById('screenshot-preview-container');
+        if (previewImg && container) {
+          previewImg.src = compressedB64;
+          container.classList.remove('hidden');
+        }
+      };
+      img.onerror = () => {
+        this.selectedScreenshotBase64 = origDataUrl;
+        const previewImg = document.getElementById('screenshot-preview-img');
+        const container = document.getElementById('screenshot-preview-container');
+        if (previewImg && container) {
+          previewImg.src = origDataUrl;
+          container.classList.remove('hidden');
+        }
+      };
+      img.src = origDataUrl;
     };
     reader.readAsDataURL(file);
   }
@@ -911,13 +943,22 @@ class SubscriptionManager {
     try {
       const user = window.auth ? window.auth.getCurrentUser() : null;
 
-      // 2. Authoritative parallel fetch: public plans catalog + user subscription
-      try {
-        const plansPromise = this.fetchPlans(true);
-        const subPromise = user ? this.syncMySubscription() : Promise.resolve(null);
-        await Promise.all([plansPromise, subPromise]);
-      } catch (e) {
-        console.warn('[SubscriptionManager] Parallel sync warning:', e);
+      // 2. Authoritative parallel fetch: only block if plans catalog is not yet loaded
+      const existingPlans = this.getPlans();
+      const hasLoadedPlans = existingPlans && Object.keys(existingPlans).length > 0;
+
+      if (!hasLoadedPlans) {
+        try {
+          const plansPromise = this.fetchPlans(true);
+          const subPromise = user ? this.syncMySubscription() : Promise.resolve(null);
+          await Promise.all([plansPromise, subPromise]);
+        } catch (e) {
+          console.warn('[SubscriptionManager] Parallel sync warning:', e);
+        }
+      } else if (!this._lastPassesFetchTime || (Date.now() - this._lastPassesFetchTime > 30000)) {
+        // Non-blocking background revalidation to keep data fresh without delaying tab switcher
+        this._lastPassesFetchTime = Date.now();
+        Promise.all([this.fetchPlans(true), user ? this.syncMySubscription() : Promise.resolve(null)]).catch(() => {});
       }
 
       // 3. Obtain fresh authoritative plans catalog from DB/backend
@@ -1265,7 +1306,7 @@ class SubscriptionManager {
           <div class="inline-flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200 shadow-2xs mt-2">
             ${availableCycles.map(cycleId => {
               const isSelected = activeCycle === cycleId;
-              const label = cycleId === 'monthly' ? 'Monthly Pass (30 Days)' : (cycleId === '4_months' ? '4-Month Exam Pass' : `${cycleId} Pass`);
+              const label = cycleId === 'monthly' ? 'Monthly Pass (30 Days)' : (cycleId === '4_months' ? '4-Month Pass' : `${cycleId} Pass`);
               const badge = cycleId === '4_months' ? '<span class="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full bg-rose-600 text-white">Save 25%</span>' : '';
               return `
                 <button 
@@ -1438,6 +1479,7 @@ class SubscriptionManager {
     }
 
     let sessions = [];
+    const localFallback = window.store ? (window.store.getPaymentSessions(user.id) || []) : [];
     try {
       const token = user.token || user.id;
       const resp = await fetch(`/api/subscriptions/history?_t=${Date.now()}`, {
@@ -1446,19 +1488,24 @@ class SubscriptionManager {
       if (resp.ok) {
         const data = await resp.json();
         if (data.success && Array.isArray(data.sessions)) {
-          sessions = data.sessions;
-          this._historySessions = sessions;
-          if (window.store) {
-            window.store.savePaymentSessions(sessions);
+          if (data.sessions.length > 0 || localFallback.length === 0) {
+            sessions = data.sessions;
+            this._historySessions = sessions;
+            if (window.store) {
+              window.store.savePaymentSessions(sessions);
+            }
+          } else {
+            sessions = localFallback;
           }
         }
       }
     } catch (e) {
       console.warn('[SubscriptionManager] History fetch failed, fallback to local store:', e);
+      sessions = localFallback;
     }
 
     if (!sessions || sessions.length === 0) {
-      sessions = this._historySessions || (window.store ? (window.store.getPaymentSessions(user.id) || []) : []);
+      sessions = this._historySessions || localFallback;
     }
 
     this._historyStatusFilter = this._historyStatusFilter || 'all';

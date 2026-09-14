@@ -1054,6 +1054,7 @@
               <option value="suspend">Suspend Subscription (Freeze Access)</option>
               <option value="reactivate">Reactivate Suspended Subscription</option>
               <option value="cancel">Cancel & Revoke Pass Immediately</option>
+              <option value="delete" class="text-rose-700 font-bold">Delete Subscription Record (Hard Reset)</option>
             </select>
           </div>
 
@@ -1159,6 +1160,12 @@
       reason: reason
     };
 
+    if (action === 'delete') {
+      if (!confirm('Are you sure you want to permanently delete this student subscription record? This will revoke their active pass and revert them to free tier.')) {
+        return;
+      }
+    }
+
     if (action === 'extend' || action === 'shorten') {
       const days = parseInt(document.getElementById('admin-sub-days-select').value, 10);
       payload.extensionDays = days;
@@ -1195,7 +1202,11 @@
       window.app.showToast(data.message || 'Subscription successfully updated!', 'success');
       window.app.closeModal('admin-generic-modal');
 
-      if (data.subscription && window.store) {
+      if (action === 'delete') {
+        if (window.store && typeof window.store.deleteSubscription === 'function') {
+          window.store.deleteSubscription(studentId);
+        }
+      } else if (data.subscription && window.store) {
         window.store.saveSubscription(data.subscription);
       }
 
@@ -2161,11 +2172,21 @@
 
   // --- ZOOMABLE / ROTATABLE SCREENSHOT MODAL ---
 
-  AdminDashboard.prototype.openScreenshotModal = function(imgSrc, title) {
+  AdminDashboard.prototype.openScreenshotModal = function(imgSrc, title, session) {
     this._screenshotScale = 1.0;
     this._screenshotRotate = 0;
     const modalContent = document.getElementById('admin-generic-modal-content');
     if (!modalContent) return;
+
+    let cleanSrc = (imgSrc || (session && (session.screenshot || session.proofUrl)) || '').trim();
+    if (cleanSrc && !cleanSrc.startsWith('data:') && !cleanSrc.startsWith('http') && !cleanSrc.startsWith('/')) {
+      if (cleanSrc.startsWith('iVBORw0KGgo')) {
+        cleanSrc = 'data:image/png;base64,' + cleanSrc;
+      } else {
+        cleanSrc = 'data:image/jpeg;base64,' + cleanSrc;
+      }
+    }
+    const hasImage = Boolean(cleanSrc);
 
     modalContent.innerHTML = `
       <div class="p-5 space-y-4">
@@ -2200,27 +2221,31 @@
 
         <!-- Viewport -->
         <div class="relative max-h-[65vh] overflow-auto rounded-xl border border-slate-200 bg-slate-100/70 flex items-center justify-center p-4 min-h-[320px]">
-          <div id="proof-loading-indicator" class="flex flex-col items-center justify-center p-6 text-slate-500">
+          <div id="proof-loading-indicator" class="${hasImage ? 'flex' : 'hidden'} flex-col items-center justify-center p-6 text-slate-500">
             <i data-lucide="loader-2" class="w-8 h-8 animate-spin text-rose-600 mb-2"></i>
             <p class="text-xs font-bold">Loading payment receipt...</p>
           </div>
-          <div id="proof-error-indicator" class="hidden flex-col items-center justify-center p-6 text-rose-600 text-center">
+          <div id="proof-error-indicator" class="${hasImage ? 'hidden' : 'flex'} flex-col items-center justify-center p-6 text-rose-600 text-center">
             <i data-lucide="alert-circle" class="w-8 h-8 mx-auto mb-2 text-rose-500"></i>
-            <p class="text-xs font-bold">Unable to load receipt image</p>
-            <p class="text-[11px] text-slate-500 mt-1">Image data may be missing, expired or corrupt.</p>
+            <p class="text-xs font-bold">No receipt image attached</p>
+            <p class="text-[11px] text-slate-500 mt-1">The student submitted payment without attaching an image proof or the image is unavailable.</p>
           </div>
-          <img id="screenshot-modal-image" src="${imgSrc}" alt="Payment Proof" 
-            onload="document.getElementById('proof-loading-indicator')?.classList.add('hidden'); this.classList.remove('hidden');" 
-            onerror="document.getElementById('proof-loading-indicator')?.classList.add('hidden'); document.getElementById('proof-error-indicator')?.classList.remove('hidden');" 
-            class="hidden max-w-full max-h-[60vh] object-contain transition-transform duration-150 ease-out shadow-md origin-center rounded-lg" 
-            style="transform: scale(1) rotate(0deg);" 
-          />
+          ${hasImage ? `
+            <img id="screenshot-modal-image" src="${cleanSrc}" alt="Payment Proof" 
+              onload="document.getElementById('proof-loading-indicator')?.classList.add('hidden'); this.classList.remove('hidden');" 
+              onerror="document.getElementById('proof-loading-indicator')?.classList.add('hidden'); document.getElementById('proof-error-indicator')?.classList.remove('hidden');" 
+              class="hidden max-w-full max-h-[60vh] object-contain transition-transform duration-150 ease-out shadow-md origin-center rounded-lg" 
+              style="transform: scale(1) rotate(0deg);" 
+            />
+          ` : ''}
         </div>
 
         <div class="flex items-center justify-between pt-2 border-t border-slate-100">
-          <a href="${imgSrc}" download="payment_proof_${Date.now()}.png" class="text-xs font-bold text-rose-700 hover:text-rose-800 flex items-center gap-1">
-            <i data-lucide="download" class="w-4 h-4"></i> Download Original
-          </a>
+          ${hasImage ? `
+            <a href="${cleanSrc}" download="payment_proof_${Date.now()}.png" class="text-xs font-bold text-rose-700 hover:text-rose-800 flex items-center gap-1">
+              <i data-lucide="download" class="w-4 h-4"></i> Download Original
+            </a>
+          ` : '<span class="text-xs text-slate-400 font-medium">No image to download</span>'}
           <button onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg cursor-pointer">
             Close
           </button>
@@ -2329,14 +2354,23 @@
         <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
           ${channels.map(ch => {
             const qrSrc = ch.qrCodeUrl || ch.qrData || `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent('upi://pay?pa=' + ch.upiId + '&pn=' + encodeURIComponent(ch.payeeName || 'ExcellenceCA'))}`;
+            const tierMap = {
+              'all': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-purple-100 text-purple-800 border border-purple-200">PASS: ALL</span>',
+              'trial': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-100 text-blue-800 border border-blue-200">PASS: TRIAL</span>',
+              'core': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-200">PASS: CORE</span>',
+              'plus': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-indigo-100 text-indigo-800 border border-indigo-200">PASS: PLUS</span>',
+              'elite': '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-200">PASS: ELITE</span>'
+            };
+            const tierBadge = tierMap[(ch.subscriptionTier || 'all').toLowerCase()] || `<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-purple-100 text-purple-800 border border-purple-200">PASS: ${(ch.subscriptionTier || 'ALL').toUpperCase()}</span>`;
 
             return `
               <div class="bg-white border ${ch.isPrimary ? 'border-rose-400 ring-2 ring-rose-200' : 'border-slate-200'} rounded-2xl p-5 shadow-xs flex flex-col justify-between space-y-4">
                 <div class="flex items-start justify-between gap-3">
                   <div class="space-y-2 flex-1">
-                    <div class="flex items-center gap-2 mb-1">
+                    <div class="flex items-center gap-2 mb-1 flex-wrap">
                       <span class="text-base font-bold text-slate-900">${ch.title || ch.name || 'UPI Channel'}</span>
                       ${ch.isPrimary ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-rose-100 text-rose-800 border border-rose-200">PRIMARY</span>' : ''}
+                      ${tierBadge}
                       ${ch.isActive ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">ACTIVE</span>' : '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">INACTIVE</span>'}
                       ${ch.needsReupload ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1"><i data-lucide="alert-triangle" class="w-3 h-3 text-amber-600"></i> RE-UPLOAD QR</span>' : ''}
                     </div>
@@ -2493,6 +2527,18 @@
               placeholder="e.g. ExcellenceCA EduTech LLP" 
               class="w-full px-3.5 py-2.5 text-xs font-medium border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white" 
             />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Target Subscription / Pass Tier Mapping</label>
+            <select id="admin-channel-tier" class="w-full px-3.5 py-2.5 text-xs font-bold border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 bg-white">
+              <option value="all" ${(channel && (channel.subscriptionTier === 'all' || !channel.subscriptionTier)) ? 'selected' : ''}>All Passes (Universal / Fallback)</option>
+              <option value="trial" ${channel && channel.subscriptionTier === 'trial' ? 'selected' : ''}>Trial Pass Only</option>
+              <option value="core" ${channel && channel.subscriptionTier === 'core' ? 'selected' : ''}>Core Pass Only</option>
+              <option value="plus" ${channel && channel.subscriptionTier === 'plus' ? 'selected' : ''}>Plus Pass Only</option>
+              <option value="elite" ${channel && channel.subscriptionTier === 'elite' ? 'selected' : ''}>Elite Pass Only</option>
+            </select>
+            <p class="text-[10px] text-slate-400 mt-1">Directs checkout for students buying this specific pass tier to this UPI/QR channel.</p>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2700,6 +2746,7 @@
     const amountLimit = parseFloat(document.getElementById('admin-channel-limit')?.value) || 0;
     const isActive = document.getElementById('admin-channel-active').checked;
     const isPrimary = document.getElementById('admin-channel-primary').checked;
+    const subscriptionTier = (document.getElementById('admin-channel-tier')?.value || 'all').trim();
 
     const submitBtn = document.getElementById('admin-save-channel-btn');
     if (submitBtn) {
@@ -2738,6 +2785,7 @@
         title: title,
         upiId: upiId,
         payeeName: payeeName,
+        subscriptionTier: subscriptionTier,
         bankAccountNumber: bankAccountNumber,
         bankIfsc: bankIfsc,
         bankAccountHolder: bankAccountHolder,

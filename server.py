@@ -798,8 +798,99 @@ def check_tier_access(user_tier, required_tier):
     return u_level >= r_level
 
 _backend_data_lock = threading.RLock()
+_collection_last_synced = {}
 
-def load_backend_data():
+def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
+    """
+    Safely synchronizes dynamic collections from Firebase RTDB to prevent stale container state.
+    Uses throttling (min_interval) to avoid redundant round-trips while guaranteeing fresh data.
+    """
+    if not data or not isinstance(data, dict):
+        return data
+
+    now = time.time()
+    all_keys = ['subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs']
+    target_keys = collections if collections else all_keys
+
+    keys_to_fetch = [k for k in target_keys if (now - _collection_last_synced.get(k, 0)) >= min_interval]
+    if not keys_to_fetch:
+        return data
+
+    import urllib.request
+    updated = False
+    for key in keys_to_fetch:
+        try:
+            req = urllib.request.Request(f"{FIREBASE_RTDB_URL}/{key}.json")
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
+                raw_bytes = resp.read()
+                if not raw_bytes:
+                    continue
+                cloud_data = json.loads(raw_bytes.decode('utf-8'))
+                if cloud_data is None:
+                    continue
+
+                if key in ['subscriptions', 'subscription_plans']:
+                    if isinstance(cloud_data, dict):
+                        data.setdefault(key, {}).update(cloud_data)
+                        _collection_last_synced[key] = now
+                        updated = True
+                elif key == 'payment_sessions':
+                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                    if items:
+                        s_map = {s.get('paymentSessionId') or s.get('id'): s for s in data.get('payment_sessions', []) if isinstance(s, dict) and (s.get('paymentSessionId') or s.get('id'))}
+                        for s in items:
+                            if isinstance(s, dict):
+                                sid = s.get('paymentSessionId') or s.get('id')
+                                if sid:
+                                    s_map[sid] = s
+                        data['payment_sessions'] = list(s_map.values())
+                        _collection_last_synced[key] = now
+                        updated = True
+                elif key == 'payment_channels':
+                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                    if items:
+                        c_map = {c.get('id'): c for c in data.get('payment_channels', []) if isinstance(c, dict) and c.get('id')}
+                        for c in items:
+                            if isinstance(c, dict) and c.get('id'):
+                                if 'subscriptionTier' not in c:
+                                    c['subscriptionTier'] = 'all'
+                                c_map[c['id']] = c
+                        data['payment_channels'] = list(c_map.values())
+                        _collection_last_synced[key] = now
+                        updated = True
+                elif key == 'notifications':
+                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                    if items:
+                        n_map = {n.get('id'): n for n in data.get('notifications', []) if isinstance(n, dict) and n.get('id')}
+                        for n in items:
+                            if isinstance(n, dict) and n.get('id'):
+                                n_map[n['id']] = n
+                        data['notifications'] = list(n_map.values())
+                        _collection_last_synced[key] = now
+                        updated = True
+                elif key == 'admin_audit_logs':
+                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                    if items:
+                        l_map = {l.get('id'): l for l in data.get('admin_audit_logs', []) if isinstance(l, dict) and l.get('id')}
+                        for l in items:
+                            if isinstance(l, dict) and l.get('id'):
+                                l_map[l['id']] = l
+                        data['admin_audit_logs'] = list(l_map.values())
+                        _collection_last_synced[key] = now
+                        updated = True
+        except Exception:
+            pass
+
+    if updated and os.path.exists(DATA_STORE_FILE):
+        try:
+            with open(DATA_STORE_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+        except Exception:
+            pass
+
+    return data
+
+def load_backend_data(refresh_collections=None):
     with _backend_data_lock:
         if IS_SERVERLESS and not os.path.exists(DATA_STORE_FILE):
             bundled_seed = os.path.join(BASE_DIR, 'backend_data.json')
@@ -920,6 +1011,13 @@ def load_backend_data():
                     sync_historical_xp(d)
                 except Exception as xp_err:
                     print(f"[SYNC_XP_WARNING] {xp_err}", flush=True)
+
+                if IS_SERVERLESS and refresh_collections:
+                    try:
+                        sync_collections_from_firebase(d, collections=refresh_collections, min_interval=5.0)
+                    except Exception:
+                        pass
+
                 return d
             else:
                 print(f"[DATA_STORE_ERROR] Failed to read {DATA_STORE_FILE} after retries. Preserving existing file contents.", flush=True)
@@ -1306,6 +1404,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(status_code)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(payload)))
+        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
         self._send_cors_headers()
         self.end_headers()
         self.wfile.write(payload)
@@ -1507,7 +1608,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
         # 2. Active Payment Channels (for student checkout)
         if path in ('/api/payments/channels', '/api/admin/payment-channels'):
-            data = load_backend_data()
+            data = load_backend_data(refresh_collections=['payment_channels'])
             channels = subscription_manager.get_payment_channels(data)
             save_backend_data(data)
             self.send_json(200, {'success': True, 'channels': channels})
@@ -1520,7 +1621,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not user:
                 self.send_json(401, {'success': False, 'error': 'Authentication required to view subscription details.', 'code': 401})
                 return
-            data = load_backend_data()
+            data = load_backend_data(refresh_collections=['subscriptions'])
             sub = subscription_manager.get_user_subscription(user['id'], data, sync_to_firebase)
             entitlements = subscription_manager.get_user_entitlements(user['id'], data, sync_to_firebase)
             user_sessions = [s for s in data.get('payment_sessions', []) if s.get('userId') == user['id']]
@@ -1539,7 +1640,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not user:
                 self.send_json(401, {'success': False, 'error': 'Authentication required.', 'code': 401})
                 return
-            data = load_backend_data()
+            data = load_backend_data(refresh_collections=['payment_sessions'])
             user_sessions = [s for s in data.get('payment_sessions', []) if s.get('userId') == user['id'] or (user.get('email') and s.get('userEmail') == user.get('email'))]
             self.send_json(200, {
                 'success': True,
@@ -1556,7 +1657,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not admin_u or admin_u.get('role') != 'admin':
                 self.send_json(403, {'success': False, 'error': 'Administrator authorization required.', 'code': 403})
                 return
-            data = load_backend_data()
+            data = load_backend_data(refresh_collections=['subscriptions'])
             subscriptions = data.get('subscriptions', {})
             users_dict = data.get('users', {})
             enriched = []
@@ -1603,7 +1704,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not admin_u or admin_u.get('role') != 'admin':
                 self.send_json(403, {'success': False, 'error': 'Administrator authorization required.', 'code': 403})
                 return
-            data = load_backend_data()
+            data = load_backend_data(refresh_collections=['payment_sessions'])
             sessions = data.get('payment_sessions', [])
             status_filter = query.get('status', [None])[0]
             if status_filter and status_filter != 'all':

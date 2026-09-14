@@ -3185,6 +3185,15 @@ class AppStore {
     }
   }
 
+  deleteSubscription(userId) {
+    if (!userId) return;
+    const subs = this.getSubscriptions();
+    if (subs[userId]) {
+      delete subs[userId];
+      this.saveSubscriptions(subs);
+    }
+  }
+
   // --- PAYMENT SESSIONS ---
 
   getPaymentSessions(userId = null) {

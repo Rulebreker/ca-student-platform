@@ -367,6 +367,12 @@ class FirebaseSyncManager {
       const val = snap.val();
       if (val && window.store) {
         window.store.saveSubscriptionPlans(val);
+        if (window.subscriptionManager) {
+          window.subscriptionManager._cachedPlans = val;
+          if (window.location.hash === '#passes' && typeof window.subscriptionManager.renderPassesPage === 'function') {
+            window.subscriptionManager.renderPassesPage(false);
+          }
+        }
         if (window.adminDashboard && window.adminDashboard.currentTab === 'plans-config') {
           window.adminDashboard.renderPlanConfig();
         }

@@ -283,6 +283,7 @@ DEFAULT_PAYMENT_CHANNELS = [
         'payeeName': 'ExcellenceCA EduTech LLP',
         'qrCodeUrl': 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR',
         'qrData': 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR',
+        'subscriptionTier': 'all',
         'isPrimary': True,
         'isActive': True,
         'order': 1
@@ -295,6 +296,7 @@ DEFAULT_PAYMENT_CHANNELS = [
         'payeeName': 'ExcellenceCA EduTech LLP',
         'qrCodeUrl': 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@icici%26pn=ExcellenceCA%26cu=INR',
         'qrData': 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@icici%26pn=ExcellenceCA%26cu=INR',
+        'subscriptionTier': 'all',
         'isPrimary': False,
         'isActive': True,
         'order': 2
@@ -306,6 +308,9 @@ def get_payment_channels(data):
     if not channels or not isinstance(channels, list):
         data['payment_channels'] = [dict(c) for c in DEFAULT_PAYMENT_CHANNELS]
         return data['payment_channels']
+    for c in channels:
+        if isinstance(c, dict) and 'subscriptionTier' not in c:
+            c['subscriptionTier'] = 'all'
     return channels
 
 def get_all_plans(data):
@@ -518,22 +523,46 @@ def create_payment_session(user, plan_id, data, sync_fn=None):
 
     channels = get_payment_channels(data)
     active_channels = [c for c in channels if c.get('isActive', True)]
-    if not active_channels:
+
+    plan_tier = str(plan.get('tier', '')).strip().lower()
+    clean_plan_id = str(plan_id).strip().lower()
+
+    # Priority 1: Channel specifically assigned to this exact plan_id or plan tier
+    specific_channels = [
+        c for c in active_channels 
+        if str(c.get('subscriptionTier', '')).strip().lower() in (clean_plan_id, plan_tier)
+    ]
+    # Priority 2: Universal channels assigned to 'all' or with no tier specified
+    universal_channels = [
+        c for c in active_channels 
+        if str(c.get('subscriptionTier', 'all')).strip().lower() in ('all', '', 'none')
+    ]
+
+    candidate_channels = specific_channels if specific_channels else universal_channels
+    if not candidate_channels:
+        candidate_channels = active_channels
+
+    if not candidate_channels:
         selected_channel = {
             'id': 'default-primary',
             'name': 'Primary UPI',
+            'title': 'Primary UPI',
             'upiId': 'excellenceca@okhdfcbank',
-            'qrCodeUrl': 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR'
+            'qrCodeUrl': 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa=excellenceca@okhdfcbank%26pn=ExcellenceCA%26cu=INR',
+            'subscriptionTier': 'all'
         }
     else:
-        primary = next((c for c in active_channels if c.get('isPrimary')), None)
-        selected_channel = primary if primary else active_channels[0]
+        primary = next((c for c in candidate_channels if c.get('isPrimary')), None)
+        selected_channel = primary if primary else candidate_channels[0]
 
     channel_snapshot = {
         'id': selected_channel.get('id'),
-        'name': selected_channel.get('name'),
+        'name': selected_channel.get('name') or selected_channel.get('title', 'Primary UPI'),
+        'title': selected_channel.get('title') or selected_channel.get('name', 'Primary UPI'),
         'upiId': selected_channel.get('upiId'),
-        'qrCodeUrl': selected_channel.get('qrCodeUrl')
+        'qrCodeUrl': selected_channel.get('qrCodeUrl'),
+        'subscriptionTier': selected_channel.get('subscriptionTier', 'all'),
+        'needsReupload': bool(selected_channel.get('needsReupload', False))
     }
 
     now = datetime.now(timezone.utc)
@@ -554,6 +583,7 @@ def create_payment_session(user, plan_id, data, sync_fn=None):
         'amount': plan['price'],
         'currency': plan.get('currency', 'INR'),
         'durationDays': plan.get('durationDays', 30),
+        'channelId': channel_snapshot.get('id'),
         'channelSnapshot': channel_snapshot,
         'qrData': channel_snapshot.get('qrCodeUrl') or f"upi://pay?pa={channel_snapshot.get('upiId')}&pn={channel_snapshot.get('name') or 'ExcellenceCA'}&am={plan['price']}&cu=INR",
         'status': 'pending',
@@ -961,8 +991,8 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
             sync_fn(f"subscriptions/{user_id}", existing)
         return True, existing
 
-    elif action == 'set_custom_expiry':
-        custom_expiry = params.get('customExpiry')
+    elif action in ('set_custom_expiry', 'custom_expiry'):
+        custom_expiry = params.get('customExpiry') or params.get('expiryDate')
         if not custom_expiry:
             return False, "Custom expiry date required."
         try:
@@ -994,7 +1024,7 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
         except Exception as e:
             return False, f"Invalid custom expiry format: {str(e)}"
 
-    elif action == 'change_plan':
+    elif action in ('change_plan', 'modify', 'update'):
         plan_id = params.get('planId')
         plan = get_plan_by_id(plan_id, data)
         if not plan:
@@ -1105,6 +1135,13 @@ def manage_subscription(admin_user, user_id, action, params, data, sync_fn=None)
             sync_fn(f"subscriptions/{user_id}", existing)
         return True, existing
 
+    elif action == 'delete':
+        deleted_sub = subscriptions.pop(user_id, None)
+        if sync_fn:
+            sync_fn(f"subscriptions/{user_id}", None, method='DELETE')
+        log_audit_action(admin_user, 'DELETE_SUBSCRIPTION', user_id, old_sub_copy, None, details=f"Admin deleted subscription record for user {user_id}", data=data, sync_fn=sync_fn)
+        return True, {'userId': user_id, 'status': 'deleted', 'planName': 'Free Tier', 'planTier': 'free'}
+
     return False, f"Unknown action: {action}"
 
 def manage_payment_channel(admin_user, action, params, data, sync_fn=None):
@@ -1118,6 +1155,7 @@ def manage_payment_channel(admin_user, action, params, data, sync_fn=None):
         name = (params.get('name') or params.get('title') or '').strip()
         upi_id = (params.get('upiId') or '').strip()
         payee_name = (params.get('payeeName') or params.get('accountHolderName') or 'ExcellenceCA').strip()
+        sub_tier = (params.get('subscriptionTier') or params.get('planTier') or 'all').strip().lower()
         if not name or not upi_id:
             return False, "Channel Name and UPI ID are required."
         qr_url = params.get('qrCodeUrl') or f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa={upi_id}%26pn={urllib.parse.quote(payee_name)}%26cu=INR"
@@ -1133,6 +1171,7 @@ def manage_payment_channel(admin_user, action, params, data, sync_fn=None):
             'upiId': upi_id,
             'payeeName': payee_name,
             'qrCodeUrl': qr_url,
+            'subscriptionTier': sub_tier,
             'bankAccountNumber': (params.get('bankAccountNumber') or params.get('accountNumber') or '').strip(),
             'bankIfsc': (params.get('bankIfsc') or params.get('ifsc') or '').strip(),
             'bankAccountHolder': (params.get('bankAccountHolder') or params.get('accountHolderName') or payee_name).strip(),
@@ -1145,7 +1184,7 @@ def manage_payment_channel(admin_user, action, params, data, sync_fn=None):
             'createdAt': now_iso
         }
         channels.append(new_chan)
-        log_audit_action(admin_user, 'ADD_PAYMENT_CHANNEL', new_chan['id'], None, new_chan, details=f"Added channel: {name} ({upi_id})", data=data, sync_fn=sync_fn)
+        log_audit_action(admin_user, 'ADD_PAYMENT_CHANNEL', new_chan['id'], None, new_chan, details=f"Added channel: {name} ({upi_id}) [Tier: {sub_tier}]", data=data, sync_fn=sync_fn)
         if sync_fn:
             sync_fn(f"payment_channels/{new_chan['id']}", new_chan)
         return True, new_chan
@@ -1169,6 +1208,8 @@ def manage_payment_channel(admin_user, action, params, data, sync_fn=None):
                 pn = target.get('payeeName', 'ExcellenceCA')
                 target['qrCodeUrl'] = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa={target['upiId']}%26pn={urllib.parse.quote(pn)}%26cu=INR"
         if params.get('qrCodeUrl'): target['qrCodeUrl'] = params['qrCodeUrl'].strip()
+        if 'subscriptionTier' in params or 'planTier' in params:
+            target['subscriptionTier'] = (params.get('subscriptionTier') or params.get('planTier') or 'all').strip().lower()
         if 'bankAccountNumber' in params or 'accountNumber' in params:
             target['bankAccountNumber'] = (params.get('bankAccountNumber') or params.get('accountNumber') or '').strip()
         if 'bankIfsc' in params or 'ifsc' in params:
@@ -1185,7 +1226,7 @@ def manage_payment_channel(admin_user, action, params, data, sync_fn=None):
             target['isActive'] = True
 
         target['updatedAt'] = now_iso
-        log_audit_action(admin_user, 'EDIT_PAYMENT_CHANNEL', channel_id, old_copy, target, details=f"Edited channel: {target['name']}", data=data, sync_fn=sync_fn)
+        log_audit_action(admin_user, 'EDIT_PAYMENT_CHANNEL', channel_id, old_copy, target, details=f"Edited channel: {target['name']} [Tier: {target.get('subscriptionTier', 'all')}]", data=data, sync_fn=sync_fn)
         if sync_fn:
             sync_fn(f"payment_channels/{channel_id}", target)
         return True, target
