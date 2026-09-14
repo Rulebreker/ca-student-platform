@@ -4487,6 +4487,19 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         self.send_json(400, {'error': 'Missing testId for question', 'code': 400})
                         return
 
+                    # Deduplicate questions in memory by ID to prevent duplicate records
+                    seen_q_ids = set()
+                    deduped_questions = []
+                    for q in questions:
+                        qid = q.get('id')
+                        if qid and qid not in seen_q_ids:
+                            seen_q_ids.add(qid)
+                            deduped_questions.append(q)
+                        elif not qid:
+                            deduped_questions.append(q)
+                    data['questions'] = deduped_questions
+                    questions = deduped_questions
+
                     # Normalize requiredTier
                     tier = str(req_data.get('requiredTier', 'free')).lower().strip()
                     if tier not in ['free', 'core', 'plus', 'elite']:
@@ -4504,12 +4517,32 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                             questions.append(req_data)
                             target_q = req_data
                     else:
-                        req_data['id'] = f'q-{int(datetime.now().timestamp() * 1000)}'
-                        req_data['createdAt'] = now_iso
-                        test_qs = [q for q in questions if q.get('testId') == test_id]
-                        req_data['number'] = len(test_qs) + 1
-                        questions.append(req_data)
-                        target_q = req_data
+                        # Idempotency check: check if an identical question was created for this test in the last 10 seconds
+                        recent_duplicate = None
+                        for q in reversed(questions):
+                            if (q.get('testId') == test_id and
+                                q.get('text') == req_data.get('text') and
+                                q.get('correctOption') == req_data.get('correctOption') and
+                                q.get('optionA') == req_data.get('optionA') and
+                                q.get('optionB') == req_data.get('optionB')):
+                                created_str = q.get('createdAt') or q.get('updatedAt')
+                                if created_str:
+                                    try:
+                                        created_dt = datetime.fromisoformat(created_str.replace('Z', '+00:00'))
+                                        if (datetime.now(timezone.utc) - created_dt).total_seconds() < 10:
+                                            recent_duplicate = q
+                                            break
+                                    except Exception:
+                                        pass
+                        if recent_duplicate:
+                            target_q = recent_duplicate
+                        else:
+                            req_data['id'] = f'q-{int(datetime.now().timestamp() * 1000)}'
+                            req_data['createdAt'] = now_iso
+                            test_qs = [q for q in questions if q.get('testId') == test_id]
+                            req_data['number'] = len(test_qs) + 1
+                            questions.append(req_data)
+                            target_q = req_data
 
                     # Maintain question count, strictly preserve admin-configured maximumMarks
                     test_questions = [q for q in questions if q.get('testId') == test_id]
@@ -4542,6 +4575,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(content_length)
                 req_data = json.loads(body.decode('utf-8'))
                 q_id = req_data.get('id')
+                if not q_id:
+                    self.send_json(400, {'error': 'Missing question id for deletion', 'code': 400})
+                    return
 
                 data = load_backend_data(refresh_collections=['tests', 'questions'])
                 orig = next((q for q in data.get('questions', []) if q.get('id') == q_id), None)

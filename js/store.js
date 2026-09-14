@@ -2637,30 +2637,71 @@ class AppStore {
 
   // Questions
   getQuestions() {
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS.QUESTIONS) || '[]');
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEYS.QUESTIONS) || '[]');
+    if (!Array.isArray(raw)) return [];
+    const seen = new Set();
+    const deduped = [];
+    let hasDuplicates = false;
+    for (const q of raw) {
+      if (q && q.id) {
+        if (!seen.has(q.id)) {
+          seen.add(q.id);
+          deduped.push(q);
+        } else {
+          hasDuplicates = true;
+        }
+      }
+    }
+    if (hasDuplicates) {
+      localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(deduped));
+    }
+    return deduped;
   }
   saveQuestions(questions) {
-    localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questions));
+    if (!Array.isArray(questions)) questions = [];
+    const seen = new Set();
+    const deduped = [];
+    for (const q of questions) {
+      if (q && q.id && !seen.has(q.id)) {
+        seen.add(q.id);
+        deduped.push(q);
+      }
+    }
+    localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(deduped));
   }
   getQuestionsByTestId(testId) {
     return this.getQuestions().filter(q => q.testId === testId).sort((a,b) => a.number - b.number);
   }
   addQuestion(question) {
+    if (!question || !question.id) return;
     const questions = this.getQuestions();
-    questions.push(question);
+    const existingIndex = questions.findIndex(q => q.id === question.id);
+    if (existingIndex >= 0) {
+      questions[existingIndex] = { ...questions[existingIndex], ...question };
+    } else {
+      questions.push(question);
+    }
     this.saveQuestions(questions);
     if (window.firebaseSync && typeof window.firebaseSync.saveQuestion === 'function') {
       window.firebaseSync.saveQuestion(question);
     }
   }
   updateQuestion(question) {
-    const questions = this.getQuestions().map(q => q.id === question.id ? question : q);
+    if (!question || !question.id) return;
+    const questions = this.getQuestions();
+    const existingIndex = questions.findIndex(q => q.id === question.id);
+    if (existingIndex >= 0) {
+      questions[existingIndex] = { ...questions[existingIndex], ...question };
+    } else {
+      questions.push(question);
+    }
     this.saveQuestions(questions);
     if (window.firebaseSync && typeof window.firebaseSync.saveQuestion === 'function') {
       window.firebaseSync.saveQuestion(question);
     }
   }
   deleteQuestion(id) {
+    if (!id) return;
     const questions = this.getQuestions().filter(q => q.id !== id);
     this.saveQuestions(questions);
     if (window.firebaseSync && typeof window.firebaseSync.deleteQuestion === 'function') {

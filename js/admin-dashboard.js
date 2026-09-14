@@ -4242,21 +4242,32 @@ This will remove the question paper, attached answer keys, and student submissio
   async saveQuestion(e, existingQId = '', explicitTestId = '') {
     e.preventDefault();
 
+    if (this._isSavingQuestion) {
+      console.warn('[saveQuestion] Save already in progress, ignoring duplicate call.');
+      return;
+    }
+    this._isSavingQuestion = true;
+
     const testId = explicitTestId || this.activeTestQuestionsId || (existingQId ? window.store.getQuestions().find(x => x.id === existingQId)?.testId : null);
     if (!testId) {
       window.app.showToast('Error: No active test selected. Please close and reopen the question builder.', 'error');
+      this._isSavingQuestion = false;
       return;
     }
 
     const submitBtn = e.target ? e.target.querySelector('[type="submit"]') : null;
     if (submitBtn) {
-      if (submitBtn.disabled) return;
+      if (submitBtn.disabled) {
+        this._isSavingQuestion = false;
+        return;
+      }
       submitBtn.disabled = true;
       submitBtn.innerHTML = '<span class="inline-flex items-center gap-1.5"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> ' + (existingQId ? 'Updating Question...' : 'Saving Question...') + '</span>';
       if (window.lucide) window.lucide.createIcons();
     }
 
     const enableSubmit = () => {
+      this._isSavingQuestion = false;
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.textContent = existingQId ? 'Update Question' : 'Save Question';
@@ -4367,7 +4378,10 @@ This will remove the question paper, attached answer keys, and student submissio
       const confirmedQ = resData.question || qPayload;
 
       // Update frontend state only after confirmed backend persistence
-      if (existingQId) {
+      const currentQuestions = window.store.getQuestions();
+      const alreadyInStore = currentQuestions.some(q => q.id === confirmedQ.id);
+
+      if (existingQId || alreadyInStore) {
         window.store.updateQuestion(confirmedQ);
       } else {
         window.store.addQuestion(confirmedQ);
@@ -4387,6 +4401,8 @@ This will remove the question paper, attached answer keys, and student submissio
       console.error('[saveQuestion] Network error during backend sync:', netErr);
       window.app.showToast('Network error: Unable to reach server. Question was not saved.', 'error');
       enableSubmit();
+    } finally {
+      this._isSavingQuestion = false;
     }
   }
 
@@ -4459,6 +4475,7 @@ This will remove the question paper, attached answer keys, and student submissio
   }
 
   async deleteQuestion(id) {
+    if (!id) return;
     if (!confirm('Delete this question permanently?')) return;
     const testId = this.activeTestQuestionsId;
     const user = window.auth.getCurrentUser();

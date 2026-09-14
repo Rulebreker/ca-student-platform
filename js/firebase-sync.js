@@ -705,21 +705,35 @@ class FirebaseSyncManager {
       const remoteIds = new Set(remoteQuestions.map(rq => rq && rq.id).filter(Boolean));
       let changed = false;
 
-      // 1. Remove any local questions that were deleted in Firebase
-      let filteredQs = localQs.filter(lq => remoteIds.has(lq.id));
-      if (filteredQs.length !== localQs.length) {
-        changed = true;
+      // Use Map keyed by ID to strictly enforce unique questions
+      const qMap = new Map();
+
+      // 1. Keep valid local questions that still exist in remote (or all local if remote is empty)
+      if (remoteQuestions.length > 0) {
+        localQs.forEach(lq => {
+          if (lq && lq.id && remoteIds.has(lq.id)) {
+            qMap.set(lq.id, lq);
+          }
+        });
+        if (qMap.size !== localQs.length) {
+          changed = true;
+        }
+      } else {
+        localQs.forEach(lq => {
+          if (lq && lq.id) {
+            qMap.set(lq.id, lq);
+          }
+        });
       }
 
       // 2. Add or update questions from remote
       remoteQuestions.forEach(rq => {
         if (!rq || !rq.id) return;
-        const idx = filteredQs.findIndex(lq => lq.id === rq.id);
-        if (idx === -1) {
-          filteredQs.push(rq);
+        if (!qMap.has(rq.id)) {
+          qMap.set(rq.id, rq);
           changed = true;
         } else {
-          const existing = filteredQs[idx];
+          const existing = qMap.get(rq.id);
           let qModified = false;
           Object.keys(rq).forEach(k => {
             if (JSON.stringify(existing[k]) !== JSON.stringify(rq[k])) {
@@ -732,13 +746,14 @@ class FirebaseSyncManager {
       });
 
       if (changed) {
-        window.store.saveQuestions(filteredQs);
+        const dedupedQs = Array.from(qMap.values());
+        window.store.saveQuestions(dedupedQs);
 
-        // If admin is currently in question builder list view (NOT editing a question form),
-        // refresh the question list. Guard against _isEditingQuestion to avoid disrupting the admin
-        // mid-edit (render-loop anti-pattern fix).
+        // If admin is currently in question builder list view (NOT editing or saving a question form),
+        // refresh the question list. Guard against _isEditingQuestion and _isSavingQuestion.
         if (window.adminDashboard && window.adminDashboard.activeTestQuestionsId
-            && !window.adminDashboard._isEditingQuestion) {
+            && !window.adminDashboard._isEditingQuestion
+            && !window.adminDashboard._isSavingQuestion) {
           window.adminDashboard.openQuestionBuilder(window.adminDashboard.activeTestQuestionsId);
         }
 
