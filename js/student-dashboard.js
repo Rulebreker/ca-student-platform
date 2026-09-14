@@ -67,8 +67,14 @@ class StudentDashboard {
     if (!container) return;
 
     const user = window.auth.getCurrentUser();
-    const tests = window.store.getTests().filter(t => t.isPublished);
-    const userAttempts = window.store.getAttemptsByUser(user.id);
+    const userTier = window.testEngine ? window.testEngine.getUserTier() : 'free';
+    const allTests = window.store.getTests().filter(t => t.isPublished || t.status === 'Published' || t.status === 'Live');
+    const tests = allTests.filter(t => {
+      if (window.testEngine) return window.testEngine.isTestVisibleForStudent(t, userTier);
+      if (t.hideFromNonEligible) return false;
+      return true;
+    });
+    const userAttempts = user ? window.store.getAttemptsByUser(user.id) : [];
 
     if (tests.length === 0) {
       container.innerHTML = `<p class="text-sm text-slate-500 py-4">No tests currently available.</p>`;
@@ -79,15 +85,23 @@ class StudentDashboard {
       const attemptsCount = userAttempts.filter(a => a.testId === test.id).length;
       const attemptsLeft = Math.max(0, (test.maxAttempts || 1) - attemptsCount);
       const subject = window.store.getSubjectById(test.subjectId);
-      const canTake = attemptsLeft > 0;
+      const isEligible = window.testEngine ? window.testEngine.isTestEligibleForStudent(test, userTier) : true;
+      const canTake = isEligible && attemptsLeft > 0;
 
       return `
-        <div class="bg-white border border-slate-200 rounded-xl p-5 hover:shadow-md transition-shadow flex flex-col justify-between">
+        <div class="bg-white border ${isEligible ? 'border-slate-200' : 'border-amber-200/90'} rounded-xl p-5 hover:shadow-md transition-shadow flex flex-col justify-between">
           <div>
             <div class="flex items-center justify-between gap-2 mb-2">
-              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
-                ${subject ? subject.name : 'General CA'}
-              </span>
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
+                  ${subject ? subject.name : 'General CA'}
+                </span>
+                ${!isEligible ? `
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                    <i data-lucide="lock" class="w-3 h-3 text-amber-700"></i> Locked
+                  </span>
+                ` : ''}
+              </div>
               <span class="text-xs text-slate-500 font-medium">
                 ${test.durationMinutes} mins • ${test.totalQuestions} MCQs
               </span>
@@ -97,20 +111,32 @@ class StudentDashboard {
           </div>
           
           <div class="pt-3 border-t border-slate-100 flex items-center justify-between">
-            <span class="text-xs ${attemptsLeft > 0 ? 'text-emerald-700 font-semibold' : 'text-slate-400'}">
-              ${attemptsLeft} of ${test.maxAttempts || 1} attempt(s) remaining
-            </span>
-            <button 
-              onclick="window.testEngine.showInstructionsModal('${test.id}')"
-              class="px-3.5 py-1.5 text-xs font-semibold rounded-lg ${
-                canTake 
-                  ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm' 
-                  : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-              } transition-colors"
-              ${!canTake ? 'disabled' : ''}
-            >
-              ${attemptsCount > 0 ? 'Re-take Test' : 'Take Test'}
-            </button>
+            ${isEligible ? `
+              <span class="text-xs ${attemptsLeft > 0 ? 'text-emerald-700 font-semibold' : 'text-slate-400'}">
+                ${attemptsLeft} of ${test.maxAttempts || 1} attempt(s) remaining
+              </span>
+              <button 
+                onclick="window.testEngine.showInstructionsModal('${test.id}')"
+                class="px-3.5 py-1.5 text-xs font-semibold rounded-lg ${
+                  canTake 
+                    ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm' 
+                    : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                } transition-colors cursor-pointer"
+                ${!canTake ? 'disabled' : ''}
+              >
+                ${attemptsCount > 0 ? 'Re-take Test' : 'Take Test'}
+              </button>
+            ` : `
+              <span class="text-xs text-amber-800 font-semibold flex items-center gap-1">
+                <i data-lucide="lock" class="w-3.5 h-3.5 text-amber-600"></i> Pass Required
+              </span>
+              <button 
+                onclick="window.testEngine.showUnlockModal('${test.id}')"
+                class="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-amber-500 hover:bg-amber-600 text-white shadow-xs transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                <i data-lucide="key" class="w-3.5 h-3.5"></i> Unlock Mock
+              </button>
+            `}
           </div>
         </div>
       `;

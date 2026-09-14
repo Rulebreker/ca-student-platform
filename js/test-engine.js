@@ -53,15 +53,108 @@ class TestEngine {
     this.renderCards();
   }
 
+  getUserTier() {
+    const curUser = window.auth ? window.auth.getCurrentUser() : null;
+    if (!curUser) return 'free';
+    if (curUser.role === 'admin' || curUser.role === 'teacher') return curUser.role;
+    if (window.store && typeof window.store.getUserEntitlements === 'function') {
+      const ent = window.store.getUserEntitlements(curUser.id);
+      if (ent && ent.isSubscribed && ent.tier) {
+        return ent.tier.toLowerCase();
+      }
+    }
+    if (window.store && typeof window.store.getUserSubscription === 'function') {
+      const sub = window.store.getUserSubscription(curUser.id);
+      const now = new Date();
+      if (sub && (sub.status === 'active' || sub.status === 'manually_granted') && (!sub.expiresAt || new Date(sub.expiresAt) > now)) {
+        let tier = (sub.planTier || 'core').toLowerCase();
+        if (sub.isTrial) tier = 'trial';
+        return tier;
+      }
+    }
+    return 'free';
+  }
+
+  isTestEligibleForStudent(test, userTier = null) {
+    if (!test) return false;
+    const tier = (userTier || this.getUserTier()).toLowerCase();
+    if (tier === 'admin' || tier === 'teacher') return true;
+
+    if (Array.isArray(test.allowedPlans) && test.allowedPlans.length > 0) {
+      const plans = test.allowedPlans.map(p => String(p).toLowerCase().trim());
+      if (plans.includes('all')) return true;
+      return plans.includes(tier);
+    }
+
+    const reqTier = String(test.requiredTier || test.tier || 'free').toLowerCase().trim();
+    if (!reqTier || reqTier === 'none' || reqTier === 'free' || reqTier === 'null') {
+      return true;
+    }
+    const tierRanks = { free: 0, none: 0, trial: 1, core: 2, plus: 3, elite: 4 };
+    const userRank = tierRanks[tier] || 0;
+    const reqRank = tierRanks[reqTier] || 0;
+    return userRank >= reqRank;
+  }
+
+  isTestVisibleForStudent(test, userTier = null) {
+    if (!test) return false;
+    const isPub = test.isPublished || test.status === 'Published' || test.status === 'Live';
+    const tier = (userTier || this.getUserTier()).toLowerCase();
+    const isStaff = tier === 'admin' || tier === 'teacher';
+    if (!isPub && !isStaff) return false;
+
+    // Eligible students can always see the test
+    if (this.isTestEligibleForStudent(test, tier)) {
+      return true;
+    }
+
+    // Non-eligible students:
+    // Case 2: If admin enabled "Hide from non-eligible students", hide completely
+    if (Boolean(test.hideFromNonEligible)) {
+      return false;
+    }
+
+    // Case 1: "Hide from non-eligible students" is OFF -> remain visible in locked state
+    return true;
+  }
+
+  formatRequiredPlans(allowedPlans, requiredTier = 'core') {
+    if (Array.isArray(allowedPlans) && allowedPlans.length > 0) {
+      const clean = allowedPlans.map(p => String(p).toLowerCase().trim()).filter(p => p !== 'free');
+      const planNames = {
+        'trial': 'Trial Pass (₹9)',
+        'core': 'Core Pass',
+        'plus': 'Plus Pass',
+        'elite': 'Elite Pass'
+      };
+      const names = clean.filter(p => planNames[p]).map(p => planNames[p]);
+      if (names.length === 1) return names[0];
+      if (names.length === 2) return `${names[0]} or ${names[1]}`;
+      if (names.length > 2) return `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+    }
+    const req = String(requiredTier || 'core').toLowerCase().trim();
+    if (req === 'trial') return 'Trial Pass';
+    if (req === 'core') return 'Core Pass or higher';
+    if (req === 'plus') return 'Plus Pass or higher';
+    if (req === 'elite') return 'Elite Pass';
+    return 'Subscription Pass';
+  }
+
   renderSubjectFilters() {
     const levelContainer = document.getElementById('test-level-pills');
     const subjectContainer = document.getElementById('test-subject-pills') || document.getElementById('test-subject-filters');
     if (!subjectContainer && !levelContainer) return;
 
+    const userTier = this.getUserTier();
+    // Unify visibility: Count exactly what is visible to the student
     const allPublishedTests = window.store.getTests().filter(t => t.isPublished || t.status === 'Published' || t.status === 'Live');
+    const allVisibleTests = allPublishedTests.filter(t => this.isTestVisibleForStudent(t, userTier));
     const subjects = window.store.getSubjects ? window.store.getSubjects() : [];
     const user = window.auth ? window.auth.getCurrentUser() : null;
-    const bookmarkedCount = user && window.store ? window.store.getBookmarks(user.id).filter(b => b.itemType === 'test' || !b.itemType).length : 0;
+    const visibleTestIds = new Set(allVisibleTests.map(t => t.id));
+    const bookmarkedCount = user && window.store 
+      ? window.store.getBookmarks(user.id).filter(b => (b.itemType === 'test' || !b.itemType) && visibleTestIds.has(b.itemId)).length 
+      : 0;
     const levels = ['all', 'CA Foundation', 'CA Intermediate', 'CA Final'];
 
     if (levelContainer) {
@@ -96,7 +189,7 @@ class TestEngine {
           }"
         >
           <span>All Tests</span>
-          <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono ${this.selectedSubject === 'all' && !this.filterBookmarkedOnly ? 'bg-blue-700/90 text-white' : 'bg-slate-100 text-slate-600'}">${allPublishedTests.length}</span>
+          <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono ${this.selectedSubject === 'all' && !this.filterBookmarkedOnly ? 'bg-blue-700/90 text-white' : 'bg-slate-100 text-slate-600'}">${allVisibleTests.length}</span>
         </button>
 
         <!-- Bookmarked Filter Pill -->
@@ -115,7 +208,7 @@ class TestEngine {
         </button>
 
         ${subjects.map(s => {
-          const count = allPublishedTests.filter(t => t.subjectId === s.id || t.subject === s.name).length;
+          const count = allVisibleTests.filter(t => t.subjectId === s.id || t.subject === s.name).length;
           const isActive = this.selectedSubject === s.id && !this.filterBookmarkedOnly;
           return `
             <button 
@@ -276,26 +369,9 @@ class TestEngine {
       });
     }
 
-    // 3b. Plan-based visibility filter
-    const curUser = window.auth ? window.auth.getCurrentUser() : null;
-    const isStaff = curUser && (curUser.role === 'admin' || curUser.role === 'teacher');
-    if (!isStaff) {
-      let userTier = 'free';
-      if (curUser && window.store) {
-        const sub = window.store.getUserSubscription ? window.store.getUserSubscription(curUser.id) : null;
-        const now = new Date();
-        if (sub && (sub.status === 'active' || sub.status === 'manually_granted') && (!sub.expiresAt || new Date(sub.expiresAt) > now)) {
-          userTier = (sub.planTier || 'core').toLowerCase();
-          if (sub.isTrial) userTier = 'trial';
-        }
-      }
-      list = list.filter(test => {
-        if (!test.allowedPlans || !Array.isArray(test.allowedPlans) || test.allowedPlans.length === 0) {
-          return true; // unrestricted / all plans
-        }
-        return test.allowedPlans.includes(userTier);
-      });
-    }
+    // 3b. Unified visibility filter (Case 1: visible in locked state; Case 2: hidden completely if ineligible)
+    const userTier = this.getUserTier();
+    list = list.filter(test => this.isTestVisibleForStudent(test, userTier));
 
     // 4. Sort
     if (this.sortBy === 'new') {
@@ -350,19 +426,22 @@ class TestEngine {
     const startIndex = (this.currentPage - 1) * this.pageSize;
     const pagedTests = filtered.slice(startIndex, startIndex + this.pageSize);
 
+    const userTier = this.getUserTier();
     const cardsHtml = pagedTests.map(test => {
+      const isEligible = this.isTestEligibleForStudent(test, userTier);
       const subject = window.store.getSubjectById(test.subjectId) || { name: test.subject || 'CA Practice' };
       const testAttempts = user ? userAttempts.filter(a => a.testId === test.id) : [];
       const attemptsUsed = testAttempts.length;
       const maxAttempts = test.maxAttempts || 1;
       const attemptsRemaining = Math.max(0, maxAttempts - attemptsUsed);
-      const canTake = attemptsRemaining > 0;
+      const canTake = isEligible && (attemptsRemaining > 0);
       const bestAttempt = testAttempts.length > 0 ? Math.max(...testAttempts.map(a => a.percentage)) : null;
       const isBm = user && window.store.isBookmarked ? window.store.isBookmarked(user.id, test.id) : false;
       const points = test.pointsPerCorrect || 10;
+      const requiredPlansText = this.formatRequiredPlans(test.allowedPlans, test.requiredTier);
 
       return `
-        <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between relative group">
+        <div class="bg-white border ${isEligible ? 'border-slate-200' : 'border-amber-200/90'} rounded-xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between relative group">
           <div>
             <div class="flex items-center justify-between gap-2 mb-3">
               <div class="flex items-center gap-1.5 flex-wrap">
@@ -372,6 +451,11 @@ class TestEngine {
                 <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
                   ${test.examLevel || 'CA Foundation'}
                 </span>
+                ${!isEligible ? `
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                    <i data-lucide="lock" class="w-3 h-3 text-amber-700"></i> Locked
+                  </span>
+                ` : ''}
               </div>
               
               <div class="flex items-center gap-1.5">
@@ -390,7 +474,14 @@ class TestEngine {
             </div>
 
             <h3 class="text-base font-bold text-slate-900 mb-2 leading-snug">${test.title}</h3>
-            <p class="text-xs text-slate-600 line-clamp-2 mb-4 leading-relaxed">${test.description}</p>
+            <p class="text-xs text-slate-600 line-clamp-2 mb-3 leading-relaxed">${test.description}</p>
+
+            ${!isEligible ? `
+              <div class="mb-3 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200/90 flex items-center gap-2 text-xs text-amber-900">
+                <i data-lucide="shield-alert" class="w-4 h-4 text-amber-600 shrink-0"></i>
+                <span class="font-medium">Requires ${requiredPlansText}</span>
+              </div>
+            ` : ''}
 
             <div class="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-lg text-xs mb-4">
               <div>
@@ -411,25 +502,41 @@ class TestEngine {
           <div>
             <div class="text-xs py-2 border-t border-slate-100 mb-3 space-y-1">
               <div class="flex items-center justify-between">
-                <span class="${canTake ? 'text-slate-600' : 'text-rose-600 font-semibold'}">
-                  ${canTake ? `You have <strong>${attemptsRemaining} of ${maxAttempts}</strong> attempt(s) remaining.` : '<strong class="text-rose-600">You have no attempts remaining.</strong>'}
-                </span>
+                ${isEligible ? `
+                  <span class="${canTake ? 'text-slate-600' : 'text-rose-600 font-semibold'}">
+                    ${canTake ? `You have <strong>${attemptsRemaining} of ${maxAttempts}</strong> attempt(s) remaining.` : '<strong class="text-rose-600">You have no attempts remaining.</strong>'}
+                  </span>
+                ` : `
+                  <span class="text-amber-800 font-semibold flex items-center gap-1.5">
+                    <i data-lucide="lock" class="w-3.5 h-3.5 text-amber-600"></i> Pass Required to Attempt
+                  </span>
+                `}
                 ${bestAttempt !== null ? `<span class="text-emerald-700 font-semibold text-[11px]">Best: ${Math.round(bestAttempt)}%</span>` : ''}
               </div>
             </div>
 
             <div class="flex items-center gap-2">
-              <button 
-                onclick="window.testEngine.showInstructionsModal('${test.id}')"
-                class="w-full py-2.5 text-xs font-bold rounded-lg ${
-                  canTake 
-                    ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm' 
-                    : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                } transition-colors cursor-pointer"
-                ${!canTake ? 'disabled' : ''}
-              >
-                ${attemptsUsed === 0 ? 'Start Mock Test' : (canTake ? 'Re-attempt Test' : 'Attempts Limit Reached')}
-              </button>
+              ${isEligible ? `
+                <button 
+                  onclick="window.testEngine.showInstructionsModal('${test.id}')"
+                  class="w-full py-2.5 text-xs font-bold rounded-lg ${
+                    canTake 
+                      ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm' 
+                      : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                  } transition-colors cursor-pointer"
+                  ${!canTake ? 'disabled' : ''}
+                >
+                  ${attemptsUsed === 0 ? 'Start Mock Test' : (canTake ? 'Re-attempt Test' : 'Attempts Limit Reached')}
+                </button>
+              ` : `
+                <button 
+                  type="button"
+                  onclick="window.testEngine.showUnlockModal('${test.id}')"
+                  class="w-full py-2.5 text-xs font-bold rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <i data-lucide="key" class="w-3.5 h-3.5"></i> Unlock this Mock
+                </button>
+              `}
             </div>
           </div>
         </div>
@@ -463,7 +570,7 @@ class TestEngine {
           </div>
           <div class="flex items-center gap-1.5">
             <button 
-              type="button"
+              type="button" 
               onclick="window.testEngine.goToPage(${this.currentPage - 1})"
               ${this.currentPage === 1 ? 'disabled' : ''}
               class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
@@ -472,7 +579,7 @@ class TestEngine {
             </button>
             ${pageBtns.join('')}
             <button 
-              type="button"
+              type="button" 
               onclick="window.testEngine.goToPage(${this.currentPage + 1})"
               ${this.currentPage === totalPages ? 'disabled' : ''}
               class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
@@ -488,6 +595,201 @@ class TestEngine {
     if (window.lucide) window.lucide.createIcons();
   }
 
+  showUnlockModal(testId) {
+    const test = window.store ? window.store.getTestById(testId) : null;
+    if (!test) return;
+
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    const userTier = this.getUserTier();
+    const allowedPlans = (Array.isArray(test.allowedPlans) && test.allowedPlans.length > 0)
+      ? test.allowedPlans.map(p => String(p).toLowerCase().trim())
+      : ['trial', 'core', 'plus', 'elite'];
+
+    let modal = document.getElementById('test-unlock-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'test-unlock-modal';
+      modal.className = 'modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-3 sm:p-4';
+      modal.innerHTML = `
+        <div class="relative w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
+          <div id="test-unlock-modal-content" class="overflow-y-auto p-5 sm:p-7 flex-1"></div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+
+    const content = document.getElementById('test-unlock-modal-content');
+    if (!content) return;
+
+    const subject = window.store.getSubjectById ? window.store.getSubjectById(test.subjectId) : null;
+    const subjectName = subject ? subject.name : (test.subject || 'CA Practice');
+    const reqText = this.formatRequiredPlans(test.allowedPlans, test.requiredTier);
+
+    // Build cards for eligible tiers
+    const planCards = [];
+
+    if (allowedPlans.includes('trial')) {
+      planCards.push(`
+        <div class="relative rounded-2xl border-2 border-amber-500/80 bg-gradient-to-b from-amber-50/50 to-white p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+          <div class="absolute -top-3 left-4 bg-amber-500 text-white font-bold text-[10px] px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow-xs">
+            Most Popular
+          </div>
+          <div>
+            <div class="flex items-baseline justify-between mt-1 mb-2">
+              <h4 class="font-bold text-slate-900 text-sm">₹9 Elite 10-Day Trial</h4>
+              <span class="text-base font-extrabold text-amber-600">₹9</span>
+            </div>
+            <p class="text-xs text-slate-600 mb-3">Instant full Elite access to this test, all questions, & grading for 10 days.</p>
+            <ul class="text-[11px] text-slate-500 space-y-1 mb-4">
+              <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> Unlocks this Mock Test immediately</li>
+              <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> 10 days of unlimited mock attempts</li>
+            </ul>
+          </div>
+          <button 
+            type="button"
+            onclick="window.app.closeModal('test-unlock-modal'); window.subscriptionManager.startCheckout('elite_trial')"
+            class="w-full py-2 px-3 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <i data-lucide="zap" class="w-3.5 h-3.5"></i> Unlock with ₹9 Trial
+          </button>
+        </div>
+      `);
+    }
+
+    if (allowedPlans.includes('elite')) {
+      planCards.push(`
+        <div class="relative rounded-2xl border border-purple-200 bg-gradient-to-b from-purple-50/40 to-white p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+          <div class="absolute -top-3 left-4 bg-purple-600 text-white font-bold text-[10px] px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow-xs">
+            All-Access VIP
+          </div>
+          <div>
+            <div class="flex items-baseline justify-between mt-1 mb-2">
+              <h4 class="font-bold text-slate-900 text-sm">Elite Pass (Monthly)</h4>
+              <span class="text-base font-extrabold text-purple-700">₹149<span class="text-xs font-normal text-slate-500">/mo</span></span>
+            </div>
+            <p class="text-xs text-slate-600 mb-3">Full access to all MCQs, test papers, 12h priority copy grading & mentorship.</p>
+            <ul class="text-[11px] text-slate-500 space-y-1 mb-4">
+              <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> Unlocks all current & future tests</li>
+              <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> +1,500 instant bonus XP points</li>
+            </ul>
+          </div>
+          <button 
+            type="button"
+            onclick="window.app.closeModal('test-unlock-modal'); window.subscriptionManager.startCheckout('elite_monthly')"
+            class="w-full py-2 px-3 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <i data-lucide="shield-check" class="w-3.5 h-3.5"></i> Get Elite Pass (₹149)
+          </button>
+        </div>
+      `);
+    }
+
+    if (allowedPlans.includes('plus')) {
+      planCards.push(`
+        <div class="relative rounded-2xl border border-indigo-200 bg-gradient-to-b from-indigo-50/40 to-white p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+          <div>
+            <div class="flex items-baseline justify-between mb-2">
+              <h4 class="font-bold text-slate-900 text-sm">Plus Pass (Monthly)</h4>
+              <span class="text-base font-extrabold text-indigo-700">₹99<span class="text-xs font-normal text-slate-500">/mo</span></span>
+            </div>
+            <p class="text-xs text-slate-600 mb-3">Access to premium MCQs, test papers, and 24h fast-track evaluation.</p>
+            <ul class="text-[11px] text-slate-500 space-y-1 mb-4">
+              <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> Full access to this Mock Test</li>
+              <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> +1,000 instant bonus XP points</li>
+            </ul>
+          </div>
+          <button 
+            type="button"
+            onclick="window.app.closeModal('test-unlock-modal'); window.subscriptionManager.startCheckout('plus_monthly')"
+            class="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <i data-lucide="shield" class="w-3.5 h-3.5"></i> Get Plus Pass (₹99)
+          </button>
+        </div>
+      `);
+    }
+
+    if (allowedPlans.includes('core')) {
+      planCards.push(`
+        <div class="relative rounded-2xl border border-blue-200 bg-gradient-to-b from-blue-50/40 to-white p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+          <div>
+            <div class="flex items-baseline justify-between mb-2">
+              <h4 class="font-bold text-slate-900 text-sm">Core Pass (Monthly)</h4>
+              <span class="text-base font-extrabold text-blue-700">₹49<span class="text-xs font-normal text-slate-500">/mo</span></span>
+            </div>
+            <p class="text-xs text-slate-600 mb-3">Access to all premium MCQ tests and standard 48h copy checking.</p>
+            <ul class="text-[11px] text-slate-500 space-y-1 mb-4">
+              <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> Full access to this Mock Test</li>
+              <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> +500 instant bonus XP points</li>
+            </ul>
+          </div>
+          <button 
+            type="button"
+            onclick="window.app.closeModal('test-unlock-modal'); window.subscriptionManager.startCheckout('core_monthly')"
+            class="w-full py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <i data-lucide="shield" class="w-3.5 h-3.5"></i> Get Core Pass (₹49)
+          </button>
+        </div>
+      `);
+    }
+
+    content.innerHTML = `
+      <div class="flex items-start justify-between pb-4 border-b border-slate-100">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 shrink-0">
+            <i data-lucide="lock" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Unlock Mock Test</h3>
+            <p class="text-xs text-slate-500">Select an eligible pass to attempt this test</p>
+          </div>
+        </div>
+        <button 
+          type="button" 
+          onclick="window.app.closeModal('test-unlock-modal')"
+          class="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+        >
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Test Info Banner -->
+      <div class="my-4 p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+        <div class="flex items-center gap-2 mb-1">
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+            ${subjectName}
+          </span>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+            Requires ${reqText}
+          </span>
+        </div>
+        <h4 class="text-sm font-bold text-slate-900">${test.title}</h4>
+        <p class="text-xs text-slate-500 mt-1">${test.durationMinutes} mins • ${test.totalQuestions} Questions • ${test.maximumMarks || 10} Marks</p>
+      </div>
+
+      <!-- Passes Grid -->
+      <div class="grid grid-cols-1 ${planCards.length > 1 ? 'sm:grid-cols-2' : ''} gap-3.5 mb-5">
+        ${planCards.join('')}
+      </div>
+
+      <!-- Footer action -->
+      <div class="pt-3 border-t border-slate-100 text-center flex items-center justify-between">
+        <span class="text-xs text-slate-500">Need multi-month or full bundles?</span>
+        <button 
+          type="button" 
+          onclick="window.app.closeModal('test-unlock-modal'); window.subscriptionManager.openPricingModal()"
+          class="text-xs font-bold text-blue-600 hover:text-blue-800 transition-colors cursor-pointer flex items-center gap-1"
+        >
+          View All Passes & Plans <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+        </button>
+      </div>
+    `;
+
+    window.app.openModal('test-unlock-modal');
+    if (window.lucide) window.lucide.createIcons();
+  }
+
   showInstructionsModal(testId) {
     const test = window.store.getTestById(testId);
     if (!test) return;
@@ -495,6 +797,11 @@ class TestEngine {
     const user = window.auth.getCurrentUser();
     if (!user) {
       window.app.showAuthModal('login');
+      return;
+    }
+
+    if (!this.isTestEligibleForStudent(test)) {
+      this.showUnlockModal(testId);
       return;
     }
 
@@ -552,33 +859,28 @@ class TestEngine {
           <div class="space-y-3 text-xs text-slate-700 leading-relaxed">
             <h4 class="font-bold text-slate-800 uppercase tracking-wider text-[11px]">Examination Rules & Guidelines:</h4>
             <ul class="list-disc pl-5 space-y-1.5 text-slate-600">
-              <li>The countdown timer starts immediately once you click <strong>Start Test</strong>.</li>
-              <li>Each correct answer awards <strong>+${test.marksPerCorrect} marks</strong>. Each wrong answer deducts <strong>${test.negativeMarksPerWrong} marks</strong>.</li>
-              <li>Unattempted questions carry zero penalty.</li>
-              <li>You can navigate questions using the <strong>Question Palette</strong> or Next/Previous buttons.</li>
-              <li>You may mark questions for review and return to them anytime before submission.</li>
-              <li>The test will <strong>automatically submit</strong> when the countdown timer reaches 00:00.</li>
-              <li>Ensure a stable internet connection. Correct answers and detailed solutions will be shown after submission.</li>
+              <li>This test contains multiple choice questions with single correct answer.</li>
+              <li>Timer will start immediately when you click <strong>Start Test Now</strong>.</li>
+              <li>You can navigate between questions using the question palette on the right.</li>
+              <li>Unanswered questions will not be penalized.</li>
+              <li>Each question carries positive marks for correct and negative deduction for wrong attempts.</li>
+              <li>Do not refresh or switch tabs during the test; your progress will be auto-saved locally.</li>
             </ul>
           </div>
 
-          <div class="bg-blue-50 border border-blue-200 p-3 rounded-lg text-xs text-blue-800 flex items-start gap-2">
-            <i data-lucide="info" class="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5"></i>
-            <div>
-              You have <strong>${attemptsLeft} of ${test.maxAttempts || 1}</strong> attempt(s) remaining for this examination.
-            </div>
-          </div>
-
-          <div class="flex items-center gap-2 pt-1">
-            <input type="checkbox" id="agree-test-rules" class="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer">
-            <label for="agree-test-rules" class="text-xs text-slate-700 font-medium cursor-pointer select-none">
-              I have read and understood all the test instructions and marking guidelines.
+          <!-- Rules Acceptance Checkbox -->
+          <div class="pt-2">
+            <label class="flex items-start gap-2.5 cursor-pointer select-none bg-blue-50/50 p-3 rounded-xl border border-blue-100 hover:bg-blue-50 transition-colors">
+              <input type="checkbox" id="agree-test-rules" class="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+              <span class="text-xs text-slate-700">
+                I have read and understood all the instructions above. I agree to abide by the examination rules.
+              </span>
             </label>
           </div>
         </div>
 
-        <!-- Sticky / Pinned Footer -->
-        <div class="flex-shrink-0 bg-slate-50 border-t border-slate-200 p-3 sm:p-4 flex items-center justify-end gap-3">
+        <!-- Fixed Footer -->
+        <div class="flex-shrink-0 bg-slate-50 border-t border-slate-200 p-4 sm:p-6 flex items-center justify-end gap-3">
           <button 
             onclick="window.app.closeModal('instructions-modal')"
             class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200/70 rounded-lg transition-colors"
@@ -613,6 +915,14 @@ class TestEngine {
 
     const test = window.store.getTestById(testId);
     if (!test) return;
+
+    if (!this.isPreview) {
+      if (!this.isTestEligibleForStudent(test)) {
+        window.app.closeModal('instructions-modal');
+        this.showUnlockModal(testId);
+        return;
+      }
+    }
 
     // Check attempt limits with backend if not preview
     if (!this.isPreview) {

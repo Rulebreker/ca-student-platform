@@ -901,6 +901,34 @@ def check_tier_access(user_tier, required_tier):
     r_level = TIER_LEVELS.get(req, 0)
     return u_level >= r_level
 
+def check_test_eligibility(user_tier, test):
+    u_tier = str(user_tier or 'free').strip().lower()
+    if u_tier in ('admin', 'teacher'):
+        return True
+    if not test:
+        return False
+    
+    allowed_plans = test.get('allowedPlans')
+    if isinstance(allowed_plans, list) and len(allowed_plans) > 0:
+        plans = [str(p).strip().lower() for p in allowed_plans]
+        if 'all' in plans:
+            return True
+        return u_tier in plans
+    
+    req_tier = str(test.get('requiredTier') or test.get('tier') or 'free').strip().lower()
+    if req_tier in ('none', 'null', '', 'free'):
+        return True
+    return check_tier_access(u_tier, req_tier)
+
+def check_test_visibility(user_tier, test):
+    if not test:
+        return False
+    if check_test_eligibility(user_tier, test):
+        return True
+    if bool(test.get('hideFromNonEligible', False)):
+        return False
+    return True
+
 def check_scheduled_mcq_tests(data, sync_fn=None):
     """
     Server-side background executor for scheduled MCQ tests.
@@ -940,8 +968,6 @@ def check_scheduled_mcq_tests(data, sync_fn=None):
                         sync_fn(f"tests/{test['id']}", test)
 
                     # Dispatch idempotent notifications to eligible students
-                    req_tier = str(test.get('requiredTier') or test.get('tier') or 'none').strip().lower()
-                    allowed_plans = test.get('allowedPlans') or ['free', 'trial', 'core', 'plus', 'elite']
                     raw_users = data.get('users', [])
                     user_list = list(raw_users.values()) if isinstance(raw_users, dict) else (raw_users if isinstance(raw_users, list) else [])
                     notifs = data.setdefault('notifications', {})
@@ -953,16 +979,7 @@ def check_scheduled_mcq_tests(data, sync_fn=None):
                     for u in user_list:
                         if isinstance(u, dict) and u.get('role') == 'student':
                             u_tier = get_user_tier(u.get('id'), data)
-                            eligible = False
-                            if req_tier in ('none', 'free', '', 'null'):
-                                eligible = True
-                            elif check_tier_access(u_tier, req_tier):
-                                eligible = True
-
-                            if allowed_plans and u_tier not in allowed_plans and 'all' not in allowed_plans:
-                                eligible = False
-
-                            if eligible:
+                            if check_test_eligibility(u_tier, test):
                                 notif_id = f"notif_mcq_live_{test['id']}_{u['id']}"
                                 if notif_id not in notifs:
                                     notif_obj = {
@@ -2272,16 +2289,23 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json(404, {'error': 'Test not found', 'code': 404})
                     return
                 # Check permissions
-                if not is_admin and not target_test.get('isPublished', True):
+                if not is_admin and not (target_test.get('isPublished', True) or target_test.get('status') in ('Published', 'Live')):
                     self.send_json(403, {'error': 'Test is currently in Draft mode.', 'code': 403})
                     return
 
-                test_req_tier = str(target_test.get('requiredTier') or target_test.get('tier') or 'free').lower()
-                if not is_admin and not check_tier_access(user_tier, test_req_tier):
+                # If student is ineligible and test is hidden, return 404 (zero trace)
+                if not is_admin and not check_test_visibility(user_tier, target_test):
+                    self.send_json(404, {'error': 'Test not found', 'code': 404})
+                    return
+
+                is_eligible = is_admin or check_test_eligibility(user_tier, target_test)
+                if not is_admin and not is_eligible:
+                    test_req_tier = str(target_test.get('requiredTier') or target_test.get('tier') or 'free').lower()
                     self.send_json(403, {
-                        'error': f'Access Denied: This test requires an active {test_req_tier.capitalize()} Pass or higher.',
+                        'error': 'Access Denied: You do not have an eligible subscription pass to attempt this test.',
                         'code': 403,
                         'requiredTier': test_req_tier,
+                        'allowedPlans': target_test.get('allowedPlans') or [test_req_tier],
                         'isLocked': True
                     })
                     return
@@ -2326,18 +2350,17 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 if is_admin:
                     self.send_json(200, {'tests': tests, 'userTier': 'admin'})
                 else:
-                    pub_tests = [t for t in tests if t.get('isPublished', True)]
+                    pub_tests = [t for t in tests if t.get('isPublished', True) or t.get('status') in ('Published', 'Live')]
                     enriched_tests = []
                     for t in pub_tests:
-                        req_tier = str(t.get('requiredTier') or t.get('tier') or 'free').lower()
-                        has_tier = check_tier_access(user_tier, req_tier)
-                        hide_non_eligible = bool(t.get('hideFromNonEligible', False))
-                        if not has_tier and hide_non_eligible:
+                        if not check_test_visibility(user_tier, t):
                             continue  # Hidden completely from non-eligible students
+                        is_eligible = check_test_eligibility(user_tier, t)
+                        req_tier = str(t.get('requiredTier') or t.get('tier') or 'free').lower()
                         t_copy = dict(t)
                         t_copy['requiredTier'] = req_tier
                         t_copy['tier'] = req_tier
-                        t_copy['isLocked'] = not has_tier
+                        t_copy['isLocked'] = not is_eligible
                         enriched_tests.append(t_copy)
                     self.send_json(200, {'tests': enriched_tests, 'userTier': user_tier})
                 return
@@ -4837,13 +4860,12 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 target = next((t for t in tests if t.get('id') == test_id), None)
                 if target:
                     user_tier = get_user_tier(user.get('id'), data)
-                    req_tier = str(target.get('requiredTier') or target.get('tier') or 'free').lower()
-                    if not check_tier_access(user_tier, req_tier):
+                    if not check_test_eligibility(user_tier, target):
                         self.send_json(403, {
-                            'error': f'Access Denied: This test requires an active {req_tier.capitalize()} Pass or higher.',
+                            'error': 'Access Denied: You do not have an eligible subscription pass to attempt this test.',
                             'code': 403,
                             'isLocked': True,
-                            'requiredTier': req_tier
+                            'allowedPlans': target.get('allowedPlans') or [target.get('requiredTier') or 'core']
                         })
                         return
                     entitlements = subscription_manager.get_user_entitlements(user['id'], data, sync_to_firebase)
@@ -4959,7 +4981,16 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     })
                     return
 
-                # Normal student submission: enforce attempt limits
+                # Normal student submission: enforce eligibility and attempt limits
+                user_tier = get_user_tier(user.get('id'), data)
+                if not check_test_eligibility(user_tier, test):
+                    self.send_json(403, {
+                        'error': 'Access Denied: You do not have an eligible subscription pass to attempt this test.',
+                        'code': 403,
+                        'isLocked': True
+                    })
+                    return
+
                 max_attempts = int(test.get('maxAttempts', 3))
                 attempts = data.get('test_attempts', [])
                 user_attempts = [a for a in attempts if a.get('testId') == test_id and a.get('userId') == user.get('id')]
