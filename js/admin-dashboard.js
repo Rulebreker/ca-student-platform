@@ -3062,6 +3062,7 @@ This will remove the question paper, attached answer keys, and student submissio
   }
 
   openTestModal(testId = null) {
+    this._isSavingTest = false;
     const isEdit = !!testId;
     const test = isEdit ? window.store.getTestById(testId) : null;
     const existingQs = isEdit ? window.store.getQuestionsByTestId(testId) : [];
@@ -3366,15 +3367,25 @@ This will remove the question paper, attached answer keys, and student submissio
   async saveTest(e, existingId = '') {
     e.preventDefault();
 
+    if (this._isSavingTest) {
+      console.warn('[saveTest] Save already in progress, ignoring duplicate call.');
+      return;
+    }
+    this._isSavingTest = true;
+
     const submitBtn = e.target ? e.target.querySelector('[type="submit"]') : null;
     if (submitBtn) {
-      if (submitBtn.disabled) return;
+      if (submitBtn.disabled) {
+        this._isSavingTest = false;
+        return;
+      }
       submitBtn.disabled = true;
       submitBtn.innerHTML = '<span class="inline-flex items-center gap-1.5"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> ' + (existingId ? 'Saving Changes...' : 'Creating Test...') + '</span>';
       if (window.lucide) window.lucide.createIcons();
     }
 
     const enableSubmit = () => {
+      this._isSavingTest = false;
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.textContent = existingId ? 'Save Changes' : 'Create Test & Proceed to Questions →';
@@ -3484,10 +3495,13 @@ This will remove the question paper, attached answer keys, and student submissio
       const confirmedTest = resData.test || testPayload;
 
       // Update store only on confirmed backend persistence
-      if (!existingId) {
-        window.store.addTest(confirmedTest);
-      } else {
+      const currentTests = window.store.getTests();
+      const alreadyInStore = currentTests.some(t => t.id === confirmedTest.id);
+
+      if (existingId || alreadyInStore) {
         window.store.updateTest(confirmedTest);
+      } else {
+        window.store.addTest(confirmedTest);
       }
 
       // Trigger notification ONLY to students subscribed to allowed plans
@@ -3540,6 +3554,8 @@ This will remove the question paper, attached answer keys, and student submissio
       console.error('[saveTest] Network error during save:', netErr);
       window.app.showToast('Network error: Unable to reach server. Test was not saved.', 'error');
       enableSubmit();
+    } finally {
+      this._isSavingTest = false;
     }
   }
 

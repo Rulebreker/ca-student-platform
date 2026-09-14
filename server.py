@@ -4307,7 +4307,18 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         return
 
                 data = load_backend_data(refresh_collections=['tests', 'questions'])
-                tests = data.get('tests', [])
+                raw_tests = data.get('tests', [])
+                seen_test_ids = set()
+                deduped_tests = []
+                for t in raw_tests:
+                    tid = t.get('id')
+                    if tid and tid not in seen_test_ids:
+                        seen_test_ids.add(tid)
+                        deduped_tests.append(t)
+                    elif not tid:
+                        deduped_tests.append(t)
+                data['tests'] = deduped_tests
+                tests = deduped_tests
                 test_id = test_data.get('id')
 
                 # Dynamic subject validation: support custom admin-created subjects
@@ -4341,11 +4352,35 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         }
                         test_data['subjectId'] = sub_id_map.get(test_data.get('subject'), 'sub-1')
 
-                if test_id:
+                now_utc = datetime.now(timezone.utc)
+                now_iso = now_utc.isoformat()
+
+                # Idempotency check: if an identical test was created within the last 10 seconds, reuse it
+                recent_duplicate = None
+                is_new_submission = not any(t.get('id') == test_id for t in tests)
+                if is_new_submission:
+                    for t in tests:
+                        if (t.get('title') == test_data.get('title') and
+                            (t.get('subjectId') == test_data.get('subjectId') or t.get('subject') == test_data.get('subject')) and
+                            (t.get('topic') == test_data.get('topic') or t.get('chapter') == test_data.get('chapter')) and
+                            t.get('durationMinutes') == test_data.get('durationMinutes')):
+                            created_str = t.get('createdAt') or t.get('updatedAt')
+                            if created_str:
+                                try:
+                                    c_dt = datetime.fromisoformat(created_str.replace('Z', '+00:00'))
+                                    if (now_utc - c_dt).total_seconds() < 10:
+                                        recent_duplicate = t
+                                        break
+                                except Exception:
+                                    pass
+
+                if recent_duplicate:
+                    test_data = recent_duplicate
+                elif test_id:
                     # Maintain question count and preserve admin-configured maximumMarks
                     test_qs = [q for q in data.get('questions', []) if q.get('testId') == test_id]
                     test_data['totalQuestions'] = len(test_qs)
-                    test_data['updatedAt'] = datetime.now(timezone.utc).isoformat()
+                    test_data['updatedAt'] = now_iso
                     idx = next((i for i, t in enumerate(tests) if t.get('id') == test_id), None)
                     if idx is not None:
                         if 'maximumMarks' in test_data and test_data['maximumMarks'] is not None:
@@ -4356,11 +4391,13 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         test_data = tests[idx]
                     else:
                         test_data['maximumMarks'] = float(test_data.get('maximumMarks', 10.0))
-                        tests.append(test_data)
+                        if not test_data.get('createdAt'):
+                            test_data['createdAt'] = now_iso
+                        tests.insert(0, test_data)
                 else:
-                    test_data['id'] = f'tst-{int(datetime.now().timestamp() * 1000)}'
-                    test_data['createdAt'] = datetime.now(timezone.utc).isoformat()
-                    test_data['updatedAt'] = test_data['createdAt']
+                    test_data['id'] = f'tst-{int(now_utc.timestamp() * 1000)}'
+                    test_data['createdAt'] = now_iso
+                    test_data['updatedAt'] = now_iso
                     test_data['totalQuestions'] = 0
                     test_data['attemptsCount'] = 0
                     test_data['maximumMarks'] = float(test_data.get('maximumMarks', 10.0))

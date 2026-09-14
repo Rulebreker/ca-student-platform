@@ -647,21 +647,35 @@ class FirebaseSyncManager {
       const remoteIds = new Set(remoteTests.map(rt => rt && rt.id).filter(Boolean));
       let changed = false;
 
-      // 1. Remove any local tests that were deleted in Firebase
-      let filteredTests = localTests.filter(lt => remoteIds.has(lt.id));
-      if (filteredTests.length !== localTests.length) {
-        changed = true;
+      // Use Map keyed by ID to strictly enforce unique tests
+      const tMap = new Map();
+
+      // 1. Keep valid local tests that still exist in remote (or all local if remote is empty)
+      if (remoteTests.length > 0) {
+        localTests.forEach(lt => {
+          if (lt && lt.id && remoteIds.has(lt.id)) {
+            tMap.set(lt.id, lt);
+          }
+        });
+        if (tMap.size !== localTests.length) {
+          changed = true;
+        }
+      } else {
+        localTests.forEach(lt => {
+          if (lt && lt.id) {
+            tMap.set(lt.id, lt);
+          }
+        });
       }
 
       // 2. Add or update tests from remote
       remoteTests.forEach(rt => {
         if (!rt || !rt.id) return;
-        const idx = filteredTests.findIndex(lt => lt.id === rt.id);
-        if (idx === -1) {
-          filteredTests.unshift(rt);
+        if (!tMap.has(rt.id)) {
+          tMap.set(rt.id, rt);
           changed = true;
         } else {
-          const existing = filteredTests[idx];
+          const existing = tMap.get(rt.id);
           let testModified = false;
           Object.keys(rt).forEach(k => {
             if (JSON.stringify(existing[k]) !== JSON.stringify(rt[k])) {
@@ -674,7 +688,8 @@ class FirebaseSyncManager {
       });
 
       if (changed) {
-        window.store.saveTests(filteredTests);
+        const dedupedTests = Array.from(tMap.values());
+        window.store.saveTests(dedupedTests);
 
         // Re-render student MCQ test list if student is viewing tests
         if (window.testEngine && typeof window.testEngine.renderTestList === 'function') {
@@ -684,9 +699,11 @@ class FirebaseSyncManager {
           }
         }
 
-        // Re-render admin MCQ tests tab if admin is viewing it
+        // Re-render admin MCQ tests tab if admin is viewing it and not actively saving a test
         if (window.adminDashboard && window.auth && window.auth.isAdmin() && window.adminDashboard.currentTab === 'mcq-tests') {
-          window.adminDashboard.renderMCQTests();
+          if (!window.adminDashboard._isSavingTest) {
+            window.adminDashboard.renderMCQTests();
+          }
         }
       }
     } catch (e) {

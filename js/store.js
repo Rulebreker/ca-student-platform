@@ -2602,24 +2602,64 @@ class AppStore {
 
   // Tests
   getTests() {
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS.TESTS) || '[]');
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEYS.TESTS) || '[]');
+    if (!Array.isArray(raw)) return [];
+    const seen = new Set();
+    const deduped = [];
+    let hasDuplicates = false;
+    for (const t of raw) {
+      if (t && t.id) {
+        if (!seen.has(t.id)) {
+          seen.add(t.id);
+          deduped.push(t);
+        } else {
+          hasDuplicates = true;
+        }
+      }
+    }
+    if (hasDuplicates) {
+      localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(deduped));
+    }
+    return deduped;
   }
   saveTests(tests) {
-    localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(tests));
+    if (!Array.isArray(tests)) tests = [];
+    const seen = new Set();
+    const deduped = [];
+    for (const t of tests) {
+      if (t && t.id && !seen.has(t.id)) {
+        seen.add(t.id);
+        deduped.push(t);
+      }
+    }
+    localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(deduped));
   }
   getTestById(id) {
     return this.getTests().find(t => t.id === id);
   }
   addTest(tst) {
+    if (!tst || !tst.id) return;
     const tests = this.getTests();
-    tests.unshift(tst);
+    const existingIndex = tests.findIndex(t => t.id === tst.id);
+    if (existingIndex >= 0) {
+      tests[existingIndex] = { ...tests[existingIndex], ...tst };
+    } else {
+      tests.unshift(tst);
+    }
     this.saveTests(tests);
     if (window.firebaseSync && typeof window.firebaseSync.saveTest === 'function') {
       window.firebaseSync.saveTest(tst);
     }
   }
   updateTest(tst) {
-    const tests = this.getTests().map(t => t.id === tst.id ? tst : t);
+    if (!tst || !tst.id) return;
+    const tests = this.getTests();
+    const existingIndex = tests.findIndex(t => t.id === tst.id);
+    if (existingIndex >= 0) {
+      tests[existingIndex] = { ...tests[existingIndex], ...tst };
+    } else {
+      tests.unshift(tst);
+    }
     this.saveTests(tests);
     if (window.firebaseSync && typeof window.firebaseSync.saveTest === 'function') {
       window.firebaseSync.saveTest(tst);
