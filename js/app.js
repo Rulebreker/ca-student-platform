@@ -321,6 +321,7 @@ class App {
     if (modal) {
       modal.classList.remove('hidden');
       modal.classList.add('flex');
+      document.body.classList.add('overflow-hidden');
       if (window.lucide) window.lucide.createIcons();
     }
   }
@@ -330,6 +331,10 @@ class App {
     if (modal) {
       modal.classList.add('hidden');
       modal.classList.remove('flex');
+      const openModals = document.querySelectorAll('.modal-backdrop.flex');
+      if (!openModals || openModals.length === 0) {
+        document.body.classList.remove('overflow-hidden');
+      }
     }
   }
 

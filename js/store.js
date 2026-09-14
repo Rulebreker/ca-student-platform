@@ -2721,7 +2721,6 @@ class AppStore {
     const test = this.getTestById(q.testId);
     if (test) {
       test.totalQuestions = (test.totalQuestions || 0) + 1;
-      test.maximumMarks = test.totalQuestions * (test.marksPerCorrect || 2.0);
       this.updateTest(test);
     }
     return newQ;

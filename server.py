@@ -995,7 +995,7 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
         return data
 
     now = time.time()
-    all_keys = ['users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs']
+    all_keys = ['users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions']
     target_keys = collections if collections else all_keys
 
     keys_to_fetch = [k for k in target_keys if (now - _collection_last_synced.get(k, 0)) >= min_interval]
@@ -1089,6 +1089,44 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
                             if isinstance(l, dict) and l.get('id'):
                                 l_map[l['id']] = l
                         data['admin_audit_logs'] = list(l_map.values())
+                        _collection_last_synced[key] = now
+                        updated = True
+                elif key == 'tests':
+                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                    if items:
+                        t_map = {t.get('id'): t for t in data.get('tests', []) if isinstance(t, dict) and t.get('id')}
+                        for t in items:
+                            if isinstance(t, dict) and t.get('id'):
+                                tid = t.get('id')
+                                cur = t_map.get(tid)
+                                if cur:
+                                    local_tq = int(cur.get('totalQuestions', 0))
+                                    cloud_tq = int(t.get('totalQuestions', 0))
+                                    cloud_updated = t.get('updatedAt') or t.get('createdAt') or ''
+                                    local_updated = cur.get('updatedAt') or cur.get('createdAt') or ''
+                                    if local_updated and cloud_updated and local_updated > cloud_updated:
+                                        continue
+                                    cur.update(t)
+                                    if local_tq > cloud_tq:
+                                        cur['totalQuestions'] = local_tq
+                                else:
+                                    t_map[tid] = t
+                        data['tests'] = list(t_map.values())
+                        _collection_last_synced[key] = now
+                        updated = True
+                elif key == 'questions':
+                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                    if items:
+                        q_map = {q.get('id'): q for q in data.get('questions', []) if isinstance(q, dict) and q.get('id')}
+                        for q in items:
+                            if isinstance(q, dict) and q.get('id'):
+                                qid = q.get('id')
+                                cur = q_map.get(qid)
+                                if cur:
+                                    cur.update(q)
+                                else:
+                                    q_map[qid] = q
+                        data['questions'] = list(q_map.values())
                         _collection_last_synced[key] = now
                         updated = True
         except Exception:
@@ -2221,7 +2259,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             token = self.get_auth_token()
             user = authenticate_token(token)
             is_admin = user and user.get('role') == 'admin'
-            data = load_backend_data()
+            data = load_backend_data(refresh_collections=['tests', 'questions'])
             if check_scheduled_mcq_tests(data, sync_to_firebase):
                 save_backend_data(data)
             tests = data.get('tests', [])
@@ -4245,7 +4283,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         self.send_json(400, {'error': f'Missing required field: {r}', 'code': 400})
                         return
 
-                data = load_backend_data()
+                data = load_backend_data(refresh_collections=['tests', 'questions'])
                 tests = data.get('tests', [])
                 test_id = test_data.get('id')
 
@@ -4281,20 +4319,25 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         test_data['subjectId'] = sub_id_map.get(test_data.get('subject'), 'sub-1')
 
                 if test_id:
-                    # Bug 3 fix: If test has questions, preserve the sum of individual question marks
+                    # Maintain question count and preserve admin-configured maximumMarks
                     test_qs = [q for q in data.get('questions', []) if q.get('testId') == test_id]
-                    if test_qs:
-                        test_data['maximumMarks'] = sum(float(q.get('marks', test_data.get('marksPerCorrect', 2.0))) for q in test_qs)
-                        test_data['totalQuestions'] = len(test_qs)
+                    test_data['totalQuestions'] = len(test_qs)
+                    test_data['updatedAt'] = datetime.now(timezone.utc).isoformat()
                     idx = next((i for i, t in enumerate(tests) if t.get('id') == test_id), None)
                     if idx is not None:
+                        if 'maximumMarks' in test_data and test_data['maximumMarks'] is not None:
+                            test_data['maximumMarks'] = float(test_data['maximumMarks'])
+                        else:
+                            test_data['maximumMarks'] = float(tests[idx].get('maximumMarks', 10.0))
                         tests[idx].update(test_data)
                         test_data = tests[idx]
                     else:
+                        test_data['maximumMarks'] = float(test_data.get('maximumMarks', 10.0))
                         tests.append(test_data)
                 else:
                     test_data['id'] = f'tst-{int(datetime.now().timestamp() * 1000)}'
                     test_data['createdAt'] = datetime.now(timezone.utc).isoformat()
+                    test_data['updatedAt'] = test_data['createdAt']
                     test_data['totalQuestions'] = 0
                     test_data['attemptsCount'] = 0
                     test_data['maximumMarks'] = float(test_data.get('maximumMarks', 10.0))
@@ -4302,7 +4345,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 data['tests'] = tests
                 save_backend_data(data)
-                sync_to_firebase(f"tests/{test_data['id']}", test_data, method='PUT')
+                sync_to_firebase(f"tests/{test_data['id']}", test_data, method='PUT', sync=True)
                 self.send_json(200, {'success': True, 'test': test_data})
                 return
             except Exception as e:
@@ -4323,24 +4366,16 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 test_id = req_data.get('testId')
                 new_status = req_data.get('status', 'Published')
 
-                data = load_backend_data()
+                data = load_backend_data(refresh_collections=['tests', 'questions'])
                 tests = data.get('tests', [])
                 target = next((t for t in tests if t.get('id') == test_id), None)
-                if target:
-                    entitlements = subscription_manager.get_user_entitlements(user['id'], data, sync_to_firebase)
-                    if target.get('isPremium') and not entitlements['permissions'].get('premium_mcq_access'):
-                        self.send_json(403, {
-                            'error': 'Access Denied: This is a premium test requiring an active Core, Plus, or Elite Pass.',
-                            'code': 403,
-                            'isPremiumLocked': True
-                        })
-                        return
                 if not target:
                     self.send_json(404, {'error': 'Test not found', 'code': 404})
                     return
 
                 target['status'] = new_status
                 target['isPublished'] = (new_status in ['Published', 'Live'])
+                target['updatedAt'] = datetime.now(timezone.utc).isoformat()
                 if req_data.get('scheduledPublishTime'):
                     target['scheduledPublishTime'] = req_data.get('scheduledPublishTime')
                 if req_data.get('liveStartTime'):
@@ -4349,7 +4384,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     target['liveEndTime'] = req_data.get('liveEndTime')
 
                 save_backend_data(data)
-                sync_to_firebase(f"tests/{target['id']}", target, method='PUT')
+                sync_to_firebase(f"tests/{target['id']}", target, method='PUT', sync=True)
                 self.send_json(200, {'success': True, 'test': target})
                 return
             except Exception as e:
@@ -4369,7 +4404,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 req_data = json.loads(body.decode('utf-8'))
                 target_id = req_data.get('id')
 
-                data = load_backend_data()
+                data = load_backend_data(refresh_collections=['tests', 'questions'])
                 data['tests'] = [t for t in data.get('tests', []) if t.get('id') != target_id]
                 deleted_qs = [q for q in data.get('questions', []) if q.get('testId') == target_id]
                 data['questions'] = [q for q in data.get('questions', []) if q.get('testId') != target_id]
@@ -4396,7 +4431,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 req_data = json.loads(body.decode('utf-8'))
                 action = req_data.get('action')
 
-                data = load_backend_data()
+                data = load_backend_data(refresh_collections=['tests', 'questions'])
                 questions = data.get('questions', [])
                 tests = data.get('tests', [])
 
@@ -4407,25 +4442,28 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         self.send_json(404, {'error': 'Original question not found', 'code': 404})
                         return
                     dup = dict(orig)
+                    now_iso = datetime.now(timezone.utc).isoformat()
                     dup['id'] = f'q-{int(datetime.now().timestamp() * 1000)}'
                     test_qs = [q for q in questions if q.get('testId') == orig.get('testId')]
                     dup['number'] = len(test_qs) + 1
                     dup['text'] = f"{orig.get('text')} (Copy)"
+                    dup['createdAt'] = now_iso
+                    dup['updatedAt'] = now_iso
                     questions.append(dup)
 
-                    # Update totalQuestions & maximumMarks as sum of question marks
+                    # Update totalQuestions (preserve admin-configured maximumMarks)
                     dup_test = None
                     for t in tests:
                         if t.get('id') == orig.get('testId'):
                             t_qs = [q for q in questions if q.get('testId') == t.get('id')]
                             t['totalQuestions'] = len(t_qs)
-                            t['maximumMarks'] = sum(float(q.get('marks', t.get('marksPerCorrect', 2.0))) for q in t_qs)
+                            t['updatedAt'] = now_iso
                             dup_test = t
 
                     save_backend_data(data)
-                    sync_to_firebase(f"questions/{dup['id']}", dup, method='PUT')
+                    sync_to_firebase(f"questions/{dup['id']}", dup, method='PUT', sync=True)
                     if dup_test:
-                        sync_to_firebase(f"tests/{dup_test['id']}", dup_test, method='PUT')
+                        sync_to_firebase(f"tests/{dup_test['id']}", dup_test, method='PUT', sync=True)
                     self.send_json(200, {'success': True, 'question': dup})
                     return
 
@@ -4436,7 +4474,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         for q in questions:
                             if q.get('id') == qid:
                                 q['number'] = idx + 1
-                                sync_to_firebase(f"questions/{q['id']}", q, method='PUT')
+                                sync_to_firebase(f"questions/{q['id']}", q, method='PUT', sync=True)
                     save_backend_data(data)
                     self.send_json(200, {'success': True, 'order': order_ids})
                     return
@@ -4454,6 +4492,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     if tier not in ['free', 'core', 'plus', 'elite']:
                         tier = 'free'
                     req_data['requiredTier'] = tier
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    req_data['updatedAt'] = now_iso
 
                     if q_id:
                         idx = next((i for i, q in enumerate(questions) if q.get('id') == q_id), None)
@@ -4465,25 +4505,25 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                             target_q = req_data
                     else:
                         req_data['id'] = f'q-{int(datetime.now().timestamp() * 1000)}'
+                        req_data['createdAt'] = now_iso
                         test_qs = [q for q in questions if q.get('testId') == test_id]
                         req_data['number'] = len(test_qs) + 1
                         questions.append(req_data)
                         target_q = req_data
 
-                    # Bug 3 fix: compute maximumMarks from actual per-question marks (not totalQuestions * marksPerCorrect)
-                    # This preserves custom per-question mark weights set by admin
+                    # Maintain question count, strictly preserve admin-configured maximumMarks
                     test_questions = [q for q in questions if q.get('testId') == test_id]
                     for t in tests:
                         if t.get('id') == test_id:
                             t['totalQuestions'] = len(test_questions)
-                            t['maximumMarks'] = sum(float(q.get('marks', t.get('marksPerCorrect', 2.0))) for q in test_questions)
+                            t['updatedAt'] = now_iso
                     save_backend_data(data)
                     # Sync question and updated test to Firebase RTDB (prevents data loss on Vercel cold start)
-                    sync_to_firebase(f"questions/{target_q['id']}", target_q, method='PUT')
+                    sync_to_firebase(f"questions/{target_q['id']}", target_q, method='PUT', sync=True)
                     if test_id:
                         updated_test = next((t for t in tests if t.get('id') == test_id), None)
                         if updated_test:
-                            sync_to_firebase(f"tests/{test_id}", updated_test, method='PUT')
+                            sync_to_firebase(f"tests/{test_id}", updated_test, method='PUT', sync=True)
                     self.send_json(200, {'success': True, 'question': target_q})
                     return
             except Exception as e:
@@ -4503,7 +4543,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 req_data = json.loads(body.decode('utf-8'))
                 q_id = req_data.get('id')
 
-                data = load_backend_data()
+                data = load_backend_data(refresh_collections=['tests', 'questions'])
                 orig = next((q for q in data.get('questions', []) if q.get('id') == q_id), None)
                 if orig:
                     test_id = orig.get('testId')
@@ -4514,17 +4554,17 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     for i, q in enumerate(rem):
                         q['number'] = i + 1
                     updated_test_ref = None
+                    now_iso = datetime.now(timezone.utc).isoformat()
                     for t in data.get('tests', []):
                         if t.get('id') == test_id:
                             t['totalQuestions'] = len(rem)
-                            # Bug 3 fix: sum per-question marks instead of N * marksPerCorrect
-                            t['maximumMarks'] = sum(float(q.get('marks', t.get('marksPerCorrect', 2.0))) for q in rem)
+                            t['updatedAt'] = now_iso
                             updated_test_ref = t
                     save_backend_data(data)
                     # Sync deletion and test update to Firebase RTDB
-                    sync_to_firebase(f"questions/{q_id}", None, method='DELETE')
+                    sync_to_firebase(f"questions/{q_id}", None, method='DELETE', sync=True)
                     if updated_test_ref:
-                        sync_to_firebase(f"tests/{test_id}", updated_test_ref, method='PUT')
+                        sync_to_firebase(f"tests/{test_id}", updated_test_ref, method='PUT', sync=True)
                 self.send_json(200, {'success': True, 'deletedId': q_id})
                 return
             except Exception as e:
@@ -4550,7 +4590,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json(400, {'error': 'Missing testId or questions array', 'code': 400})
                     return
 
-                data = load_backend_data()
+                data = load_backend_data(refresh_collections=['tests', 'questions'])
                 tests = data.get('tests', [])
                 target_test = next((t for t in tests if t.get('id') == test_id), None)
                 if not target_test:
@@ -4607,10 +4647,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     sync_to_firebase(f"questions/{q_id}", q_obj, method='PUT')
                     next_number += 1
 
-                # Update target test question count & marks
+                # Update target test question count (strictly preserve admin-configured maximumMarks)
                 all_test_qs = [q for q in data['questions'] if q.get('testId') == test_id]
                 target_test['totalQuestions'] = len(all_test_qs)
-                target_test['maximumMarks'] = sum(float(q.get('marks', 2.0)) for q in all_test_qs)
                 if publish_immediately:
                     target_test['isPublished'] = True
                 save_backend_data(data)
@@ -4858,9 +4897,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     pos = float(test.get('marksPerCorrect', 2.0))
                     neg = float(test.get('negativeMarksPerWrong', 0.5))
                     gross = correct_count * pos
-                    penalty = wrong_count * neg
                     score = max(0.0, gross - penalty)
-                    max_marks = len(questions) * pos
+                    max_marks = float(test.get('maximumMarks')) if test.get('maximumMarks') is not None else float(len(questions) * pos if questions else 10.0)
                     pct = (score / max_marks * 100) if max_marks > 0 else 0
 
                     self.send_json(200, {
@@ -4928,7 +4966,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 points_per_correct = float(test.get('pointsPerCorrect', pos))
                 score = max(0.0, gross - penalty)
                 earned_points = correct_count * points_per_correct
-                max_marks = sum(float(q.get('marks', pos)) for q in questions) if questions else 0.0
+                max_marks = float(test.get('maximumMarks')) if test.get('maximumMarks') is not None else (sum(float(q.get('marks', pos)) for q in questions) if questions else 10.0)
                 pct = (score / max_marks * 100) if max_marks > 0 else 0
 
                 attempt_record = {

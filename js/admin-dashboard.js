@@ -3065,9 +3065,8 @@ This will remove the question paper, attached answer keys, and student submissio
     const isEdit = !!testId;
     const test = isEdit ? window.store.getTestById(testId) : null;
     const existingQs = isEdit ? window.store.getQuestionsByTestId(testId) : [];
-    const computedMaxMarks = existingQs.length > 0 
-      ? existingQs.reduce((sum, q) => sum + (typeof q.marks === 'number' ? q.marks : (test && typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0)), 0)
-      : (test ? (test.maximumMarks || 10) : 10);
+    const currentMaxMarks = test ? (typeof test.maximumMarks === 'number' ? test.maximumMarks : (parseFloat(test.maximumMarks) || 10)) : 10;
+    const questionsMarksSum = existingQs.reduce((sum, q) => sum + (typeof q.marks === 'number' ? q.marks : (test && typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0)), 0);
     const modalContent = document.getElementById('admin-generic-modal-content');
     if (!modalContent) return;
 
@@ -3089,94 +3088,97 @@ This will remove the question paper, attached answer keys, and student submissio
     if (!scheduledDateVal) {
       const tom = new Date(Date.now() + 24 * 60 * 60 * 1000 + 5.5 * 60 * 60 * 1000);
       scheduledDateVal = tom.toISOString().slice(0, 10);
-      scheduledTimeVal = '17:00';
     }
 
     modalContent.innerHTML = `
-      <form onsubmit="window.adminDashboard.saveTest(event, '${testId || ''}')" class="flex flex-col max-h-[90vh] overflow-hidden">
+      <form onsubmit="window.adminDashboard.saveTest(event, '${testId || ''}')" class="flex flex-col h-full max-h-[90vh]">
         <!-- Fixed Header -->
-        <div class="flex-shrink-0 flex items-center justify-between border-b border-slate-200 p-5 sm:p-6 bg-white">
+        <div class="flex-shrink-0 flex items-center justify-between p-4 sm:p-5 border-b border-slate-200">
           <div>
-            <h3 class="text-base font-bold text-slate-900">${isEdit ? 'Edit MCQ Test' : 'Create New MCQ Test'}</h3>
-            <p class="text-xs text-slate-500">Configure exam level, test parameters, academic marks, and platform points</p>
+            <h3 class="text-base font-bold text-slate-900">${isEdit ? 'Edit Mock Test' : 'Create New MCQ Test'}</h3>
+            <p class="text-xs text-slate-500">Chartered Accountancy Online CBT Examination Module</p>
           </div>
-          <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors">
+          <button 
+            type="button" 
+            onclick="window.app.closeModal('admin-generic-modal')" 
+            class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
+          >
             <i data-lucide="x" class="w-5 h-5"></i>
           </button>
         </div>
 
-        <!-- Scrollable Form Body -->
-        <div class="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4 text-xs">
-          <div>
-            <label class="block font-bold text-slate-700 mb-1">Test Name / Title *</label>
-            <input 
-              type="text" 
-              id="tst-title" 
-              required 
-              value="${test ? test.title : ''}"
-              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500" 
-              placeholder="e.g. Ind AS 115 Revenue Recognition Speed Assessment"
-            >
-          </div>
-
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <!-- Scrollable Body -->
+        <div class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+          <div class="space-y-3">
             <div>
-              <label class="block font-bold text-slate-700 mb-1">Exam Level *</label>
-              <select id="tst-exam-level" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold">
-                <option value="CA Foundation" ${!test || test.examLevel === 'CA Foundation' ? 'selected' : ''}>CA Foundation</option>
-                <option value="CA Intermediate" ${test && test.examLevel === 'CA Intermediate' ? 'selected' : ''}>CA Intermediate</option>
-                <option value="CA Final" ${test && test.examLevel === 'CA Final' ? 'selected' : ''}>CA Final</option>
-              </select>
-            </div>
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Subject *</label>
-              <select id="tst-subject" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium">
-                ${subjects.map(s => `
-                  <option value="${s.id}" ${test && (test.subjectId === s.id || test.subject === s.name) ? 'selected' : ''}>
-                    ${s.name} (${s.level || 'Foundation'})
-                  </option>
-                `).join('')}
-              </select>
-            </div>
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Chapter / Topic *</label>
+              <label class="block font-bold text-slate-700 mb-1">Test Title *</label>
               <input 
                 type="text" 
-                id="tst-topic" 
+                id="tst-title" 
                 required 
-                value="${test ? (test.topic || test.chapter || '') : ''}"
+                value="${test ? test.title : ''}"
                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500" 
-                placeholder="e.g. Accounting Standards / Ind AS"
+                placeholder="e.g. CA Foundation Accounts Mock Test 1 - Accounting Principles"
               >
             </div>
-          </div>
 
-          <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Duration (Mins) *</label>
-              <input 
-                type="number" 
-                id="tst-duration" 
-                min="1" 
-                required 
-                value="${test ? test.durationMinutes : 15}"
-                class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold"
-              >
-            </div>
-            <div>
-              <div class="flex items-center justify-between mb-1">
-                <label class="block font-bold text-slate-700">Max Marks *</label>
-                ${existingQs.length > 0 ? `<span class="text-[9px] text-blue-600 font-semibold" title="Computed from attached questions">(${existingQs.length} Qs)</span>` : ''}
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label class="block font-bold text-slate-700 mb-1">Course Level *</label>
+                <select id="tst-exam-level" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold bg-white">
+                  <option value="CA Foundation" ${!test || test.examLevel === 'CA Foundation' ? 'selected' : ''}>CA Foundation</option>
+                  <option value="CA Intermediate" ${test && test.examLevel === 'CA Intermediate' ? 'selected' : ''}>CA Intermediate</option>
+                  <option value="CA Final" ${test && test.examLevel === 'CA Final' ? 'selected' : ''}>CA Final</option>
+                </select>
               </div>
-              <input 
-                type="number" 
-                id="tst-maxmarks" 
-                step="0.5" 
-                min="1" 
-                required 
-                value="${computedMaxMarks}"
-                class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold"
-              >
+              <div>
+                <label class="block font-bold text-slate-700 mb-1">Subject *</label>
+                <select id="tst-subject" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold bg-white">
+                  ${subjects.map(s => `
+                    <option value="${s.id}" ${test && (test.subjectId === s.id || test.subject === s.name) ? 'selected' : ''}>${s.name}</option>
+                  `).join('')}
+                </select>
+              </div>
+              <div>
+                <label class="block font-bold text-slate-700 mb-1">Chapter / Topic *</label>
+                <input 
+                  type="text" 
+                  id="tst-topic" 
+                  required 
+                  value="${test ? (test.topic || test.chapter || '') : ''}"
+                  class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500" 
+                  placeholder="e.g. Accounting Standards / Ind AS"
+                >
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+              <div>
+                <label class="block font-bold text-slate-700 mb-1">Duration (Mins) *</label>
+                <input 
+                  type="number" 
+                  id="tst-duration" 
+                  min="1" 
+                  required 
+                  value="${test ? test.durationMinutes : 15}"
+                  class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold"
+                >
+              </div>
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <label class="block font-bold text-slate-700">Max Marks *</label>
+                  ${existingQs.length > 0 ? `<span class="text-[9px] text-slate-500 font-semibold" title="Total sum of individual question marks">(${existingQs.length} Qs, Sum: ${questionsMarksSum})</span>` : ''}
+                </div>
+                <input 
+                  type="number" 
+                  id="tst-maxmarks" 
+                  step="0.5" 
+                  min="1" 
+                  required 
+                  value="${currentMaxMarks}"
+                  class="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold"
+                >
+              </div>
             </div>
             <div>
               <label class="block font-bold text-emerald-800 mb-1">Exam Mark (+) *</label>
@@ -3363,16 +3365,33 @@ This will remove the question paper, attached answer keys, and student submissio
 
   async saveTest(e, existingId = '') {
     e.preventDefault();
+
+    const submitBtn = e.target ? e.target.querySelector('[type="submit"]') : null;
+    if (submitBtn) {
+      if (submitBtn.disabled) return;
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="inline-flex items-center gap-1.5"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> ' + (existingId ? 'Saving Changes...' : 'Creating Test...') + '</span>';
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    const enableSubmit = () => {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = existingId ? 'Save Changes' : 'Create Test & Proceed to Questions →';
+      }
+    };
+
     const title = document.getElementById('tst-title').value.trim();
     const examLevel = document.getElementById('tst-exam-level').value;
     const subjectId = document.getElementById('tst-subject').value;
     const topic = document.getElementById('tst-topic').value.trim();
     const durationMinutes = parseInt(document.getElementById('tst-duration').value, 10);
-    const maximumMarks = parseFloat(document.getElementById('tst-maxmarks').value);
-    const marksPerCorrect = parseFloat(document.getElementById('tst-positive').value);
-    const negativeMarksPerWrong = parseFloat(document.getElementById('tst-negative').value);
+    const maxMarksInput = parseFloat(document.getElementById('tst-maxmarks').value);
+    const maximumMarks = !isNaN(maxMarksInput) && maxMarksInput > 0 ? maxMarksInput : 10.0;
+    const marksPerCorrect = parseFloat(document.getElementById('tst-positive').value) || 2.0;
+    const negativeMarksPerWrong = parseFloat(document.getElementById('tst-negative').value) || 0.5;
     const pointsPerCorrect = parseFloat(document.getElementById('tst-points').value) || 10;
-    const maxAttempts = parseInt(document.getElementById('tst-maxattempts').value, 10);
+    const maxAttempts = parseInt(document.getElementById('tst-maxattempts').value, 10) || 3;
     const status = document.getElementById('tst-status').value;
     const description = document.getElementById('tst-desc').value.trim();
     const requiredTier = document.getElementById('tst-required-tier') ? document.getElementById('tst-required-tier').value : 'free';
@@ -3393,22 +3412,13 @@ This will remove the question paper, attached answer keys, and student submissio
       const sTime = document.getElementById('tst-scheduled-time')?.value || '17:00';
       if (!sDate) {
         window.app.showToast('Please select a scheduled publish date.', 'error');
+        enableSubmit();
         return;
       }
       scheduledPublishTime = `${sDate}T${sTime.length === 5 ? sTime + ':00' : sTime}+05:30`;
     }
 
-    // Bug 3 fix: For existing tests that already have questions, compute maximumMarks from
-    // actual per-question marks (not from the form field which defaults to 10 and would overwrite
-    // the server-computed value). For new tests (no questions yet), use the form field.
-    let resolvedMaxMarks = maximumMarks;
-    if (existingId) {
-      const existingQuestions = window.store.getQuestionsByTestId(existingId);
-      if (existingQuestions.length > 0) {
-        resolvedMaxMarks = existingQuestions.reduce((sum, q) => sum + (typeof q.marks === 'number' ? q.marks : marksPerCorrect), 0);
-      }
-    }
-
+    // Preserve the admin's explicitly set maximumMarks!
     const testPayload = {
       id: existingId || ('tst-' + Date.now()),
       title,
@@ -3418,7 +3428,7 @@ This will remove the question paper, attached answer keys, and student submissio
       chapter: topic,
       topic,
       durationMinutes,
-      maximumMarks: resolvedMaxMarks,
+      maximumMarks: maximumMarks,
       marksPerCorrect,
       negativeMarksPerWrong,
       pointsPerCorrect,
@@ -3437,91 +3447,131 @@ This will remove the question paper, attached answer keys, and student submissio
       updatedAt: new Date().toISOString()
     };
 
-
     if (!existingId) {
       testPayload.createdAt = new Date().toISOString();
       testPayload.attemptsCount = 0;
-      window.store.addTest(testPayload);
-    } else {
-      window.store.updateTest(testPayload);
     }
 
-    // Attempt backend sync
     const user = window.auth.getCurrentUser();
     const token = user ? (user.token || user.email) : '';
+
     try {
-      await fetch('/api/tests', {
+      const resp = await fetch('/api/tests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify(testPayload)
       });
-    } catch (err) {
-      console.warn('Backend sync error:', err);
-    }
 
-    // Trigger notification ONLY to students subscribed to allowed plans
-    if (!existingId && testPayload.isPublished) {
-      const allStudents = window.store.getStudents ? window.store.getStudents() : [];
-      const subs = window.store.getSubscriptions ? window.store.getSubscriptions() : {};
-      const now = new Date();
-      const bulkNotifs = [];
-      allStudents.forEach(st => {
-        const stLevel = (st.caLevel || '').toUpperCase();
-        const tLevel = (examLevel || '').toUpperCase();
-        const levelMatches = !tLevel ||
-          (stLevel.includes('FOUNDATION') && tLevel.includes('FOUNDATION')) ||
-          (stLevel.includes('INTER') && tLevel.includes('INTER')) ||
-          (stLevel.includes('FINAL') && tLevel.includes('FINAL')) ||
-          !st.caLevel;
-        if (!levelMatches) return;
-
-        // Check active subscription tier
-        const sub = subs[st.id];
-        const isSubActive = sub && (sub.status === 'active' || sub.status === 'manually_granted') && (!sub.expiresAt || new Date(sub.expiresAt) > now);
-        let studentTier = 'free';
-        if (isSubActive) {
-          studentTier = (sub.planTier || 'core').toLowerCase();
-          if (sub.isTrial) studentTier = 'trial';
-        }
-
-        if (testPayload.allowedPlans.includes(studentTier)) {
-          bulkNotifs.push({
-            userId: st.id,
-            type: 'new_test',
-            title: 'New MCQ Test Published!',
-            message: `${testPayload.title} (${testPayload.subject}) is now live for your ${studentTier.toUpperCase()} pass tier.`,
-            link: 'tests',
-            metadata: { testId: testPayload.id }
-          });
-        }
-      });
-      if (bulkNotifs.length > 0 && window.store && typeof window.store.addNotificationsBulk === 'function') {
-        window.store.addNotificationsBulk(bulkNotifs);
+      if (!resp.ok) {
+        let errMsg = 'Failed to save test configuration.';
+        try {
+          const errData = await resp.json();
+          if (errData && errData.error) errMsg = errData.error;
+        } catch (_) {}
+        console.error('[saveTest] Backend rejected test:', resp.status, errMsg);
+        window.app.showToast(errMsg, 'error');
+        enableSubmit();
+        return;
       }
-    }
 
-    window.app.showToast(existingId ? 'Test updated successfully!' : 'Test created! You can now add questions.', 'success');
-    this.renderMCQTests();
-    this.openQuestionBuilder(testPayload.id);
+      const resData = await resp.json();
+      if (!resData.success) {
+        window.app.showToast(resData.error || 'Server error saving test.', 'error');
+        enableSubmit();
+        return;
+      }
+
+      const confirmedTest = resData.test || testPayload;
+
+      // Update store only on confirmed backend persistence
+      if (!existingId) {
+        window.store.addTest(confirmedTest);
+      } else {
+        window.store.updateTest(confirmedTest);
+      }
+
+      // Trigger notification ONLY to students subscribed to allowed plans
+      if (!existingId && confirmedTest.isPublished) {
+        const allStudents = window.store.getStudents ? window.store.getStudents() : [];
+        const subs = window.store.getSubscriptions ? window.store.getSubscriptions() : {};
+        const now = new Date();
+        const bulkNotifs = [];
+        allStudents.forEach(st => {
+          const stLevel = (st.caLevel || '').toUpperCase();
+          const tLevel = (examLevel || '').toUpperCase();
+          const levelMatches = !tLevel ||
+            (stLevel.includes('FOUNDATION') && tLevel.includes('FOUNDATION')) ||
+            (stLevel.includes('INTER') && tLevel.includes('INTER')) ||
+            (stLevel.includes('FINAL') && tLevel.includes('FINAL')) ||
+            !st.caLevel;
+          if (!levelMatches) return;
+
+          const sub = subs[st.id];
+          const isSubActive = sub && (sub.status === 'active' || sub.status === 'manually_granted') && (!sub.expiresAt || new Date(sub.expiresAt) > now);
+          let studentTier = 'free';
+          if (isSubActive) {
+            studentTier = (sub.planTier || 'core').toLowerCase();
+            if (sub.isTrial) studentTier = 'trial';
+          }
+
+          if (confirmedTest.allowedPlans.includes(studentTier)) {
+            bulkNotifs.push({
+              userId: st.id,
+              type: 'new_test',
+              title: 'New MCQ Test Published!',
+              message: `${confirmedTest.title} (${confirmedTest.subject}) is now live for your ${studentTier.toUpperCase()} pass tier.`,
+              link: 'tests',
+              metadata: { testId: confirmedTest.id }
+            });
+          }
+        });
+        if (bulkNotifs.length > 0 && window.store && typeof window.store.addNotificationsBulk === 'function') {
+          window.store.addNotificationsBulk(bulkNotifs);
+        }
+      }
+
+      window.app.closeModal('admin-generic-modal');
+      window.app.showToast(existingId ? 'Test updated successfully!' : 'Test created! You can now add questions.', 'success');
+      this.renderMCQTests();
+      if (!existingId) {
+        this.openQuestionBuilder(confirmedTest.id);
+      }
+    } catch (netErr) {
+      console.error('[saveTest] Network error during save:', netErr);
+      window.app.showToast('Network error: Unable to reach server. Test was not saved.', 'error');
+      enableSubmit();
+    }
   }
 
   async deleteTest(id) {
     if (!confirm('Are you sure you want to permanently delete this mock test and all its questions?')) return;
 
-    window.store.deleteTest(id);
-
     const user = window.auth.getCurrentUser();
     const token = user ? (user.token || user.email) : '';
     try {
-      await fetch('/api/tests/delete', {
+      const resp = await fetch('/api/tests/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ id })
       });
-    } catch (e) {}
 
-    window.app.showToast('Test and associated questions deleted.', 'info');
-    this.renderMCQTests();
+      if (!resp.ok) {
+        let errMsg = 'Failed to delete test.';
+        try {
+          const errData = await resp.json();
+          if (errData && errData.error) errMsg = errData.error;
+        } catch (_) {}
+        window.app.showToast(errMsg, 'error');
+        return;
+      }
+
+      window.store.deleteTest(id);
+      window.app.showToast('Test and associated questions deleted.', 'info');
+      this.renderMCQTests();
+    } catch (netErr) {
+      console.error('[deleteTest] Network error:', netErr);
+      window.app.showToast('Network error: Could not delete test.', 'error');
+    }
   }
 
   // --- QUESTION BUILDER MODAL ---
@@ -3759,9 +3809,10 @@ This will remove the question paper, attached answer keys, and student submissio
 
   // --- MANUAL QUESTION BUILDER FORM WITH RICH TEXT & IMAGES ---
   openQuestionForm(questionId = null) {
-    const testId = this.activeTestQuestionsId;
-    const test = window.store.getTestById(testId);
     const existingQ = questionId ? window.store.getQuestions().find(x => x.id === questionId) : null;
+    const testId = this.activeTestQuestionsId || (existingQ ? existingQ.testId : null);
+    if (testId) this.activeTestQuestionsId = testId;
+    const test = window.store.getTestById(testId);
     const modalContent = document.getElementById('admin-generic-modal-content');
     if (!modalContent) return;
     this._isEditingQuestion = true; // Guard: prevent realtime sync from re-rendering while admin is editing
@@ -3781,7 +3832,7 @@ This will remove the question paper, attached answer keys, and student submissio
           </button>
         </div>
 
-        <form onsubmit="window.adminDashboard.saveQuestion(event, '${questionId || ''}')" class="space-y-5 text-xs">
+        <form onsubmit="window.adminDashboard.saveQuestion(event, '${questionId || ''}', '${testId || ''}')" class="space-y-5 text-xs">
           <!-- Question Prompt Section -->
           <div class="space-y-2">
             <div class="flex items-center justify-between">
@@ -4188,21 +4239,21 @@ This will remove the question paper, attached answer keys, and student submissio
     if (fileInput) fileInput.value = '';
   }
 
-  async saveQuestion(e, existingQId = '') {
+  async saveQuestion(e, existingQId = '', explicitTestId = '') {
     e.preventDefault();
 
-    // Bug 1 + 2 fix: Guard against null testId (stale modal) and disable button to prevent double-submit
-    const testId = this.activeTestQuestionsId;
+    const testId = explicitTestId || this.activeTestQuestionsId || (existingQId ? window.store.getQuestions().find(x => x.id === existingQId)?.testId : null);
     if (!testId) {
       window.app.showToast('Error: No active test selected. Please close and reopen the question builder.', 'error');
       return;
     }
 
-    // Disable submit button immediately to prevent double-submit
     const submitBtn = e.target ? e.target.querySelector('[type="submit"]') : null;
     if (submitBtn) {
+      if (submitBtn.disabled) return;
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Saving…';
+      submitBtn.innerHTML = '<span class="inline-flex items-center gap-1.5"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> ' + (existingQId ? 'Updating Question...' : 'Saving Question...') + '</span>';
+      if (window.lucide) window.lucide.createIcons();
     }
 
     const enableSubmit = () => {
@@ -4217,6 +4268,12 @@ This will remove the question paper, attached answer keys, and student submissio
 
     const text = document.getElementById('q-text').value.trim();
     const qImgUrl = document.getElementById('q-img-url').value;
+
+    if (!text && !qImgUrl) {
+      window.app.showToast('Please provide question text or upload a question image.', 'warning');
+      enableSubmit();
+      return;
+    }
 
     const optA = document.getElementById('q-optA').value.trim();
     const optB = document.getElementById('q-optB').value.trim();
@@ -4274,25 +4331,11 @@ This will remove the question paper, attached answer keys, and student submissio
       requiredTier: requiredTier || 'free',
       explanation: explanation || 'Refer to ICAI Module.',
       explanationImage: explanationImageUrl || null,
-      isDraft: false, // Explicit admin authoring is verified
+      isDraft: false,
       isDuplicate: false
     };
 
-    if (existingQId) {
-      window.store.updateQuestion(qPayload);
-    } else {
-      window.store.addQuestion(qPayload);
-    }
-
-    if (test) {
-      const allQs = window.store.getQuestionsByTestId(testId);
-      test.totalQuestions = allQs.length;
-      // Bug 3 fix: always sum per-question marks (not totalQuestions × marksPerCorrect)
-      test.maximumMarks = allQs.reduce((sum, q) => sum + (typeof q.marks === 'number' ? q.marks : (test.marksPerCorrect || 2.0)), 0);
-      window.store.updateTest(test);
-    }
-
-    // Backend sync — with proper error toast (not silent catch)
+    // Await backend response BEFORE updating store
     const user = window.auth.getCurrentUser();
     const token = user ? (user.token || user.email) : '';
     try {
@@ -4301,41 +4344,88 @@ This will remove the question paper, attached answer keys, and student submissio
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify(qPayload)
       });
-      if (!resp.ok) {
-        const errData = await resp.json().catch(() => ({}));
-        console.warn('[saveQuestion] Backend returned error:', resp.status, errData);
-        // Data is already in localStorage+Firebase via store — show warning not error
-        window.app.showToast('Question saved locally. Backend sync had an issue — will retry on next load.', 'warning');
-      } else {
-        window.app.showToast('Question saved successfully!', 'success');
-      }
-    } catch (netErr) {
-      console.warn('[saveQuestion] Network error during backend sync:', netErr);
-      // Still saved locally — inform admin
-      window.app.showToast('Question saved locally (offline). Will sync when connection is restored.', 'info');
-    }
 
-    this._isEditingQuestion = false;
-    this.openQuestionBuilder(testId);
+      if (!resp.ok) {
+        let errMsg = 'Failed to save question to server.';
+        try {
+          const errData = await resp.json();
+          if (errData && errData.error) errMsg = errData.error;
+        } catch (_) {}
+        console.error('[saveQuestion] Backend returned error:', resp.status, errMsg);
+        window.app.showToast(errMsg, 'error');
+        enableSubmit();
+        return; // Form remains open
+      }
+
+      const resData = await resp.json();
+      if (!resData.success) {
+        window.app.showToast(resData.error || 'Server rejected question.', 'error');
+        enableSubmit();
+        return;
+      }
+
+      const confirmedQ = resData.question || qPayload;
+
+      // Update frontend state only after confirmed backend persistence
+      if (existingQId) {
+        window.store.updateQuestion(confirmedQ);
+      } else {
+        window.store.addQuestion(confirmedQ);
+      }
+
+      if (test) {
+        const allQs = window.store.getQuestionsByTestId(testId);
+        test.totalQuestions = allQs.length;
+        // Strictly preserve admin-configured maximumMarks (DO NOT overwrite with sum)
+        window.store.updateTest(test);
+      }
+
+      this._isEditingQuestion = false;
+      window.app.showToast(existingQId ? 'Question updated successfully!' : 'Question saved successfully!', 'success');
+      this.openQuestionBuilder(testId);
+    } catch (netErr) {
+      console.error('[saveQuestion] Network error during backend sync:', netErr);
+      window.app.showToast('Network error: Unable to reach server. Question was not saved.', 'error');
+      enableSubmit();
+    }
   }
 
-
   async duplicateQuestion(questionId) {
-    const q = window.store.duplicateQuestion(questionId);
-    if (!q) return;
-
     const user = window.auth.getCurrentUser();
     const token = user ? (user.token || user.email) : '';
     try {
-      await fetch('/api/tests/questions', {
+      const resp = await fetch('/api/tests/questions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ action: 'duplicate', questionId })
       });
-    } catch (e) {}
 
-    window.app.showToast('Question duplicated.', 'success');
-    this.openQuestionBuilder(this.activeTestQuestionsId);
+      if (!resp.ok) {
+        let errMsg = 'Failed to duplicate question.';
+        try {
+          const errData = await resp.json();
+          if (errData && errData.error) errMsg = errData.error;
+        } catch (_) {}
+        window.app.showToast(errMsg, 'error');
+        return;
+      }
+
+      const resData = await resp.json();
+      if (resData.success && resData.question) {
+        window.store.addQuestion(resData.question);
+        const test = window.store.getTestById(this.activeTestQuestionsId);
+        if (test) {
+          test.totalQuestions = (test.totalQuestions || 0) + 1;
+          // Strictly preserve admin-configured maximumMarks
+          window.store.updateTest(test);
+        }
+        window.app.showToast('Question duplicated.', 'success');
+        this.openQuestionBuilder(this.activeTestQuestionsId);
+      }
+    } catch (netErr) {
+      console.error('[duplicateQuestion] Network error:', netErr);
+      window.app.showToast('Network error: Could not duplicate question.', 'error');
+    }
   }
 
   async moveQuestion(questionId, direction) {
@@ -4371,28 +4461,42 @@ This will remove the question paper, attached answer keys, and student submissio
   async deleteQuestion(id) {
     if (!confirm('Delete this question permanently?')) return;
     const testId = this.activeTestQuestionsId;
-    window.store.deleteQuestion(id);
-
-    const test = window.store.getTestById(testId);
-    if (test) {
-      const remaining = window.store.getQuestionsByTestId(testId);
-      test.totalQuestions = remaining.length;
-      test.maximumMarks = remaining.reduce((sum, q) => sum + (typeof q.marks === 'number' ? q.marks : (test.marksPerCorrect || 2.0)), 0);
-      window.store.updateTest(test);
-    }
-
     const user = window.auth.getCurrentUser();
     const token = user ? (user.token || user.email) : '';
+
     try {
-      await fetch('/api/tests/questions/delete', {
+      const resp = await fetch('/api/tests/questions/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ id })
       });
-    } catch (e) {}
 
-    window.app.showToast('Question deleted.', 'info');
-    this.openQuestionBuilder(testId);
+      if (!resp.ok) {
+        let errMsg = 'Failed to delete question from server.';
+        try {
+          const errData = await resp.json();
+          if (errData && errData.error) errMsg = errData.error;
+        } catch (_) {}
+        window.app.showToast(errMsg, 'error');
+        return;
+      }
+
+      window.store.deleteQuestion(id);
+
+      const test = window.store.getTestById(testId);
+      if (test) {
+        const remaining = window.store.getQuestionsByTestId(testId);
+        test.totalQuestions = remaining.length;
+        // Strictly preserve admin-configured maximumMarks
+        window.store.updateTest(test);
+      }
+
+      window.app.showToast('Question deleted.', 'info');
+      this.openQuestionBuilder(testId);
+    } catch (netErr) {
+      console.error('[deleteQuestion] Network error:', netErr);
+      window.app.showToast('Network error: Could not delete question.', 'error');
+    }
   }
 
   verifyQuestionDraft(questionId) {

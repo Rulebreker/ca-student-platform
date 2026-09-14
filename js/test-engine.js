@@ -512,78 +512,83 @@ class TestEngine {
     if (!modalContent) return;
 
     modalContent.innerHTML = `
-      <div class="p-6">
-        <div class="flex items-start justify-between border-b border-slate-200 pb-4 mb-5">
+      <div class="flex flex-col h-full max-h-[90vh] overflow-hidden">
+        <!-- Fixed Header -->
+        <div class="flex-shrink-0 bg-white border-b border-slate-200 p-4 sm:p-6 flex items-start justify-between">
           <div>
             <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 mb-1">
               ${subject ? subject.name : 'Chartered Accountancy Test'}
             </span>
             <h3 class="text-lg font-bold text-slate-900">${test.title}</h3>
           </div>
-          <button onclick="window.app.closeModal('instructions-modal')" class="text-slate-400 hover:text-slate-600">
+          <button onclick="window.app.closeModal('instructions-modal')" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100">
             <i data-lucide="x" class="w-5 h-5"></i>
           </button>
         </div>
 
-        <!-- Exam Parameters Grid -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl mb-5 text-center">
-          <div class="p-2 border-r border-slate-200">
-            <span class="text-[11px] text-slate-500 block uppercase font-medium">Duration</span>
-            <span class="text-base font-bold text-slate-800">${test.durationMinutes} Minutes</span>
+        <!-- Scrollable Body -->
+        <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-4">
+          <!-- Exam Parameters Grid -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl text-center border border-slate-100">
+            <div class="p-2 border-r border-slate-200">
+              <span class="text-[11px] text-slate-500 block uppercase font-medium">Duration</span>
+              <span class="text-base font-bold text-slate-800">${test.durationMinutes} Minutes</span>
+            </div>
+            <div class="p-2 border-r border-slate-200">
+              <span class="text-[11px] text-slate-500 block uppercase font-medium">Questions</span>
+              <span class="text-base font-bold text-slate-800">${test.totalQuestions} MCQs</span>
+            </div>
+            <div class="p-2 border-r border-slate-200">
+              <span class="text-[11px] text-slate-500 block uppercase font-medium">Correct Mark</span>
+              <span class="text-base font-bold text-emerald-600">+${test.marksPerCorrect}</span>
+            </div>
+            <div class="p-2">
+              <span class="text-[11px] text-slate-500 block uppercase font-medium">Negative Mark</span>
+              <span class="text-base font-bold text-rose-600">-${test.negativeMarksPerWrong}</span>
+            </div>
           </div>
-          <div class="p-2 border-r border-slate-200">
-            <span class="text-[11px] text-slate-500 block uppercase font-medium">Questions</span>
-            <span class="text-base font-bold text-slate-800">${test.totalQuestions} MCQs</span>
+
+          <!-- Instructions Details -->
+          <div class="space-y-3 text-xs text-slate-700 leading-relaxed">
+            <h4 class="font-bold text-slate-800 uppercase tracking-wider text-[11px]">Examination Rules & Guidelines:</h4>
+            <ul class="list-disc pl-5 space-y-1.5 text-slate-600">
+              <li>The countdown timer starts immediately once you click <strong>Start Test</strong>.</li>
+              <li>Each correct answer awards <strong>+${test.marksPerCorrect} marks</strong>. Each wrong answer deducts <strong>${test.negativeMarksPerWrong} marks</strong>.</li>
+              <li>Unattempted questions carry zero penalty.</li>
+              <li>You can navigate questions using the <strong>Question Palette</strong> or Next/Previous buttons.</li>
+              <li>You may mark questions for review and return to them anytime before submission.</li>
+              <li>The test will <strong>automatically submit</strong> when the countdown timer reaches 00:00.</li>
+              <li>Ensure a stable internet connection. Correct answers and detailed solutions will be shown after submission.</li>
+            </ul>
           </div>
-          <div class="p-2 border-r border-slate-200">
-            <span class="text-[11px] text-slate-500 block uppercase font-medium">Correct Mark</span>
-            <span class="text-base font-bold text-emerald-600">+${test.marksPerCorrect}</span>
+
+          <div class="bg-blue-50 border border-blue-200 p-3 rounded-lg text-xs text-blue-800 flex items-start gap-2">
+            <i data-lucide="info" class="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5"></i>
+            <div>
+              You have <strong>${attemptsLeft} of ${test.maxAttempts || 1}</strong> attempt(s) remaining for this examination.
+            </div>
           </div>
-          <div class="p-2">
-            <span class="text-[11px] text-slate-500 block uppercase font-medium">Negative Mark</span>
-            <span class="text-base font-bold text-rose-600">-${test.negativeMarksPerWrong}</span>
+
+          <div class="flex items-center gap-2 pt-1">
+            <input type="checkbox" id="agree-test-rules" class="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer">
+            <label for="agree-test-rules" class="text-xs text-slate-700 font-medium cursor-pointer select-none">
+              I have read and understood all the test instructions and marking guidelines.
+            </label>
           </div>
         </div>
 
-        <!-- Instructions Details -->
-        <div class="space-y-3 text-xs text-slate-700 leading-relaxed mb-6">
-          <h4 class="font-bold text-slate-800 uppercase tracking-wider text-[11px]">Examination Rules & Guidelines:</h4>
-          <ul class="list-disc pl-5 space-y-1.5 text-slate-600">
-            <li>The countdown timer starts immediately once you click <strong>Start Test</strong>.</li>
-            <li>Each correct answer awards <strong>+${test.marksPerCorrect} marks</strong>. Each wrong answer deducts <strong>${test.negativeMarksPerWrong} marks</strong>.</li>
-            <li>Unattempted questions carry zero penalty.</li>
-            <li>You can navigate questions using the <strong>Question Palette</strong> or Next/Previous buttons.</li>
-            <li>You may mark questions for review and return to them anytime before submission.</li>
-            <li>The test will <strong>automatically submit</strong> when the countdown timer reaches 00:00.</li>
-            <li>Ensure a stable internet connection. Correct answers and detailed solutions will be shown after submission.</li>
-          </ul>
-        </div>
-
-        <div class="bg-blue-50 border border-blue-200 p-3 rounded-lg text-xs text-blue-800 mb-6 flex items-start gap-2">
-          <i data-lucide="info" class="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5"></i>
-          <div>
-            You have <strong>${attemptsLeft} of ${test.maxAttempts || 1}</strong> attempt(s) remaining for this examination.
-          </div>
-        </div>
-
-        <div class="flex items-center gap-2 mb-6">
-          <input type="checkbox" id="agree-test-rules" class="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer">
-          <label for="agree-test-rules" class="text-xs text-slate-700 font-medium cursor-pointer">
-            I have read and understood all the test instructions and marking guidelines.
-          </label>
-        </div>
-
-        <div class="flex items-center justify-end gap-3 border-t border-slate-100 pt-4">
+        <!-- Sticky / Pinned Footer -->
+        <div class="flex-shrink-0 bg-slate-50 border-t border-slate-200 p-3 sm:p-4 flex items-center justify-end gap-3">
           <button 
             onclick="window.app.closeModal('instructions-modal')"
-            class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200/70 rounded-lg transition-colors"
           >
             Cancel
           </button>
           <button 
             onclick="window.testEngine.startTest('${test.id}')"
             id="btn-confirm-start-test"
-            class="px-6 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors"
+            class="px-6 py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors active:scale-[0.98]"
           >
             Start Test Now →
           </button>
