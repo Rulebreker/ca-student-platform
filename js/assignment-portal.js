@@ -432,7 +432,7 @@ class AssignmentPortal {
                   onclick="window.app.navigate('passes')"
                   class="w-full py-2.5 text-xs font-bold rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                 >
-                  <i data-lucide="lock" class="w-3.5 h-3.5"></i> Requires ${reqBadgeText || 'Pass'} → Upgrade
+                  <i data-lucide="key" class="w-3.5 h-3.5"></i> Unlock this Test Paper
                 </button>
               ` : submission ? `
                 <button 
