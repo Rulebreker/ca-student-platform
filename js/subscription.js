@@ -24,13 +24,69 @@ class SubscriptionManager {
     if (this._initialized) return;
     this._initialized = true;
     this.fetchPlans();
+    this.checkAndRecoverActiveSession();
 
-    // Re-validate session if window gains focus
+    // Re-validate session if window gains focus or app is resumed
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         this.syncMySubscription();
+        this.checkAndRecoverActiveSession();
       }
     });
+  }
+
+  async checkAndRecoverActiveSession() {
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    if (!user || user.role === 'admin' || user.role === 'teacher') return;
+
+    // If active session is already active in memory and not expired, keep running
+    if (this.activeSession && this.activeSession.expiresAt) {
+      try {
+        const expDt = new Date(this.activeSession.expiresAt);
+        if (expDt > new Date()) {
+          return;
+        }
+      } catch (e) {}
+    }
+
+    try {
+      const token = user.token || user.id;
+      const resp = await fetch(`/api/payments/active-session?_t=${Date.now()}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        cache: 'no-store'
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && data.success && data.hasActiveSession && data.session) {
+          const sess = data.session;
+          const expDt = new Date(sess.expiresAt);
+          if (expDt > new Date()) {
+            console.log('[SubscriptionManager] Restoring active payment session:', sess.paymentSessionId);
+            this.activeSession = sess;
+            try {
+              localStorage.setItem('eca_active_payment_session', JSON.stringify({
+                sessionId: sess.paymentSessionId || sess.id,
+                userId: user.id,
+                expiresAt: sess.expiresAt
+              }));
+            } catch (e) {}
+
+            const modal = document.getElementById('payment-checkout-modal');
+            if (!modal || modal.classList.contains('hidden')) {
+              this.openCheckoutModal(sess);
+              window.app.showToast('Active payment session restored.', 'info');
+            }
+            return;
+          }
+        }
+      }
+      // If no active session, clear local storage key
+      try {
+        localStorage.removeItem('eca_active_payment_session');
+      } catch (e) {}
+    } catch (err) {
+      console.warn('[SubscriptionManager] Active session recovery error:', err);
+    }
   }
 
   async fetchPlans(force = false) {
@@ -491,6 +547,13 @@ class SubscriptionManager {
       }
 
       this.activeSession = data.session;
+      try {
+        localStorage.setItem('eca_active_payment_session', JSON.stringify({
+          sessionId: data.session.paymentSessionId || data.session.id,
+          userId: user.id,
+          expiresAt: data.session.expiresAt
+        }));
+      } catch (e) {}
       if (window.store) {
         window.store.addPaymentSession(data.session);
       }
@@ -518,12 +581,14 @@ class SubscriptionManager {
   }
 
   createCheckoutModalElement() {
-    const el = document.createElement('div');
+    let el = document.getElementById('payment-checkout-modal');
+    if (el) return;
+    el = document.createElement('div');
     el.id = 'payment-checkout-modal';
-    el.className = 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-xs hidden overflow-y-auto';
+    el.className = 'fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-xs hidden overflow-y-auto overscroll-contain';
     el.innerHTML = `
-      <div class="relative w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[95vh] flex flex-col">
-        <div id="payment-checkout-content" class="overflow-y-auto p-5 sm:p-7 flex-1"></div>
+      <div class="relative w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[92dvh] sm:max-h-[90vh] flex flex-col">
+        <div id="payment-checkout-content" class="overflow-y-auto p-4 sm:p-7 flex-1 pb-[calc(1rem+env(safe-area-inset-bottom,0px))]"></div>
       </div>
     `;
     document.body.appendChild(el);
@@ -634,7 +699,7 @@ class SubscriptionManager {
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5 items-center">
         <!-- QR Code -->
         <div class="bg-white p-3 rounded-xl border border-slate-200 text-center flex flex-col items-center shadow-2xs">
-          <div class="w-40 h-40 bg-slate-100 rounded-lg overflow-hidden flex items-center justify-center p-1.5 border border-slate-100 relative">
+          <div class="w-36 h-36 sm:w-40 sm:h-40 max-w-full bg-slate-100 rounded-lg overflow-hidden flex items-center justify-center p-1.5 border border-slate-100 relative">
             ${channel.needsReupload ? `
               <div class="p-3 text-center text-amber-800 bg-amber-50 rounded-md flex flex-col items-center justify-center h-full w-full">
                 <i data-lucide="alert-triangle" class="w-6 h-6 mb-1 text-amber-600"></i>
@@ -721,18 +786,18 @@ class SubscriptionManager {
           </div>
         </div>
 
-        <div class="pt-2 flex items-center justify-end gap-3">
+        <div class="pt-3 flex flex-col-reverse sm:flex-row items-stretch sm:items-center sm:justify-end gap-2.5 sm:gap-3 sticky bottom-0 bg-white/95 backdrop-blur-xs py-2.5 border-t border-slate-100 mt-2 z-10">
           <button 
             type="button" 
             onclick="window.subscriptionManager.handleUserCloseCheckout()"
-            class="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 rounded-lg hover:bg-slate-100 transition-colors"
+            class="w-full sm:w-auto px-4 py-2.5 min-h-[44px] text-xs font-bold text-slate-600 hover:text-slate-800 rounded-xl hover:bg-slate-100 transition-colors flex items-center justify-center cursor-pointer text-center"
           >
-            Cancel
+            Cancel Order
           </button>
           <button 
             type="submit" 
             id="submit-payment-btn"
-            class="px-5 py-2 text-xs sm:text-sm font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow-xs transition-transform active:scale-95 flex items-center gap-1.5"
+            class="w-full sm:w-auto px-5 py-2.5 min-h-[44px] text-xs sm:text-sm font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow-xs transition-transform active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <i data-lucide="check-circle" class="w-4 h-4"></i>
             <span>Submit Verification</span>
@@ -840,6 +905,9 @@ class SubscriptionManager {
       } catch (e) {}
     }
 
+    try {
+      localStorage.removeItem('eca_active_payment_session');
+    } catch (e) {}
     this.activeSession = null;
     window.app.showToast('Payment session cancelled.', 'info');
   }
@@ -904,6 +972,9 @@ class SubscriptionManager {
         window.app.showToast('Payment proof submitted successfully! Verification usually takes 10-30 minutes.', 'success');
       }
 
+      try {
+        localStorage.removeItem('eca_active_payment_session');
+      } catch (e) {}
       this.activeSession = null;
       this.selectedScreenshotBase64 = null;
 

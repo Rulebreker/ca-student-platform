@@ -333,12 +333,17 @@ class AuthManager {
           const uEmail = (u.email || '').trim().toLowerCase();
           const uUname = (u.username || '').trim().toLowerCase().replace(/^@+/, '');
           const uPrefix = uEmail.includes('@') ? uEmail.split('@')[0] : '';
+          const uId = (u.id || '').trim().toLowerCase();
+          const uReg = (u.registrationNo || '').trim().toLowerCase();
           return (
             cleanId === uEmail ||
             cleanUname === uUname ||
             cleanId === uUname ||
             cleanUname === uPrefix ||
             cleanUname === uPrefix.replace(/\./g, '_') ||
+            cleanId === uId ||
+            cleanUname === uId ||
+            (uReg && (cleanId === uReg || cleanUname === uReg)) ||
             (['admin', 'adminrulebreker', 'administrator'].includes(cleanUname) && u.role === 'admin') ||
             (['teacher', 'prof_rajesh'].includes(cleanUname) && u.role === 'teacher')
           );

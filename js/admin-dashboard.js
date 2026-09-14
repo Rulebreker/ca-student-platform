@@ -1077,7 +1077,7 @@ class AdminDashboard {
 
           <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
             <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-            <button type="submit" class="px-5 py-2 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">Save New Password</button>
+            <button type="submit" id="reset-pass-submit-btn" class="px-5 py-2 font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm disabled:opacity-50">Save New Password</button>
           </div>
         </form>
       </div>
@@ -1087,16 +1087,60 @@ class AdminDashboard {
     window.app.openModal('admin-generic-modal');
   }
 
-  saveResetPassword(e, studentId) {
+  async saveResetPassword(e, studentId) {
     e.preventDefault();
-    const newPass = document.getElementById('reset-pass-val').value.trim();
+    const inputEl = document.getElementById('reset-pass-val');
+    const submitBtn = document.getElementById('reset-pass-submit-btn') || (e.target ? e.target.querySelector('button[type="submit"]') : null);
+    const newPass = inputEl ? inputEl.value.trim() : '';
+
+    if (!newPass || newPass.length < 6) {
+      window.app.showToast('Password must be at least 6 characters long.', 'error');
+      return;
+    }
+
     const student = window.store.getUserById(studentId);
-    if (student) {
+    if (!student) {
+      window.app.showToast('Student not found in store.', 'error');
+      return;
+    }
+
+    const origBtnText = submitBtn ? submitBtn.innerHTML : 'Save New Password';
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="inline-block animate-spin mr-1.5">⏳</span> Updating...';
+    }
+
+    try {
+      const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+      const token = currentUser ? (currentUser.token || currentUser.email) : '';
+      const resp = await fetch('/api/admin/users/reset-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ userId: studentId, newPassword: newPass })
+      });
+
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'Failed to update student password on server.');
+      }
+
+      // Update local store with hashed password or fallback
       student.password = window.auth ? window.auth.hashPassword(newPass) : newPass;
       window.store.updateUser(student);
+
       window.app.closeModal('admin-generic-modal');
-      window.app.showToast(`Password updated successfully for ${student.name}`, 'success');
+      window.app.showToast(data.message || `Password updated successfully for ${student.name}`, 'success');
       this.renderStudents();
+    } catch (err) {
+      console.error('[AdminDashboard] saveResetPassword error:', err);
+      window.app.showToast(`Error: ${err.message}`, 'error');
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = origBtnText;
+      }
     }
   }
 

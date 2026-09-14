@@ -1301,6 +1301,10 @@ def manage_payment_channel(admin_user, action, params, data, sync_fn=None):
         log_audit_action(admin_user, 'DELETE_PAYMENT_CHANNEL', channel_id, old_copy, None, details=f"Deleted channel: {target['name']}", data=data, sync_fn=sync_fn)
         if sync_fn:
             sync_fn("payment_channels", {c['id']: c for c in channels})
+            try:
+                sync_fn(f"payment_channels/{channel_id}", None, method='DELETE')
+            except Exception:
+                pass
         return True, {'deletedId': channel_id}
 
     return False, f"Unknown action: {action}"
