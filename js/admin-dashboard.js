@@ -3872,7 +3872,8 @@ class AdminDashboard {
                       }[reqTier] || 'bg-slate-100 text-slate-700 border-slate-200';
                       return `<span class="px-2 py-0.5 text-[10px] font-bold uppercase rounded border ${tierBadgeStyle}">Tier: ${reqTier}</span>`;
                     })()}
-                    <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-50 text-emerald-700 border border-emerald-200">+${typeof q.marks === 'number' ? q.marks : 2.0} Pts</span>
+                    <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-blue-50 text-blue-700 border border-blue-200">${typeof q.marks === 'number' ? q.marks : 2.0} Marks</span>
+                    <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-50 text-amber-800 border border-amber-200">+${(q.xp !== undefined && q.xp !== null) ? q.xp : (q.points !== undefined && q.points !== null ? q.points : (test && test.pointsPerCorrect ? test.pointsPerCorrect : 10))} XP</span>
                   </div>
 
                   <!-- Reorder & Action Controls -->
@@ -4185,25 +4186,49 @@ class AdminDashboard {
             </select>
           </div>
 
-          <!-- Points / Marks for this MCQ -->
-          <div class="bg-blue-50/70 border border-blue-200 rounded-xl p-4 space-y-2">
-            <div class="flex items-center justify-between">
-              <label class="font-bold text-blue-950 text-sm">Points Awarded for Correct Answer *</label>
-              <span class="text-[10px] font-bold text-blue-700 bg-white px-2 py-0.5 rounded border border-blue-200">
-                Score Weight
-              </span>
+          <!-- Individual Marks & Platform XP for this MCQ -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <!-- Academic Marks -->
+            <div class="bg-blue-50/70 border border-blue-200 rounded-xl p-4 space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="font-bold text-blue-950 text-sm">Marks for Correct Answer *</label>
+                <span class="text-[10px] font-bold text-blue-700 bg-white px-2 py-0.5 rounded border border-blue-200">
+                  Academic Marks
+                </span>
+              </div>
+              <p class="text-[11px] text-blue-800">Specify score marks awarded for this question (0 or any number).</p>
+              <input 
+                type="number" 
+                id="q-marks" 
+                value="${existingQ && typeof existingQ.marks === 'number' ? existingQ.marks : (test && typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0)}" 
+                min="0" 
+                step="0.25" 
+                required
+                class="w-full px-3 py-2 border border-blue-300 rounded-lg text-xs font-bold bg-white text-slate-800 focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g. 2.0"
+              >
             </div>
-            <p class="text-[11px] text-blue-800">Specify score points to award when the student selects the correct option.</p>
-            <input 
-              type="number" 
-              id="q-marks" 
-              value="${existingQ && typeof existingQ.marks === 'number' ? existingQ.marks : (test && typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0)}" 
-              min="0.25" 
-              step="0.25" 
-              required
-              class="w-full sm:w-44 px-3 py-2 border border-blue-300 rounded-lg text-xs font-bold bg-white text-slate-800"
-              placeholder="e.g. 2.0"
-            >
+
+            <!-- Platform Gamification XP -->
+            <div class="bg-amber-50/70 border border-amber-200 rounded-xl p-4 space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="font-bold text-amber-950 text-sm">XP Awarded for Correct Answer *</label>
+                <span class="text-[10px] font-bold text-amber-700 bg-white px-2 py-0.5 rounded border border-amber-200">
+                  Platform XP
+                </span>
+              </div>
+              <p class="text-[11px] text-amber-800">Specify gamification XP awarded towards student's leaderboard & profile.</p>
+              <input 
+                type="number" 
+                id="q-xp" 
+                value="${existingQ && (typeof existingQ.xp === 'number' ? existingQ.xp : (typeof existingQ.points === 'number' ? existingQ.points : null)) !== null ? (existingQ.xp ?? existingQ.points) : (test && typeof test.pointsPerCorrect === 'number' ? test.pointsPerCorrect : 10)}" 
+                min="0" 
+                step="1" 
+                required
+                class="w-full px-3 py-2 border border-amber-300 rounded-lg text-xs font-bold bg-white text-slate-800 focus:ring-2 focus:ring-amber-500"
+                placeholder="e.g. 10"
+              >
+            </div>
           </div>
 
           <!-- Explanation / ICAI Standard Reference -->
@@ -4490,7 +4515,11 @@ class AdminDashboard {
     const explanationImageUrl = document.getElementById('q-explanation-img-url') ? document.getElementById('q-explanation-img-url').value : '';
     const marksInput = document.getElementById('q-marks');
     const marksVal = marksInput ? parseFloat(marksInput.value) : null;
-    const qMarks = (marksVal && !isNaN(marksVal) && marksVal > 0) ? marksVal : (test && typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0);
+    const qMarks = (marksVal !== null && !isNaN(marksVal) && marksVal >= 0) ? marksVal : (test && typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0);
+
+    const xpInput = document.getElementById('q-xp');
+    const xpVal = xpInput ? parseFloat(xpInput.value) : null;
+    const qXp = (xpVal !== null && !isNaN(xpVal) && xpVal >= 0) ? Math.round(xpVal) : (test && typeof test.pointsPerCorrect === 'number' ? test.pointsPerCorrect : 10);
 
     const tierSelect = document.getElementById('q-required-tier');
     const requiredTier = tierSelect ? tierSelect.value : 'free';
@@ -4520,6 +4549,8 @@ class AdminDashboard {
       },
       correctOption,
       marks: qMarks,
+      xp: qXp,
+      points: qXp,
       requiredTier: requiredTier || 'free',
       explanation: explanation || 'Refer to ICAI Module.',
       explanationImage: explanationImageUrl || null,

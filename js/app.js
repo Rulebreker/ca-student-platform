@@ -281,6 +281,17 @@ class App {
       window.lecturePlayer.renderCatalog();
     } else if (viewName === 'tests') {
       window.testEngine.renderCatalog();
+    } else if (viewName === 'test-taking') {
+      if (window.testEngine) {
+        if (!window.testEngine.activeTest) {
+          const restored = window.testEngine.restoreExamSession();
+          if (!restored) {
+            this.navigate('tests');
+          }
+        } else {
+          window.testEngine.renderExamInterface();
+        }
+      }
     } else if (viewName === 'assignments') {
       window.assignmentPortal.render();
     } else if (viewName === 'leaderboard') {

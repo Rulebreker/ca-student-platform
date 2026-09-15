@@ -4721,7 +4721,20 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         tier = 'free'
                     req_data['requiredTier'] = tier
                     now_iso = datetime.now(timezone.utc).isoformat()
-                    req_data['updatedAt'] = now_iso
+                    if 'marks' in req_data:
+                        try:
+                            req_data['marks'] = float(req_data['marks'])
+                        except (ValueError, TypeError):
+                            req_data['marks'] = 2.0
+                    if 'xp' in req_data or 'points' in req_data:
+                        try:
+                            raw_xp = req_data.get('xp', req_data.get('points', 10))
+                            xp_val = int(float(raw_xp))
+                            req_data['xp'] = xp_val
+                            req_data['points'] = xp_val
+                        except (ValueError, TypeError):
+                            req_data['xp'] = 10
+                            req_data['points'] = 10
 
                     if q_id:
                         idx = next((i for i, q in enumerate(questions) if q.get('id') == q_id), None)
@@ -5122,7 +5135,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 time_taken = int(req_data.get('timeTakenSeconds', 60))
                 is_preview = req_data.get('isPreview', False)
 
-                data = load_backend_data()
+                data = load_backend_data(refresh_collections=['tests', 'questions', 'users'])
                 test = next((t for t in data.get('tests', []) if t.get('id') == test_id), None)
                 if not test:
                     self.send_json(404, {'error': 'Test not found', 'code': 404})
@@ -5135,20 +5148,30 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     correct_count = 0
                     wrong_count = 0
                     unattempted_count = 0
+                    pos = float(test.get('marksPerCorrect', 2.0))
+                    neg = float(test.get('negativeMarksPerWrong', 0.5))
+                    earned_preview_points = 0
+                    gross = 0.0
+                    penalty = 0.0
+
                     for q in questions:
                         chosen = answers.get(q.get('id'))
+                        q_pos = float(q.get('marks', pos))
+                        q_neg = float(q.get('negativeMarks', neg))
+                        q_xp = float(q.get('xp', q.get('points', test.get('pointsPerCorrect', 10))))
+
                         if not chosen:
                             unattempted_count += 1
                         elif chosen == q.get('correctOption'):
                             correct_count += 1
+                            gross += q_pos
+                            earned_preview_points += q_xp
                         else:
                             wrong_count += 1
+                            penalty += q_neg
 
-                    pos = float(test.get('marksPerCorrect', 2.0))
-                    neg = float(test.get('negativeMarksPerWrong', 0.5))
-                    gross = correct_count * pos
                     score = max(0.0, gross - penalty)
-                    max_marks = float(test.get('maximumMarks')) if test.get('maximumMarks') is not None else float(len(questions) * pos if questions else 10.0)
+                    max_marks = float(test.get('maximumMarks')) if test.get('maximumMarks') is not None else float(sum(float(q.get('marks', pos)) for q in questions) if questions else 10.0)
                     pct = (score / max_marks * 100) if max_marks > 0 else 0
 
                     self.send_json(200, {
@@ -5164,6 +5187,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                             'grossMarks': gross,
                             'negativePenalty': penalty,
                             'finalScore': score,
+                            'earnedPoints': int(earned_preview_points),
                             'maximumMarks': max_marks,
                             'percentage': pct,
                             'timeTakenSeconds': time_taken,
@@ -5201,14 +5225,20 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 user_tier = get_user_tier(user.get('id'), data)
                 gross = 0.0
                 penalty = 0.0
+                earned_points = 0.0
+                pos_default = float(test.get('marksPerCorrect', 2.0))
+                neg_default = float(test.get('negativeMarksPerWrong', 0.5))
+                xp_default = float(test.get('pointsPerCorrect', 10))
+
                 for q in questions:
                     req_tier = str(q.get('requiredTier', 'free')).lower()
                     if not check_tier_access(user_tier, req_tier):
                         unattempted_count += 1
                         continue
 
-                    q_pos = float(q.get('marks', test.get('marksPerCorrect', 2.0)))
-                    q_neg = float(q.get('negativeMarks', test.get('negativeMarksPerWrong', 0.5)))
+                    q_pos = float(q.get('marks', pos_default))
+                    q_neg = float(q.get('negativeMarks', neg_default))
+                    q_xp = float(q.get('xp', q.get('points', xp_default)))
 
                     chosen = answers.get(q.get('id'))
                     if not chosen:
@@ -5216,16 +5246,15 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     elif chosen == q.get('correctOption'):
                         correct_count += 1
                         gross += q_pos
+                        earned_points += q_xp
                     else:
                         wrong_count += 1
                         penalty += q_neg
 
                 # Dynamic marking and platform points scheme
-                pos = float(test.get('marksPerCorrect', 2.0))
-                points_per_correct = float(test.get('pointsPerCorrect', pos))
+                earned_points = int(earned_points)
                 score = max(0.0, gross - penalty)
-                earned_points = correct_count * points_per_correct
-                max_marks = float(test.get('maximumMarks')) if test.get('maximumMarks') is not None else (sum(float(q.get('marks', pos)) for q in questions) if questions else 10.0)
+                max_marks = float(test.get('maximumMarks')) if test.get('maximumMarks') is not None else (sum(float(q.get('marks', pos_default)) for q in questions) if questions else 10.0)
                 pct = (score / max_marks * 100) if max_marks > 0 else 0
 
                 attempt_record = {

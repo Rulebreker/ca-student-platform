@@ -1030,14 +1030,84 @@ class TestEngine {
     this.secondsRemaining = this.totalDurationSeconds;
     this.currentAttemptId = this.isPreview ? 'preview-' + Date.now() : 'att-' + Date.now();
 
+    // Persist active session to prevent blank screen on refresh
+    this.saveExamSession();
+
     // Switch view to exam interface
     window.app.navigate('test-taking');
     this.renderExamInterface();
     this.startTimer();
   }
 
+  saveExamSession() {
+    if (!this.activeTest) return;
+    try {
+      const session = {
+        test: this.activeTest,
+        questions: this.questions,
+        currentIndex: this.currentIndex,
+        userAnswers: this.userAnswers,
+        markedForReview: this.markedForReview,
+        secondsRemaining: this.secondsRemaining,
+        totalDurationSeconds: this.totalDurationSeconds,
+        currentAttemptId: this.currentAttemptId,
+        isPreview: this.isPreview,
+        savedAt: Date.now()
+      };
+      localStorage.setItem('excellenceca_active_exam_session', JSON.stringify(session));
+    } catch (e) {
+      console.warn('[saveExamSession] Could not save exam session:', e);
+    }
+  }
+
+  clearExamSession() {
+    try {
+      localStorage.removeItem('excellenceca_active_exam_session');
+    } catch (e) {}
+  }
+
+  restoreExamSession() {
+    try {
+      const raw = localStorage.getItem('excellenceca_active_exam_session');
+      if (!raw) return false;
+      const session = JSON.parse(raw);
+      if (!session || !session.test || !Array.isArray(session.questions) || session.questions.length === 0) {
+        this.clearExamSession();
+        return false;
+      }
+      // Calculate elapsed time while away
+      const elapsedSeconds = Math.max(0, Math.floor((Date.now() - (session.savedAt || Date.now())) / 1000));
+      const remaining = Math.max(0, (session.secondsRemaining || 0) - elapsedSeconds);
+
+      this.activeTest = session.test;
+      this.questions = session.questions;
+      this.currentIndex = session.currentIndex || 0;
+      this.userAnswers = session.userAnswers || {};
+      this.markedForReview = session.markedForReview || {};
+      this.totalDurationSeconds = session.totalDurationSeconds || (session.test.durationMinutes * 60);
+      this.secondsRemaining = remaining;
+      this.currentAttemptId = session.currentAttemptId || ('att-' + Date.now());
+      this.isPreview = !!session.isPreview;
+
+      this.renderExamInterface();
+
+      if (remaining <= 0) {
+        window.app.showToast('Time expired while away. Submitting test...', 'warning');
+        this.submitTest(true);
+      } else {
+        this.startTimer();
+      }
+      return true;
+    } catch (err) {
+      console.warn('[restoreExamSession] Failed to restore session:', err);
+      this.clearExamSession();
+      return false;
+    }
+  }
+
   exitPreview() {
     clearInterval(this.timerInterval);
+    this.clearExamSession();
     this.activeTest = null;
     this.isPreview = false;
     window.app.navigate('admin');
@@ -1046,9 +1116,16 @@ class TestEngine {
 
   startTimer() {
     clearInterval(this.timerInterval);
+    let tickCount = 0;
     this.timerInterval = setInterval(() => {
       this.secondsRemaining--;
       this.updateTimerDisplay();
+
+      // Periodically sync remaining time to localStorage every 5 seconds
+      tickCount++;
+      if (tickCount % 5 === 0) {
+        this.saveExamSession();
+      }
 
       if (this.secondsRemaining <= 0) {
         clearInterval(this.timerInterval);
@@ -1126,6 +1203,7 @@ class TestEngine {
             </div>
 
             <button 
+              id="submit-test-btn"
               onclick="window.testEngine.confirmSubmit()"
               class="px-3.5 py-2 sm:px-4 sm:py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer flex-shrink-0"
             >
@@ -1345,22 +1423,26 @@ class TestEngine {
     const q = this.questions.find(x => x.id === questionId);
     if (q && q.isLocked) return;
     this.userAnswers[questionId] = optionKey;
+    this.saveExamSession();
     this.renderExamInterface();
   }
 
   clearAnswer(questionId) {
     delete this.userAnswers[questionId];
+    this.saveExamSession();
     this.renderExamInterface();
   }
 
   toggleReview(questionId) {
     this.markedForReview[questionId] = !this.markedForReview[questionId];
+    this.saveExamSession();
     this.renderExamInterface();
   }
 
   jumpToQuestion(index) {
     if (index >= 0 && index < this.questions.length) {
       this.currentIndex = index;
+      this.saveExamSession();
       this.renderExamInterface();
     }
   }
@@ -1368,6 +1450,7 @@ class TestEngine {
   nextQuestion() {
     if (this.currentIndex < this.questions.length - 1) {
       this.currentIndex++;
+      this.saveExamSession();
       this.renderExamInterface();
     }
   }
@@ -1375,28 +1458,55 @@ class TestEngine {
   previousQuestion() {
     if (this.currentIndex > 0) {
       this.currentIndex--;
+      this.saveExamSession();
       this.renderExamInterface();
     }
   }
 
   confirmSubmit() {
+    if (this._isSubmitting) return;
     const answeredCount = Object.keys(this.userAnswers).length;
     const totalCount = this.questions.length;
     const unattempted = totalCount - answeredCount;
 
     if (confirm(`You have answered ${answeredCount} of ${totalCount} questions (${unattempted} unattempted).\n\nAre you sure you want to finalize and submit your test?`)) {
-      this.submitTest(false);
+      const btn = document.getElementById('submit-test-btn');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="inline-flex items-center gap-1.5"><i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Submitting...</span>';
+        if (window.lucide) window.lucide.createIcons();
+      }
+      this._isSubmitting = true;
+      this.submitTest(false).finally(() => {
+        this._isSubmitting = false;
+        const resetBtn = document.getElementById('submit-test-btn');
+        if (resetBtn && this.activeTest) {
+          resetBtn.disabled = false;
+          resetBtn.innerHTML = `<i data-lucide="check-square" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i> ${this.isPreview ? 'Finish Preview' : 'Submit Test'}`;
+          if (window.lucide) window.lucide.createIcons();
+        }
+      });
     }
   }
 
   async submitTest(isTimeout = false) {
     clearInterval(this.timerInterval);
 
-    const user = window.auth.getCurrentUser();
-    const test = this.activeTest;
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    let test = this.activeTest;
+    if (!test) {
+      this.restoreExamSession();
+      test = this.activeTest;
+    }
+    if (!test) {
+      window.app.showToast('No active exam session found.', 'error');
+      window.app.navigate('tests');
+      return;
+    }
+
     const timeTakenSeconds = Math.max(1, this.totalDurationSeconds - this.secondsRemaining);
 
-    // Retrieve questions with answer keys (unlocked upon submission)
+    // Retrieve questions with answer keys (unlocked upon submission if available)
     const questionsWithKeys = window.store.getQuestionsByTestId(test.id);
 
     // Evaluate answers
@@ -1405,20 +1515,28 @@ class TestEngine {
     let unattemptedCount = 0;
     let grossMarks = 0;
     let totalPossibleMarks = 0;
+    let earnedPoints = 0;
 
     const defaultPos = typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0;
     const neg = typeof test.negativeMarksPerWrong === 'number' ? test.negativeMarksPerWrong : 0.5;
+    const defaultXp = typeof test.pointsPerCorrect === 'number' ? test.pointsPerCorrect : 10;
 
-    questionsWithKeys.forEach(q => {
-      const qMark = (typeof q.marks === 'number' && q.marks > 0) ? q.marks : defaultPos;
+    const evalQuestions = (questionsWithKeys && questionsWithKeys.length > 0) ? questionsWithKeys : this.questions;
+
+    evalQuestions.forEach(q => {
+      const qMark = (typeof q.marks === 'number' && q.marks >= 0) ? q.marks : defaultPos;
+      const qNeg = (typeof q.negativeMarks === 'number' && q.negativeMarks >= 0) ? q.negativeMarks : neg;
+      const qXp = (typeof q.xp === 'number' && q.xp >= 0) ? q.xp : ((typeof q.points === 'number' && q.points >= 0) ? q.points : defaultXp);
+
       totalPossibleMarks += qMark;
       const chosen = this.userAnswers[q.id];
       if (!chosen) {
         unattemptedCount++;
-      } else if (chosen === q.correctOption) {
+      } else if (q.correctOption && chosen === q.correctOption) {
         correctCount++;
         grossMarks += qMark;
-      } else {
+        earnedPoints += qXp;
+      } else if (q.correctOption) {
         wrongCount++;
       }
     });
@@ -1426,14 +1544,13 @@ class TestEngine {
     const negativePenalty = wrongCount * neg;
     const finalScore = Math.max(0, grossMarks - negativePenalty);
     if (totalPossibleMarks <= 0) {
-      totalPossibleMarks = test.maximumMarks || (questionsWithKeys.length * defaultPos);
+      totalPossibleMarks = test.maximumMarks || (evalQuestions.length * defaultPos);
     }
     const percentage = totalPossibleMarks > 0 ? (finalScore / totalPossibleMarks) * 100 : 0;
 
-    const earnedPoints = correctCount * (test.pointsPerCorrect || 10);
-
     if (this.isPreview) {
       // PREVIEW MODE: ZERO ATTEMPTS CONSUMED
+      this.clearExamSession();
       const previewRecord = {
         id: 'preview-' + Date.now(),
         testId: test.id,
@@ -1455,11 +1572,11 @@ class TestEngine {
         userAnswers: { ...this.userAnswers }
       };
 
-      this.showResultModal(null, previewRecord, questionsWithKeys);
+      this.showResultModal(null, previewRecord, evalQuestions);
       return;
     }
 
-    // Normal student submission: call backend if possible
+    // Normal student submission: call authoritative backend
     let backendAttempt = null;
     let backendQuestions = null;
     try {
@@ -1467,8 +1584,14 @@ class TestEngine {
       if (resp && resp.success && resp.attempt) {
         backendAttempt = resp.attempt;
         backendQuestions = resp.questions;
+      } else if (resp && !resp.success && !resp.offline) {
+        // Backend actively rejected attempt (e.g. limit reached, authentication issue)
+        window.app.showToast(resp.error || 'Test submission was rejected by the server.', 'error');
+        return;
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('[submitTest] Backend submit error, falling back:', e);
+    }
 
     const existingUserAttempts = window.store.getAttemptsByUser(user ? user.id : 'anon').filter(a => a.testId === test.id);
 
@@ -1482,7 +1605,7 @@ class TestEngine {
       startedAt: new Date(Date.now() - (timeTakenSeconds * 1000)).toISOString(),
       submittedAt: new Date().toISOString(),
       timeTakenSeconds: timeTakenSeconds,
-      totalQuestions: questionsWithKeys.length,
+      totalQuestions: evalQuestions.length,
       correctCount: correctCount,
       wrongCount: wrongCount,
       unattemptedCount: unattemptedCount,
@@ -1502,10 +1625,24 @@ class TestEngine {
       attemptRecord.totalMarks = totalPossibleMarks;
     }
 
+    // Save attempt to authoritative local store
     window.store.recordAttempt(attemptRecord);
 
+    // If backend returned unlocked questions with answers & explanations, update local store
+    if (backendQuestions && Array.isArray(backendQuestions) && backendQuestions.length > 0) {
+      backendQuestions.forEach(bq => {
+        if (bq && bq.id) {
+          window.store.updateQuestion(bq);
+        }
+      });
+    }
+
+    // Clear saved active exam session now that it is completed
+    this.clearExamSession();
+
     // Record Authoritative XP Transaction for Student
-    if (user && user.role === 'student' && earnedPoints > 0) {
+    const ptsToAward = attemptRecord.earnedPoints !== undefined ? attemptRecord.earnedPoints : earnedPoints;
+    if (user && user.role === 'student' && ptsToAward > 0) {
       const oldTotalXp = window.store.getUserTotalXp ? window.store.getUserTotalXp(user.id) : (user.totalXp || 0);
       window.store.recordXpTransaction({
         idempotencyKey: `mcq_attempt_${attemptRecord.id}`,
@@ -1513,16 +1650,16 @@ class TestEngine {
         sourceType: 'mcq_test',
         sourceId: test.id,
         activityName: `MCQ: ${test.title}`,
-        points: earnedPoints,
-        resultStatus: finalScore >= (totalPossibleMarks * 0.4) ? 'Passed' : 'Completed',
+        points: ptsToAward,
+        resultStatus: (attemptRecord.finalScore || finalScore) >= (totalPossibleMarks * 0.4) ? 'Passed' : 'Completed',
         metadata: {
-          score: finalScore,
+          score: attemptRecord.finalScore || finalScore,
           totalMarks: totalPossibleMarks,
-          correct: correctCount,
-          wrong: wrongCount
+          correct: attemptRecord.correctCount || correctCount,
+          wrong: attemptRecord.wrongCount || wrongCount
         }
       });
-      const newTotalXp = window.store.getUserTotalXp ? window.store.getUserTotalXp(user.id) : (oldTotalXp + earnedPoints);
+      const newTotalXp = window.store.getUserTotalXp ? window.store.getUserTotalXp(user.id) : (oldTotalXp + ptsToAward);
       if (window.leaderboardManager && typeof window.leaderboardManager.triggerRankUpIfEligible === 'function') {
         window.leaderboardManager.triggerRankUpIfEligible(user.id, oldTotalXp, newTotalXp);
       }
@@ -1534,16 +1671,16 @@ class TestEngine {
         userId: user.id,
         type: 'points_received',
         title: 'MCQ Assessment Completed!',
-        message: `You scored ${finalScore.toFixed(1)}/${totalPossibleMarks} on "${test.title}" and earned +${earnedPoints} Platform Points for the Leaderboard!`,
+        message: `You scored ${(attemptRecord.finalScore || finalScore).toFixed(1)}/${totalPossibleMarks} on "${test.title}" and earned +${ptsToAward} Platform Points for the Leaderboard!`,
         link: 'leaderboard',
-        metadata: { testId: test.id, points: earnedPoints }
+        metadata: { testId: test.id, points: ptsToAward }
       });
     }
 
     if (window.leaderboardManager) {
       window.leaderboardManager.calculateAllStandings();
     }
-    this.showResultModal(attemptRecord.id, null, backendQuestions || questionsWithKeys);
+    this.showResultModal(attemptRecord.id, null, backendQuestions || evalQuestions);
   }
 
   showResultModal(attemptId, previewRecord = null, unlockedQuestions = null) {
