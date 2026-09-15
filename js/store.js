@@ -2128,6 +2128,19 @@ class AppStore {
       return !sName.includes('econ') && !sName.includes('quant') && !sName.includes('math');
     });
   }
+  getSubjectsByLevel(level) {
+    if (!level || level === 'all' || String(level).trim().toLowerCase() === 'all levels') {
+      return this.getSubjects();
+    }
+    const norm = String(level).trim().toUpperCase();
+    return this.getSubjects().filter(s => {
+      const sLevel = String(s.level || '').toUpperCase();
+      if (norm.includes('FOUNDATION')) return sLevel.includes('FOUNDATION') || !s.level;
+      if (norm.includes('INTER')) return sLevel.includes('INTER');
+      if (norm.includes('FINAL')) return sLevel.includes('FINAL');
+      return sLevel === norm;
+    });
+  }
   saveSubjects(subjects) {
     localStorage.setItem(STORAGE_KEYS.SUBJECTS, JSON.stringify(subjects));
   }

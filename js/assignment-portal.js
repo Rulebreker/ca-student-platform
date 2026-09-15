@@ -429,7 +429,7 @@ class AssignmentPortal {
               ${isTierLocked ? `
                 <button 
                   type="button"
-                  onclick="window.app.navigate('passes')"
+                  onclick="window.assignmentPortal ? window.assignmentPortal.showUnlockModal('${asg.id}') : (window.testEngine ? window.testEngine.showUnlockModal('${asg.id}', 'paper') : window.app.navigate('passes'))"
                   class="w-full py-2.5 text-xs font-bold rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                 >
                   <i data-lucide="key" class="w-3.5 h-3.5"></i> Unlock this Test Paper
@@ -948,6 +948,16 @@ class AssignmentPortal {
     return `${day} ${month} ${year}, ${formattedHours}:${minutes} ${ampm}`;
   }
 
+  showUnlockModal(paperId) {
+    if (window.testEngine && typeof window.testEngine.showUnlockModal === 'function') {
+      window.testEngine.showUnlockModal(paperId, 'paper');
+    } else if (window.subscriptionManager && typeof window.subscriptionManager.openPricingModal === 'function') {
+      window.subscriptionManager.openPricingModal();
+    } else if (window.app && typeof window.app.navigate === 'function') {
+      window.app.navigate('passes');
+    }
+  }
+
   openAssignmentModal(asgId) {
     const asg = window.store.getAssignmentById(asgId);
     if (!asg) return;
@@ -1058,7 +1068,7 @@ class AssignmentPortal {
             </div>
             <button 
               type="button"
-              onclick="window.app.closeModal('assignment-modal'); window.app.navigate('passes');"
+              onclick="window.app.closeModal('assignment-modal'); (window.assignmentPortal && window.assignmentPortal.showUnlockModal) ? window.assignmentPortal.showUnlockModal('${asg.id}') : (window.testEngine ? window.testEngine.showUnlockModal('${asg.id}', 'paper') : window.app.navigate('passes'));"
               class="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm inline-flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <i data-lucide="sparkles" class="w-4 h-4"></i> Upgrade Pass
@@ -1143,7 +1153,7 @@ class AssignmentPortal {
             </p>
             <button 
               type="button"
-              onclick="window.app.closeModal('assignment-modal'); window.app.navigate('passes');"
+              onclick="window.app.closeModal('assignment-modal'); (window.assignmentPortal && window.assignmentPortal.showUnlockModal) ? window.assignmentPortal.showUnlockModal('${asg.id}') : (window.testEngine ? window.testEngine.showUnlockModal('${asg.id}', 'paper') : window.app.navigate('passes'));"
               class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm cursor-pointer inline-flex items-center gap-1.5"
             >
               <i data-lucide="sparkles" class="w-4 h-4"></i> View Passes & Upgrade →

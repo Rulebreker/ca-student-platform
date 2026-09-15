@@ -149,11 +149,37 @@ class TestEngine {
     // Unify visibility: Count exactly what is visible to the student
     const allPublishedTests = window.store.getTests().filter(t => t.isPublished || t.status === 'Published' || t.status === 'Live');
     const allVisibleTests = allPublishedTests.filter(t => this.isTestVisibleForStudent(t, userTier));
-    const subjects = window.store.getSubjects ? window.store.getSubjects() : [];
+
+    // Scoped tests for the active exam level
+    let levelVisibleTests = allVisibleTests;
+    if (this.selectedLevel && this.selectedLevel !== 'all') {
+      const targetLvl = this.selectedLevel.toUpperCase();
+      levelVisibleTests = allVisibleTests.filter(t => {
+        const tLvl = (t.examLevel || 'CA Foundation').toUpperCase();
+        if (targetLvl.includes('FOUNDATION')) return tLvl.includes('FOUNDATION');
+        if (targetLvl.includes('INTER')) return tLvl.includes('INTER');
+        if (targetLvl.includes('FINAL')) return tLvl.includes('FINAL');
+        return tLvl === targetLvl;
+      });
+    }
+
+    // Scoped subjects for the active exam level
+    const subjects = (this.selectedLevel && this.selectedLevel !== 'all' && window.store && window.store.getSubjectsByLevel)
+      ? window.store.getSubjectsByLevel(this.selectedLevel)
+      : (window.store && window.store.getSubjects ? window.store.getSubjects() : []);
+
+    // Auto-reset selectedSubject if not valid in active level
+    if (this.selectedSubject && this.selectedSubject !== 'all') {
+      const isValid = subjects.some(s => s.id === this.selectedSubject || s.name === this.selectedSubject);
+      if (!isValid) {
+        this.selectedSubject = 'all';
+      }
+    }
+
     const user = window.auth ? window.auth.getCurrentUser() : null;
-    const visibleTestIds = new Set(allVisibleTests.map(t => t.id));
+    const levelVisibleTestIds = new Set(levelVisibleTests.map(t => t.id));
     const bookmarkedCount = user && window.store 
-      ? window.store.getBookmarks(user.id).filter(b => (b.itemType === 'test' || !b.itemType) && visibleTestIds.has(b.itemId)).length 
+      ? window.store.getBookmarks(user.id).filter(b => (b.itemType === 'test' || !b.itemType) && levelVisibleTestIds.has(b.itemId)).length 
       : 0;
     const levels = ['all', 'CA Foundation', 'CA Intermediate', 'CA Final'];
 
@@ -189,7 +215,7 @@ class TestEngine {
           }"
         >
           <span>All Tests</span>
-          <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono ${this.selectedSubject === 'all' && !this.filterBookmarkedOnly ? 'bg-blue-700/90 text-white' : 'bg-slate-100 text-slate-600'}">${allVisibleTests.length}</span>
+          <span class="px-1.5 py-0.5 rounded-full text-[10px] font-mono ${this.selectedSubject === 'all' && !this.filterBookmarkedOnly ? 'bg-blue-700/90 text-white' : 'bg-slate-100 text-slate-600'}">${levelVisibleTests.length}</span>
         </button>
 
         <!-- Bookmarked Filter Pill -->
@@ -208,7 +234,7 @@ class TestEngine {
         </button>
 
         ${subjects.map(s => {
-          const count = allVisibleTests.filter(t => t.subjectId === s.id || t.subject === s.name).length;
+          const count = levelVisibleTests.filter(t => t.subjectId === s.id || t.subject === s.name).length;
           const isActive = this.selectedSubject === s.id && !this.filterBookmarkedOnly;
           return `
             <button 
@@ -234,6 +260,18 @@ class TestEngine {
   filterLevel(lvl) {
     this.selectedLevel = lvl;
     this.currentPage = 1;
+
+    // Reset selected subject if not valid in the newly selected level
+    if (this.selectedSubject && this.selectedSubject !== 'all') {
+      const validSubjects = (lvl && lvl !== 'all' && window.store && window.store.getSubjectsByLevel)
+        ? window.store.getSubjectsByLevel(lvl)
+        : (window.store && window.store.getSubjects ? window.store.getSubjects() : []);
+      const isValid = validSubjects.some(s => s.id === this.selectedSubject || s.name === this.selectedSubject);
+      if (!isValid) {
+        this.selectedSubject = 'all';
+      }
+    }
+
     this.renderSubjectFilters();
     this.renderCards();
   }
@@ -595,14 +633,22 @@ class TestEngine {
     if (window.lucide) window.lucide.createIcons();
   }
 
-  showUnlockModal(testId) {
-    const test = window.store ? window.store.getTestById(testId) : null;
-    if (!test) return;
+  showUnlockModal(itemId, itemType = 'test') {
+    let test = window.store ? window.store.getTestById(itemId) : null;
+    let paper = null;
+    if (itemType === 'paper' || itemType === 'assignment') {
+      paper = window.store && window.store.getAssignmentById ? window.store.getAssignmentById(itemId) : null;
+    } else if (!test && window.store && window.store.getAssignmentById) {
+      paper = window.store.getAssignmentById(itemId);
+    }
+    const item = paper || test;
+    if (!item) return;
+    const isPaper = Boolean(paper);
 
     const user = window.auth ? window.auth.getCurrentUser() : null;
     const userTier = this.getUserTier();
-    const allowedPlans = (Array.isArray(test.allowedPlans) && test.allowedPlans.length > 0)
-      ? test.allowedPlans.map(p => String(p).toLowerCase().trim())
+    const allowedPlans = (Array.isArray(item.allowedPlans) && item.allowedPlans.length > 0)
+      ? item.allowedPlans.map(p => String(p).toLowerCase().trim())
       : ['trial', 'core', 'plus', 'elite'];
 
     let modal = document.getElementById('test-unlock-modal');
@@ -621,9 +667,10 @@ class TestEngine {
     const content = document.getElementById('test-unlock-modal-content');
     if (!content) return;
 
-    const subject = window.store.getSubjectById ? window.store.getSubjectById(test.subjectId) : null;
-    const subjectName = subject ? subject.name : (test.subject || 'CA Practice');
-    const reqText = this.formatRequiredPlans(test.allowedPlans, test.requiredTier);
+    const subject = window.store && window.store.getSubjectById ? window.store.getSubjectById(item.subjectId) : null;
+    const subjectName = subject ? subject.name : (item.subject || (isPaper ? 'Descriptive Test Paper' : 'CA Practice'));
+    const reqText = this.formatRequiredPlans(item.allowedPlans, item.requiredTier);
+    const itemLabel = isPaper ? 'Test Paper' : 'Mock Test';
 
     // Build cards for eligible tiers
     const planCards = [];
@@ -639,9 +686,9 @@ class TestEngine {
               <h4 class="font-bold text-slate-900 text-sm">₹9 Elite 10-Day Trial</h4>
               <span class="text-base font-extrabold text-amber-600">₹9</span>
             </div>
-            <p class="text-xs text-slate-600 mb-3">Instant full Elite access to this test, all questions, & grading for 10 days.</p>
+            <p class="text-xs text-slate-600 mb-3">Instant full Elite access to this ${isPaper ? 'test paper' : 'test'}, all questions, & grading for 10 days.</p>
             <ul class="text-[11px] text-slate-500 space-y-1 mb-4">
-              <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> Unlocks this Mock Test immediately</li>
+              <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> Unlocks this ${itemLabel} immediately</li>
               <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> 10 days of unlimited mock attempts</li>
             </ul>
           </div>
@@ -694,7 +741,7 @@ class TestEngine {
             </div>
             <p class="text-xs text-slate-600 mb-3">Access to premium MCQs, test papers, and 24h fast-track evaluation.</p>
             <ul class="text-[11px] text-slate-500 space-y-1 mb-4">
-              <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> Full access to this Mock Test</li>
+              <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> Full access to this ${itemLabel}</li>
               <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> +1,000 instant bonus XP points</li>
             </ul>
           </div>
@@ -719,7 +766,7 @@ class TestEngine {
             </div>
             <p class="text-xs text-slate-600 mb-3">Access to all premium MCQ tests and standard 48h copy checking.</p>
             <ul class="text-[11px] text-slate-500 space-y-1 mb-4">
-              <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> Full access to this Mock Test</li>
+              <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> Full access to this ${itemLabel}</li>
               <li class="flex items-center gap-1.5"><i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 shrink-0"></i> +500 instant bonus XP points</li>
             </ul>
           </div>
@@ -734,6 +781,10 @@ class TestEngine {
       `);
     }
 
+    const metaDetail = isPaper
+      ? `${item.durationMinutes ? `${item.durationMinutes} mins` : 'Flexible Time'} • Descriptive Test Paper • ${item.maximumMarks || 100} Marks`
+      : `${item.durationMinutes} mins • ${item.totalQuestions} Questions • ${item.maximumMarks || 10} Marks`;
+
     content.innerHTML = `
       <div class="flex items-start justify-between pb-4 border-b border-slate-100">
         <div class="flex items-center gap-3">
@@ -741,8 +792,8 @@ class TestEngine {
             <i data-lucide="lock" class="w-5 h-5"></i>
           </div>
           <div>
-            <h3 class="text-base font-bold text-slate-900">Unlock Mock Test</h3>
-            <p class="text-xs text-slate-500">Select an eligible pass to attempt this test</p>
+            <h3 class="text-base font-bold text-slate-900">${isPaper ? 'Unlock Test Paper' : 'Unlock Mock Test'}</h3>
+            <p class="text-xs text-slate-500">${isPaper ? 'Select an eligible pass to attempt this test paper' : 'Select an eligible pass to attempt this test'}</p>
           </div>
         </div>
         <button 
@@ -764,8 +815,8 @@ class TestEngine {
             Requires ${reqText}
           </span>
         </div>
-        <h4 class="text-sm font-bold text-slate-900">${test.title}</h4>
-        <p class="text-xs text-slate-500 mt-1">${test.durationMinutes} mins • ${test.totalQuestions} Questions • ${test.maximumMarks || 10} Marks</p>
+        <h4 class="text-sm font-bold text-slate-900">${item.title}</h4>
+        <p class="text-xs text-slate-500 mt-1">${metaDetail}</p>
       </div>
 
       <!-- Passes Grid -->
