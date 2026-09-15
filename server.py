@@ -2104,13 +2104,50 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not admin_u or admin_u.get('role') != 'admin':
                 self.send_json(403, {'success': False, 'error': 'Administrator authorization required.', 'code': 403})
                 return
-            data = load_backend_data(refresh_collections=['payment_sessions'])
+            data = load_backend_data(refresh_collections=['payment_sessions', 'users'])
             sessions = data.get('payment_sessions', [])
             status_filter = query.get('status', [None])[0]
             if status_filter and status_filter != 'all':
                 filtered = [s for s in sessions if s.get('status') == status_filter]
             else:
                 filtered = sessions
+
+            # Build authentic user lookup from database users
+            raw_users = data.get('users', {})
+            users_list = list(raw_users.values()) if isinstance(raw_users, dict) else (raw_users if isinstance(raw_users, list) else [])
+            user_by_id = {}
+            user_by_email = {}
+            for u in users_list:
+                if isinstance(u, dict):
+                    uid = u.get('id')
+                    uemail = str(u.get('email') or '').strip().lower()
+                    if uid:
+                        user_by_id[uid] = u
+                    if uemail:
+                        user_by_email[uemail] = u
+
+            enriched_payments = []
+            for s in filtered:
+                if not isinstance(s, dict):
+                    continue
+                s_copy = dict(s)
+                uid = s_copy.get('userId') or s_copy.get('studentId')
+                uemail = str(s_copy.get('userEmail') or s_copy.get('studentEmail') or '').strip().lower()
+                user_obj = user_by_id.get(uid) or user_by_email.get(uemail)
+                if user_obj:
+                    if user_obj.get('name'):
+                        s_copy['studentName'] = user_obj.get('name')
+                        s_copy['userName'] = user_obj.get('name')
+                    if user_obj.get('username'):
+                        s_copy['username'] = user_obj.get('username')
+                    if user_obj.get('email'):
+                        s_copy['studentEmail'] = user_obj.get('email')
+                        s_copy['userEmail'] = user_obj.get('email')
+                    if user_obj.get('id'):
+                        s_copy['studentId'] = user_obj.get('id')
+                        s_copy['userId'] = user_obj.get('id')
+                enriched_payments.append(s_copy)
+
             stats = {
                 'total': len(sessions),
                 'pending': sum(1 for s in sessions if s.get('status') in ('pending_verification', 'late_payment')),
@@ -2118,10 +2155,10 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 'rejected': sum(1 for s in sessions if s.get('status') == 'rejected'),
                 'totalRevenue': sum(s.get('amount', 0) for s in sessions if s.get('status') == 'approved')
             }
-            print(f"[ADMIN_PAYMENTS] Serving {len(filtered)} payment sessions to admin {admin_u.get('email')} (filter={status_filter})", flush=True)
+            print(f"[ADMIN_PAYMENTS] Serving {len(enriched_payments)} payment sessions to admin {admin_u.get('email')} (filter={status_filter})", flush=True)
             self.send_json(200, {
                 'success': True,
-                'payments': filtered,
+                'payments': enriched_payments,
                 'stats': stats
             })
             return
@@ -4270,6 +4307,16 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     paper_data['createdAt'] = datetime.now(timezone.utc).isoformat()
                     papers.insert(0, paper_data)
                 data['papers'] = papers
+
+                # Synchronize data['assignments'] to match data['papers']
+                assignments = data.get('assignments', [])
+                asg_idx = next((i for i, a in enumerate(assignments) if a.get('id') == paper_data['id']), None)
+                if asg_idx is not None:
+                    assignments[asg_idx].update(paper_data)
+                else:
+                    assignments.insert(0, paper_data)
+                data['assignments'] = assignments
+
                 save_backend_data(data)
                 sync_to_firebase(f"papers/{paper_data['id']}", paper_data, method='PUT')
                 sync_to_firebase(f"assignments/{paper_data['id']}", paper_data, method='PUT')

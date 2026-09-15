@@ -782,8 +782,8 @@ class TestEngine {
     }
 
     const metaDetail = isPaper
-      ? `${item.durationMinutes ? `${item.durationMinutes} mins` : 'Flexible Time'} • Descriptive Test Paper • ${item.maximumMarks || 100} Marks`
-      : `${item.durationMinutes} mins • ${item.totalQuestions} Questions • ${item.maximumMarks || 10} Marks`;
+      ? `${item.durationMinutes ? `${item.durationMinutes} mins` : 'Flexible Time'} • Descriptive Test Paper • ${item.maximumMarks !== undefined && item.maximumMarks !== null ? item.maximumMarks : 100} Marks`
+      : `${item.durationMinutes} mins • ${item.totalQuestions} Questions • ${item.maximumMarks !== undefined && item.maximumMarks !== null ? item.maximumMarks : 10} Marks`;
 
     content.innerHTML = `
       <div class="flex items-start justify-between pb-4 border-b border-slate-100">

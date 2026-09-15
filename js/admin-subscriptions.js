@@ -1471,12 +1471,14 @@
       if (currentFilter === 'rejected' && p.status !== 'rejected') return false;
 
       if (search) {
+        const studentUser = window.store && (window.store.getUserById(p.userId || p.studentId) || window.store.getUserByEmail(p.userEmail || p.studentEmail));
         const utr = (p.utr || '').toLowerCase();
-        const studentName = (p.studentName || '').toLowerCase();
-        const studentEmail = (p.studentEmail || '').toLowerCase();
-        const sessionId = (p.sessionId || '').toLowerCase();
-        const planName = (p.planName || '').toLowerCase();
-        if (!utr.includes(search) && !studentName.includes(search) && !studentEmail.includes(search) && !sessionId.includes(search) && !planName.includes(search)) {
+        const studentName = ((studentUser && studentUser.name) || p.studentName || p.userName || '').toLowerCase();
+        const username = ((studentUser && studentUser.username) || p.username || '').toLowerCase();
+        const studentEmail = ((studentUser && studentUser.email) || p.studentEmail || p.userEmail || '').toLowerCase();
+        const sessionId = (p.sessionId || p.paymentSessionId || '').toLowerCase();
+        const planName = (p.planName || p.planId || '').toLowerCase();
+        if (!utr.includes(search) && !studentName.includes(search) && !username.includes(search) && !studentEmail.includes(search) && !sessionId.includes(search) && !planName.includes(search)) {
           return false;
         }
       }
@@ -1629,11 +1631,19 @@
                     statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">Incomplete</span>';
                   }
 
+                  const studentUser = window.store && (window.store.getUserById(p.userId || p.studentId) || window.store.getUserByEmail(p.userEmail || p.studentEmail));
+                  const studentName = (studentUser && studentUser.name) || p.studentName || p.userName || 'Student';
+                  const studentUsername = (studentUser && studentUser.username) || p.username || '';
+                  const studentEmail = (studentUser && studentUser.email) || p.studentEmail || p.userEmail || p.studentId || '';
+
                   return `
                     <tr class="hover:bg-slate-50/70 transition-colors ${isLate ? 'bg-orange-50/20' : ''}">
                       <td class="py-3 px-4">
-                        <span class="font-bold text-slate-900 block">${p.studentName || 'Student'}</span>
-                        <span class="text-xs text-slate-500 block">${p.studentEmail || p.studentId}</span>
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                          <span class="font-bold text-slate-900">${studentName}</span>
+                          ${studentUsername ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-200">@${studentUsername}</span>` : ''}
+                        </div>
+                        <span class="text-xs text-slate-500 block">${studentEmail}</span>
                         <span class="text-[11px] font-bold text-rose-700 mt-0.5 inline-block">${p.planName || p.planId}</span>
                       </td>
                       <td class="py-3 px-4 font-black text-slate-900">₹${p.amount}</td>
@@ -1778,16 +1788,19 @@
 
     const filtered = payments.filter(p => {
       if (currentFilter === 'pending' && p.status !== 'pending_verification' && p.status !== 'late_payment') return false;
+      if (currentFilter === 'late' && p.status !== 'late_payment') return false;
       if (currentFilter === 'approved' && p.status !== 'approved') return false;
       if (currentFilter === 'rejected' && p.status !== 'rejected') return false;
 
       if (search) {
+        const studentUser = window.store && (window.store.getUserById(p.userId || p.studentId) || window.store.getUserByEmail(p.userEmail || p.studentEmail));
         const utr = (p.utr || '').toLowerCase();
-        const sName = (p.studentName || '').toLowerCase();
-        const sEmail = (p.studentEmail || '').toLowerCase();
-        const sid = (p.sessionId || '').toLowerCase();
-        const pName = (p.planName || '').toLowerCase();
-        if (!utr.includes(search) && !sName.includes(search) && !sEmail.includes(search) && !sid.includes(search) && !pName.includes(search)) {
+        const sName = ((studentUser && studentUser.name) || p.studentName || p.userName || '').toLowerCase();
+        const username = ((studentUser && studentUser.username) || p.username || '').toLowerCase();
+        const sEmail = ((studentUser && studentUser.email) || p.studentEmail || p.userEmail || '').toLowerCase();
+        const sid = (p.sessionId || p.paymentSessionId || '').toLowerCase();
+        const pName = (p.planName || p.planId || '').toLowerCase();
+        if (!utr.includes(search) && !sName.includes(search) && !username.includes(search) && !sEmail.includes(search) && !sid.includes(search) && !pName.includes(search)) {
           return false;
         }
       }
@@ -1851,11 +1864,19 @@
                   statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">Incomplete</span>';
                 }
 
+                const studentUser = window.store && (window.store.getUserById(p.userId || p.studentId) || window.store.getUserByEmail(p.userEmail || p.studentEmail));
+                const studentName = (studentUser && studentUser.name) || p.studentName || p.userName || 'Student';
+                const studentUsername = (studentUser && studentUser.username) || p.username || '';
+                const studentEmail = (studentUser && studentUser.email) || p.studentEmail || p.userEmail || p.studentId || '';
+
                 return `
                   <tr class="hover:bg-slate-50/70 transition-colors ${isLate ? 'bg-orange-50/20' : ''}">
                     <td class="py-3 px-4">
-                      <span class="font-bold text-slate-900 block">${p.studentName || 'Student'}</span>
-                      <span class="text-xs text-slate-500 block">${p.studentEmail || p.studentId}</span>
+                      <div class="flex items-center gap-1.5 flex-wrap">
+                        <span class="font-bold text-slate-900">${studentName}</span>
+                        ${studentUsername ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-200">@${studentUsername}</span>` : ''}
+                      </div>
+                      <span class="text-xs text-slate-500 block">${studentEmail}</span>
                       <span class="text-[11px] font-bold text-rose-700 mt-0.5 inline-block">${p.planName || p.planId}</span>
                     </td>
                     <td class="py-3 px-4 font-black text-slate-900">₹${p.amount}</td>
@@ -1984,7 +2005,10 @@
   AdminDashboard.prototype.promptApprovePayment = function(sessionId) {
     const session = (this._cachedPaymentSessions || []).find(s => s.sessionId === sessionId);
     const amount = session ? session.amount : '';
-    const studentName = session ? (session.studentName || 'Student') : 'Student';
+    const studentUser = session && window.store && (window.store.getUserById(session.userId || session.studentId) || window.store.getUserByEmail(session.userEmail || session.studentEmail));
+    const studentName = (studentUser && studentUser.name) || (session ? (session.studentName || session.userName) : 'Student');
+    const studentUsername = (studentUser && studentUser.username) || (session ? session.username : '');
+    const studentDisplay = studentUsername ? `${studentName} (@${studentUsername})` : studentName;
     const planName = session ? (session.planName || session.planId) : 'Pass';
 
     const modalContent = document.getElementById('admin-generic-modal-content');
@@ -2003,7 +2027,7 @@
         </div>
 
         <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 space-y-1">
-          <p class="font-bold">Approve payment of ₹${amount} for ${studentName} (${planName})?</p>
+          <p class="font-bold">Approve payment of ₹${amount} for ${studentDisplay} (${planName})?</p>
           <p class="text-[11px] text-emerald-700">This will authoritatively activate the subscription, update SLA tracking, and credit bonus XP points to the student ledger.</p>
         </div>
 
@@ -2212,12 +2236,22 @@
     }
     const hasImage = Boolean(cleanSrc);
 
+    const studentUser = session && window.store && (window.store.getUserById(session.userId || session.studentId) || window.store.getUserByEmail(session.userEmail || session.studentEmail));
+    const studentName = (studentUser && studentUser.name) || (session ? (session.studentName || session.userName) : '');
+    const studentUsername = (studentUser && studentUser.username) || (session ? session.username : '');
+
     modalContent.innerHTML = `
       <div class="p-5 space-y-4">
         <div class="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
             <span class="text-xs font-bold text-rose-700 uppercase tracking-wider">Payment Receipt Inspection</span>
             <h3 class="text-sm font-black text-slate-900 mt-0.5">${title || 'Bank Screenshot'}</h3>
+            ${studentName ? `
+              <div class="text-xs text-slate-600 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                <span class="font-bold text-slate-900">${studentName}</span>
+                ${studentUsername ? `<span class="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-slate-200 text-slate-700">@${studentUsername}</span>` : ''}
+              </div>
+            ` : ''}
           </div>
           <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg">
             <i data-lucide="x" class="w-5 h-5"></i>

@@ -606,8 +606,12 @@ def create_payment_session(user, plan_id, data, sync_fn=None):
         'paymentSessionId': payment_session_id,
         'sessionId': payment_session_id,
         'userId': user['id'],
+        'studentId': user['id'],
         'userEmail': user.get('email'),
+        'studentEmail': user.get('email'),
         'userName': user.get('name'),
+        'studentName': user.get('name'),
+        'username': user.get('username', ''),
         'userPhone': user.get('phone', ''),
         'caLevel': user.get('caLevel', ''),
         'planId': plan['id'],
@@ -695,6 +699,24 @@ def submit_payment(user_id, session_id, utr, screenshot, data, sync_fn=None):
     session['utr'] = clean_utr
     session['screenshot'] = screenshot.strip()
     session['submittedAt'] = now_iso
+
+    # Ensure linked user metadata (studentName, username) is present
+    if not session.get('studentName') or not session.get('username'):
+        raw_users = data.get('users', {})
+        users_list = list(raw_users.values()) if isinstance(raw_users, dict) else (raw_users if isinstance(raw_users, list) else [])
+        user_obj = next((u for u in users_list if isinstance(u, dict) and (u.get('id') == user_id or (session.get('userEmail') and u.get('email') == session.get('userEmail')))), None)
+        if user_obj:
+            if user_obj.get('username'):
+                session['username'] = user_obj.get('username')
+            if user_obj.get('name'):
+                session['userName'] = user_obj.get('name')
+                session['studentName'] = user_obj.get('name')
+            if user_obj.get('email'):
+                session['userEmail'] = user_obj.get('email')
+                session['studentEmail'] = user_obj.get('email')
+            if user_obj.get('id'):
+                session['userId'] = user_obj.get('id')
+                session['studentId'] = user_obj.get('id')
 
     if sync_fn:
         sync_fn(f"payment_sessions/{session_id}", session)

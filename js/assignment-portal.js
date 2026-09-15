@@ -380,7 +380,7 @@ class AssignmentPortal {
               <div>
                 <span class="text-slate-400 block text-[11px]">Duration & Marks</span>
                 <span class="font-bold text-slate-800">${isUntimed ? 'No Time Limit' : `${asg.durationMinutes || 180} Mins`}</span>
-                <span class="text-[10px] text-slate-500 block mt-0.5">${asg.maximumMarks || 100} Max Marks</span>
+                <span class="text-[10px] text-slate-500 block mt-0.5">${asg.maximumMarks !== undefined && asg.maximumMarks !== null ? asg.maximumMarks : 100} Max Marks</span>
               </div>
             </div>
 

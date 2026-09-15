@@ -1534,7 +1534,7 @@ class AdminDashboard {
                       ${a.topic || 'General'}
                     </td>
                     <td class="py-3 px-3 font-bold text-slate-800 whitespace-nowrap">
-                      ${a.maximumMarks} Marks
+                      ${a.maximumMarks !== undefined && a.maximumMarks !== null ? a.maximumMarks : 0} Marks
                     </td>
                     <td class="py-3 px-3 font-semibold text-slate-600 whitespace-nowrap">
                       ${a.durationMinutes || 180} Mins
@@ -1730,10 +1730,9 @@ class AdminDashboard {
               <input 
                 type="number" 
                 id="admin-paper-marks" 
-                min="10" 
-                max="500" 
+                min="0" 
                 required 
-                value="${paper ? paper.maximumMarks : 100}" 
+                value="${paper && paper.maximumMarks !== undefined && paper.maximumMarks !== null ? paper.maximumMarks : 100}" 
                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold focus:ring-2 focus:ring-blue-500"
               >
             </div>
@@ -1957,8 +1956,9 @@ class AdminDashboard {
     const examLevel = document.getElementById('admin-paper-exam-level') ? document.getElementById('admin-paper-exam-level').value : 'CA Foundation';
     const subjectId = document.getElementById('admin-paper-subject').value;
     const subjectObj = window.store.getSubjectById(subjectId) || { name: 'Accounting' };
-    const topic = document.getElementById('admin-paper-topic').value.trim();
-    const maximumMarks = parseInt(document.getElementById('admin-paper-marks').value, 10);
+    const rawMarks = document.getElementById('admin-paper-marks').value;
+    const parsedMarks = parseInt(rawMarks, 10);
+    const maximumMarks = !isNaN(parsedMarks) && parsedMarks >= 0 ? parsedMarks : 0;
 
     const isUntimed = !!(document.getElementById('admin-paper-untimed') && document.getElementById('admin-paper-untimed').checked);
     const durationInput = document.getElementById('admin-paper-duration');

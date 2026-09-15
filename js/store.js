@@ -1996,6 +1996,11 @@ class AppStore {
   getUserById(id) {
     return this.getUsers().find(u => u.id === id);
   }
+  getUserByEmail(email) {
+    if (!email) return null;
+    const norm = String(email).trim().toLowerCase();
+    return this.getUsers().find(u => u && u.email && String(u.email).trim().toLowerCase() === norm);
+  }
   addUser(user) {
     const users = this.getUsers();
     users.unshift(user);
@@ -2846,7 +2851,21 @@ class AppStore {
     }
     try {
       const arr = JSON.parse(data);
-      if (Array.isArray(arr) && arr.length > 0) return arr;
+      if (Array.isArray(arr) && arr.length > 0) {
+        // Enforce deduplication by id so duplicate localStorage entries are cleaned
+        const seen = new Set();
+        const unique = [];
+        for (const a of arr) {
+          if (a && a.id && !seen.has(a.id)) {
+            seen.add(a.id);
+            unique.push(a);
+          }
+        }
+        if (unique.length !== arr.length) {
+          localStorage.setItem(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(unique));
+        }
+        return unique.length > 0 ? unique : DEFAULT_ASSIGNMENTS;
+      }
       this.saveAssignments(DEFAULT_ASSIGNMENTS);
       return DEFAULT_ASSIGNMENTS;
     } catch (e) {
@@ -2854,18 +2873,34 @@ class AppStore {
     }
   }
   saveAssignments(assignments) {
-    localStorage.setItem(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(assignments));
+    if (!Array.isArray(assignments)) return;
+    // Deduplicate by id before persisting
+    const seen = new Set();
+    const unique = [];
+    for (const a of assignments) {
+      if (a && a.id && !seen.has(a.id)) {
+        seen.add(a.id);
+        unique.push(a);
+      }
+    }
+    localStorage.setItem(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(unique));
   }
   getAssignmentById(id) {
     return this.getAssignments().find(a => a.id === id);
   }
   addAssignment(asg) {
-    if (!asg) return;
+    if (!asg || !asg.id) return;
     Object.keys(asg).forEach(k => {
       if (asg[k] === undefined) asg[k] = null;
     });
     const assignments = this.getAssignments();
-    assignments.unshift(asg);
+    const existIdx = assignments.findIndex(a => a.id === asg.id);
+    if (existIdx !== -1) {
+      // Update in-place to prevent duplicate creation
+      assignments[existIdx] = asg;
+    } else {
+      assignments.unshift(asg);
+    }
     this.saveAssignments(assignments);
     if (window.firebaseSync && typeof window.firebaseSync.saveAssignment === 'function') {
       try {
