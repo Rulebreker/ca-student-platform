@@ -9,7 +9,7 @@
   "crons": [
     {
       "path": "/api/admin/ai/scheduler/tick",
-      "schedule": "* * * * *"
+      "schedule": "0 0 * * *"
     }
   ],
   "headers": [
