@@ -157,8 +157,15 @@ class AuthManager {
   }
 
   getCurrentUser() {
-    this.currentUser = window.store ? window.store.getCurrentUser() : null;
-    return this.currentUser;
+    if (this.currentUser) return this.currentUser;
+    if (window.store) {
+      const stored = window.store.getCurrentUser();
+      if (stored) {
+        this.currentUser = stored;
+        return this.currentUser;
+      }
+    }
+    return null;
   }
 
   isLoggedIn() {
@@ -250,11 +257,16 @@ class AuthManager {
     let serverAvailable = false;
     if (typeof fetch !== 'undefined') {
       try {
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timeoutId = controller ? setTimeout(() => controller.abort(), 12000) : null;
+
         const resp = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ identifier: cleanRaw, password: rawPass })
+          body: JSON.stringify({ identifier: cleanRaw, password: rawPass }),
+          signal: controller ? controller.signal : undefined
         });
+        if (timeoutId) clearTimeout(timeoutId);
 
         if (resp.status === 404) {
           console.warn('[AuthManager] /api/auth/login returned 404 (static hosting detected). Proceeding to local store & Firebase authentication fallback.');
@@ -283,6 +295,20 @@ class AuthManager {
             };
           }
 
+          if (resp.status === 400 || resp.status === 422) {
+            return {
+              success: false,
+              error: (data && data.error) || 'Login Failed: Invalid credentials or request format.'
+            };
+          }
+
+          if (resp.status === 429) {
+            return {
+              success: false,
+              error: 'Login Failed: Too many login attempts. Please wait a moment and try again.'
+            };
+          }
+
           if (resp.status >= 500) {
             console.warn('[AuthManager] Backend login error (>= 500), attempting local/Firebase authentication.');
             serverAvailable = false;
@@ -293,17 +319,21 @@ class AuthManager {
             }
             this._watchdogFailCount = 0;
 
-            // Merge / update into local store
+            // Merge / update into local store safely without crashing login
             if (window.store) {
-              const localUsers = window.store.getUsers();
-              const existingIdx = localUsers.findIndex(u => u.id === authUser.id || (u.email && u.email.toLowerCase() === (authUser.email || '').toLowerCase()));
-              if (existingIdx !== -1) {
-                localUsers[existingIdx] = { ...localUsers[existingIdx], ...authUser };
-                window.store.saveUsers(localUsers);
-              } else {
-                window.store.addUser(authUser);
+              try {
+                const localUsers = window.store.getUsers() || [];
+                const existingIdx = localUsers.findIndex(u => u.id === authUser.id || (u.email && u.email.toLowerCase() === (authUser.email || '').toLowerCase()));
+                if (existingIdx !== -1) {
+                  localUsers[existingIdx] = { ...localUsers[existingIdx], ...authUser };
+                  window.store.saveUsers(localUsers);
+                } else {
+                  window.store.addUser(authUser);
+                }
+                window.store.setCurrentUser(authUser);
+              } catch (storeErr) {
+                console.warn('[AuthManager] Local store update warning during login:', storeErr);
               }
-              window.store.setCurrentUser(authUser);
             }
 
             this.currentUser = authUser;
@@ -318,7 +348,7 @@ class AuthManager {
           }
         }
       } catch (netErr) {
-        // Network offline or connection failed - proceed to offline fallback
+        // Network offline or connection timed out - proceed to offline fallback
         console.warn('[AuthManager] Backend login request failed, falling back to local store:', netErr);
         serverAvailable = false;
       }

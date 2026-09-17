@@ -521,8 +521,8 @@ class App {
 
   async handleLoginSubmit(e) {
     if (e && e.preventDefault) e.preventDefault();
-    const identifier = document.getElementById('auth-email').value;
-    const pass = document.getElementById('auth-password').value;
+    const identifier = (document.getElementById('auth-email') ? document.getElementById('auth-email').value : '').trim();
+    const pass = document.getElementById('auth-password') ? document.getElementById('auth-password').value : '';
 
     const submitBtn = e && e.target ? e.target.querySelector('button[type="submit"]') : null;
     const originalBtnText = submitBtn ? submitBtn.innerHTML : '';
@@ -533,7 +533,7 @@ class App {
 
     try {
       const res = await window.auth.login(identifier, pass);
-      if (res.success) {
+      if (res && res.success) {
         this.closeModal('auth-modal');
         this.showToast(`Welcome back, ${res.user.name}!`, 'success');
 
@@ -561,8 +561,12 @@ class App {
           }
         }
       } else {
-        this.showToast(res.error, 'error');
+        const errMsg = (res && res.error) ? res.error : 'Login Failed: Invalid username or password.';
+        this.showToast(errMsg, 'error');
       }
+    } catch (err) {
+      console.error('[App] handleLoginSubmit error:', err);
+      this.showToast('Unable to sign in due to a network or connection issue. Please check your connection and try again.', 'error');
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;

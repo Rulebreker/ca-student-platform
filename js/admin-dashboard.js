@@ -36,25 +36,45 @@ class AdminDashboard {
     this.syncBackendUsers();
     this.renderTabs();
 
-    if (this.currentTab === 'overview') this.renderOverview();
-    else if (this.currentTab === 'banners') this.renderBanners();
-    else if (this.currentTab === 'students') this.renderStudents();
-    else if (this.currentTab === 'subscriptions') this.renderSubscriptions();
-    else if (this.currentTab === 'payments') this.renderPaymentVerifications();
-    else if (this.currentTab === 'payment-channels') this.renderPaymentChannels();
-    else if (this.currentTab === 'plans-config') this.renderPlansConfig();
-    else if (this.currentTab === 'audit-logs') this.renderAdminAuditLogs();
-    else if (this.currentTab === 'teachers') this.renderTeachers();
-    else if (this.currentTab === 'papers') this.renderTestPapers();
-    else if (this.currentTab === 'grading') this.renderGradingCenter();
-    else if (this.currentTab === 'xp-management') this.renderXpManagement();
-    else if (this.currentTab === 'xp-reset') this.renderXpResetSettings();
-    else if (this.currentTab === 'referrals') this.renderReferrals();
-    else if (this.currentTab === 'mcq-tests') this.renderMCQTests();
-    else if (this.currentTab === 'ranks-config') this.renderRanksConfig();
-    else if (this.currentTab === 'lectures') this.renderLectures();
-    else if (this.currentTab === 'subjects') this.renderSubjects();
-    else if (this.currentTab === 'ai-automation') this.renderAiAutomation();
+    try {
+      if (this.currentTab === 'overview') this.renderOverview();
+      else if (this.currentTab === 'banners') this.renderBanners();
+      else if (this.currentTab === 'students') this.renderStudents();
+      else if (this.currentTab === 'subscriptions') this.renderSubscriptions();
+      else if (this.currentTab === 'payments') this.renderPaymentVerifications();
+      else if (this.currentTab === 'payment-channels') this.renderPaymentChannels();
+      else if (this.currentTab === 'plans-config') this.renderPlansConfig();
+      else if (this.currentTab === 'audit-logs') this.renderAdminAuditLogs();
+      else if (this.currentTab === 'teachers') this.renderTeachers();
+      else if (this.currentTab === 'papers') this.renderTestPapers();
+      else if (this.currentTab === 'grading') this.renderGradingCenter();
+      else if (this.currentTab === 'xp-management') this.renderXpManagement();
+      else if (this.currentTab === 'xp-reset') this.renderXpResetSettings();
+      else if (this.currentTab === 'referrals') this.renderReferrals();
+      else if (this.currentTab === 'mcq-tests') this.renderMCQTests();
+      else if (this.currentTab === 'ranks-config') this.renderRanksConfig();
+      else if (this.currentTab === 'lectures') this.renderLectures();
+      else if (this.currentTab === 'subjects') this.renderSubjects();
+      else if (this.currentTab === 'ai-automation') this.renderAiAutomation();
+    } catch (tabErr) {
+      console.error(`[AdminDashboard] Error rendering tab "${this.currentTab}":`, tabErr);
+      const container = document.getElementById('admin-content-area');
+      if (container) {
+        container.innerHTML = `
+          <div class="bg-rose-50 border border-rose-200 rounded-2xl p-8 text-center my-6">
+            <div class="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-3">
+              <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+            </div>
+            <h3 class="text-lg font-black text-rose-900">Unable to load this section</h3>
+            <p class="text-sm text-rose-700 mt-1 max-w-md mx-auto">${tabErr && tabErr.message ? tabErr.message : 'An error occurred while loading this administrative view.'}</p>
+            <button onclick="window.adminDashboard.switchTab('overview')" class="mt-4 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg transition-all shadow-sm">
+              Return to Overview
+            </button>
+          </div>
+        `;
+        if (window.lucide) window.lucide.createIcons();
+      }
+    }
   }
 
   switchTab(tab) {
@@ -7396,7 +7416,7 @@ class AdminDashboard {
   // --- 18. AI MCQ STUDIO & AUTONOMOUS HOSTING SUITE ---
   // ================================================================
 
-  renderAiAutomation() {
+  async renderAiAutomation() {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
 

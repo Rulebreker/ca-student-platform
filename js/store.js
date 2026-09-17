@@ -1747,74 +1747,159 @@ const DEFAULT_SUBMISSIONS = [];
 
 class AppStore {
   constructor() {
+    this._memoryCache = {};
+    this._pruneBulkyCollections();
     this.initData();
   }
 
-  initData() {
-    // Reset/seed if fresh or update admin password
-    const existingUsers = localStorage.getItem(STORAGE_KEYS.USERS);
-    let revoked = [];
+  _pruneBulkyCollections() {
     try {
-      revoked = JSON.parse(localStorage.getItem('excellenceca_revoked_users') || '[]');
-    } catch (e) {}
-    const revokedSet = new Set(revoked.map(x => String(x).toLowerCase().replace(/^@+/, '').trim()));
+      if (typeof localStorage === 'undefined') return;
 
-    if (!existingUsers) {
-      const seeded = DEFAULT_USERS.filter(u => {
-        if (!u) return false;
-        const uId = String(u.id || '').toLowerCase().trim();
-        const uEmail = String(u.email || '').toLowerCase().trim();
-        const uUname = String(u.username || '').toLowerCase().replace(/^@+/, '').trim();
-        return !revokedSet.has(uId) && !revokedSet.has(uEmail) && !revokedSet.has(uUname);
-      });
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(seeded));
-    } else {
-      // Ensure admin password and username/email are updated and teachers exist
-      let users = JSON.parse(existingUsers);
-      
-      // Force purge any revoked users from existing storage
-      if (revokedSet.size > 0) {
-        users = users.filter(u => {
+      // 1. Submissions: strip bulky base64 PDF payloads from localStorage to prevent QuotaExceededError
+      const rawSubs = localStorage.getItem(STORAGE_KEYS.SUBMISSIONS);
+      if (rawSubs && rawSubs.length > 500000) {
+        try {
+          const subs = JSON.parse(rawSubs);
+          if (Array.isArray(subs) && subs.length > 0) {
+            let modified = false;
+            const sanitized = subs.map(s => {
+              if (!s) return s;
+              const copy = { ...s };
+              if (copy.fileData && copy.fileData.length > 30000) {
+                copy.fileData = '';
+                copy.hasStoredPdf = true;
+                modified = true;
+              }
+              if (copy.checkedCopyPdfData && copy.checkedCopyPdfData.length > 30000) {
+                copy.checkedCopyPdfData = '';
+                copy.hasStoredPdf = true;
+                modified = true;
+              }
+              return copy;
+            });
+            if (modified) {
+              try {
+                localStorage.setItem(STORAGE_KEYS.SUBMISSIONS, JSON.stringify(sanitized));
+                console.info('[AppStore] Cleaned bulky submission PDFs from localStorage to maintain healthy quota.');
+              } catch (e) {}
+            }
+          }
+        } catch (e) {}
+      }
+
+      // 2. Notifications: trim to latest 50 in localStorage
+      const rawNotifs = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
+      if (rawNotifs && rawNotifs.length > 150000) {
+        try {
+          const notifs = JSON.parse(rawNotifs);
+          if (Array.isArray(notifs) && notifs.length > 50) {
+            localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifs.slice(0, 50)));
+          }
+        } catch (e) {}
+      }
+
+      // 3. XP Transactions: trim to latest 60 in localStorage
+      const rawTx = localStorage.getItem(STORAGE_KEYS.XP_TRANSACTIONS);
+      if (rawTx && rawTx.length > 150000) {
+        try {
+          const txs = JSON.parse(rawTx);
+          if (Array.isArray(txs) && txs.length > 60) {
+            localStorage.setItem(STORAGE_KEYS.XP_TRANSACTIONS, JSON.stringify(txs.slice(0, 60)));
+          }
+        } catch (e) {}
+      }
+
+      // 4. Admin Audit Logs: trim to latest 50 in localStorage
+      const rawLogs = localStorage.getItem(STORAGE_KEYS.ADMIN_AUDIT_LOGS);
+      if (rawLogs && rawLogs.length > 150000) {
+        try {
+          const logs = JSON.parse(rawLogs);
+          if (Array.isArray(logs) && logs.length > 50) {
+            localStorage.setItem(STORAGE_KEYS.ADMIN_AUDIT_LOGS, JSON.stringify(logs.slice(0, 50)));
+          }
+        } catch (e) {}
+      }
+    } catch (err) {
+      console.warn('[AppStore] Error during storage pruning:', err);
+    }
+  }
+
+  initData() {
+    try {
+      this._pruneBulkyCollections();
+      // Reset/seed if fresh or update admin password
+      const existingUsers = localStorage.getItem(STORAGE_KEYS.USERS);
+      let revoked = [];
+      try {
+        revoked = JSON.parse(localStorage.getItem('excellenceca_revoked_users') || '[]');
+      } catch (e) {}
+      const revokedSet = new Set(revoked.map(x => String(x).toLowerCase().replace(/^@+/, '').trim()));
+
+      if (!existingUsers) {
+        const seeded = DEFAULT_USERS.filter(u => {
           if (!u) return false;
           const uId = String(u.id || '').toLowerCase().trim();
           const uEmail = String(u.email || '').toLowerCase().trim();
           const uUname = String(u.username || '').toLowerCase().replace(/^@+/, '').trim();
           return !revokedSet.has(uId) && !revokedSet.has(uEmail) && !revokedSet.has(uUname);
         });
-      }
-
-      // Force Purge problematic account @divya_nair if present in localStorage
-      users = users.filter(u => u.id !== 'usr-student-26' && u.username !== 'divya_nair' && u.email !== 'divya.nair@castudent.in');
-      
-      const admin = users.find(u => u.role === 'admin');
-      if (admin) {
-        admin.password = 'eliterulebrker@220709';
-        admin.email = 'adminrulebreker@rulebrekerdothunter.com';
-        admin.username = 'adminrulebreker@rulebrekerdothunter.com';
-        if (!admin.token) admin.token = 'token_admin_excellenceca_secret';
-      }
-      // Ensure teachers exist
-      if (!users.some(u => u.role === 'teacher')) {
-        const teachers = DEFAULT_USERS.filter(u => u.role === 'teacher');
-        users.push(...teachers);
-      }
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-
-      // Also clean from current user if logged in as divya_nair
-      try {
-        const cu = JSON.parse(localStorage.getItem(STORAGE_KEYS.CURRENT_USER) || 'null');
-        if (cu && (cu.id === 'usr-student-26' || cu.username === 'divya_nair' || cu.email === 'divya.nair@castudent.in')) {
-          localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+        this.set(STORAGE_KEYS.USERS, seeded);
+      } else {
+        // Ensure admin password and username/email are updated and teachers exist
+        let users = [];
+        try {
+          users = JSON.parse(existingUsers) || [];
+        } catch (e) {
+          users = [...DEFAULT_USERS];
         }
-      } catch (e) {}
-    }
+        
+        // Force purge any revoked users from existing storage
+        if (revokedSet.size > 0) {
+          users = users.filter(u => {
+            if (!u) return false;
+            const uId = String(u.id || '').toLowerCase().trim();
+            const uEmail = String(u.email || '').toLowerCase().trim();
+            const uUname = String(u.username || '').toLowerCase().replace(/^@+/, '').trim();
+            return !revokedSet.has(uId) && !revokedSet.has(uEmail) && !revokedSet.has(uUname);
+          });
+        }
 
-    // Ensure subjects are seeded once with default subjects, preserving custom subjects
-    const existingSubjects = localStorage.getItem(STORAGE_KEYS.SUBJECTS);
-    const subjectsSeeded = localStorage.getItem('excellenceca_subjects_seeded_v2');
-    if (!existingSubjects || !subjectsSeeded) {
-      localStorage.setItem(STORAGE_KEYS.SUBJECTS, JSON.stringify(DEFAULT_SUBJECTS));
-      localStorage.setItem('excellenceca_subjects_seeded_v2', 'true');
+        // Force Purge problematic account @divya_nair if present in localStorage
+        users = users.filter(u => u && u.id !== 'usr-student-26' && u.username !== 'divya_nair' && u.email !== 'divya.nair@castudent.in');
+        
+        const admin = users.find(u => u && u.role === 'admin');
+        if (admin) {
+          admin.password = 'eliterulebrker@220709';
+          admin.email = 'adminrulebreker@rulebrekerdothunter.com';
+          admin.username = 'adminrulebreker@rulebrekerdothunter.com';
+          if (!admin.token) admin.token = 'token_admin_excellenceca_secret';
+        }
+        // Ensure teachers exist
+        if (!users.some(u => u && u.role === 'teacher')) {
+          const teachers = DEFAULT_USERS.filter(u => u.role === 'teacher');
+          users.push(...teachers);
+        }
+        this.set(STORAGE_KEYS.USERS, users);
+
+        // Also clean from current user if logged in as divya_nair
+        try {
+          const cu = JSON.parse(localStorage.getItem(STORAGE_KEYS.CURRENT_USER) || 'null');
+          if (cu && (cu.id === 'usr-student-26' || cu.username === 'divya_nair' || cu.email === 'divya.nair@castudent.in')) {
+            localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+          }
+        } catch (e) {}
+      }
+
+      // Ensure subjects are seeded once with default subjects, preserving custom subjects
+      const existingSubjects = localStorage.getItem(STORAGE_KEYS.SUBJECTS);
+      const subjectsSeeded = localStorage.getItem('excellenceca_subjects_seeded_v2');
+      if (!existingSubjects || !subjectsSeeded) {
+        this.set(STORAGE_KEYS.SUBJECTS, DEFAULT_SUBJECTS);
+        try { localStorage.setItem('excellenceca_subjects_seeded_v2', 'true'); } catch (e) {}
+      }
+    } catch (initErr) {
+      console.warn('[AppStore] initData safe recovery:', initErr);
     }
 
     if (!localStorage.getItem(STORAGE_KEYS.BOOKMARKS)) {
@@ -1980,11 +2065,18 @@ class AppStore {
 
   // Key-value store helpers for local storage
   get(key, defaultValue = null) {
+    const storageKey = STORAGE_KEYS[key.toUpperCase()] || (key.startsWith('excellenceca_') ? key : `excellenceca_${key}`);
+    if (this._memoryCache && this._memoryCache[storageKey] !== undefined) {
+      return this._memoryCache[storageKey];
+    }
     try {
-      const storageKey = STORAGE_KEYS[key.toUpperCase()] || (key.startsWith('excellenceca_') ? key : `excellenceca_${key}`);
       const val = localStorage.getItem(storageKey);
       if (val === null || val === undefined) return defaultValue;
-      return JSON.parse(val);
+      const parsed = JSON.parse(val);
+      if (this._memoryCache) {
+        this._memoryCache[storageKey] = parsed;
+      }
+      return parsed;
     } catch (e) {
       console.warn(`[AppStore] Failed to read key ${key}:`, e);
       return defaultValue;
@@ -1992,8 +2084,11 @@ class AppStore {
   }
 
   set(key, value) {
+    const storageKey = STORAGE_KEYS[key.toUpperCase()] || (key.startsWith('excellenceca_') ? key : `excellenceca_${key}`);
+    if (this._memoryCache) {
+      this._memoryCache[storageKey] = value;
+    }
     try {
-      const storageKey = STORAGE_KEYS[key.toUpperCase()] || (key.startsWith('excellenceca_') ? key : `excellenceca_${key}`);
       if (value === null || value === undefined) {
         localStorage.removeItem(storageKey);
       } else {
@@ -2001,19 +2096,29 @@ class AppStore {
       }
     } catch (e) {
       console.warn(`[AppStore] Failed to write key ${key}:`, e);
+      this._pruneBulkyCollections();
+      try {
+        if (value === null || value === undefined) {
+          localStorage.removeItem(storageKey);
+        } else {
+          localStorage.setItem(storageKey, JSON.stringify(value));
+        }
+      } catch (retryErr) {
+        console.warn(`[AppStore] Storage quota exceeded for ${key}; persisting in memory for active session.`);
+      }
     }
   }
 
   // Users
   getUsers() {
-    const raw = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
+    const raw = this.get(STORAGE_KEYS.USERS, []);
     let revoked = [];
     try {
-      revoked = JSON.parse(localStorage.getItem('excellenceca_revoked_users') || '[]');
+      revoked = this.get('revoked_users', []);
     } catch (e) {}
-    if (!revoked || !revoked.length) return raw;
+    if (!revoked || !revoked.length) return Array.isArray(raw) ? raw : [];
     const revokedSet = new Set(revoked.map(x => String(x).toLowerCase().replace(/^@+/, '').trim()));
-    return raw.filter(u => {
+    return (Array.isArray(raw) ? raw : []).filter(u => {
       if (!u) return false;
       const uId = String(u.id || '').toLowerCase().trim();
       const uEmail = String(u.email || '').toLowerCase().trim();
@@ -2022,7 +2127,7 @@ class AppStore {
     });
   }
   saveUsers(users) {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+    this.set(STORAGE_KEYS.USERS, users);
   }
   getStudents() {
     return this.getUsers().filter(u => u.role === 'student');
@@ -2184,14 +2289,10 @@ class AppStore {
 
   // Current session
   getCurrentUser() {
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS.CURRENT_USER) || 'null');
+    return this.get(STORAGE_KEYS.CURRENT_USER, null);
   }
   setCurrentUser(user) {
-    if (user) {
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
-    } else {
-      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-    }
+    this.set(STORAGE_KEYS.CURRENT_USER, user);
   }
 
   // Subjects
@@ -2261,7 +2362,7 @@ class AppStore {
     });
   }
   saveSubjects(subjects) {
-    localStorage.setItem(STORAGE_KEYS.SUBJECTS, JSON.stringify(subjects));
+    this.set(STORAGE_KEYS.SUBJECTS, subjects);
   }
   getSubjectById(id) {
     if (!id) return null;
@@ -2315,7 +2416,7 @@ class AppStore {
     return list;
   }
   saveBookmarks(bookmarks) {
-    localStorage.setItem(STORAGE_KEYS.BOOKMARKS, JSON.stringify(bookmarks));
+    this.set(STORAGE_KEYS.BOOKMARKS, bookmarks);
   }
   isBookmarked(userId, itemId) {
     if (!userId || !itemId) return false;
@@ -2374,7 +2475,7 @@ class AppStore {
     return list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   }
   saveNotifications(notifications) {
-    localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications));
+    this.set(STORAGE_KEYS.NOTIFICATIONS, notifications);
   }
   addNotification(notif) {
     if (!notif) return;
@@ -2545,7 +2646,7 @@ class AppStore {
     return list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   }
   saveXpTransactions(transactions) {
-    localStorage.setItem(STORAGE_KEYS.XP_TRANSACTIONS, JSON.stringify(transactions));
+    this.set(STORAGE_KEYS.XP_TRANSACTIONS, transactions);
   }
   recordXpTransaction(tx) {
     if (!tx || !tx.userId || tx.points === undefined || tx.points === null) return null;
@@ -2692,7 +2793,7 @@ class AppStore {
     return JSON.parse(localStorage.getItem(STORAGE_KEYS.LECTURES) || '[]');
   }
   saveLectures(lectures) {
-    localStorage.setItem(STORAGE_KEYS.LECTURES, JSON.stringify(lectures));
+    this.set(STORAGE_KEYS.LECTURES, lectures);
   }
   addLecture(lec) {
     const lectures = this.getLectures();
@@ -2740,7 +2841,7 @@ class AppStore {
         deduped.push(t);
       }
     }
-    localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(deduped));
+    this.set(STORAGE_KEYS.TESTS, deduped);
   }
   getTestById(id) {
     return this.getTests().find(t => t.id === id);
@@ -2815,7 +2916,7 @@ class AppStore {
         deduped.push(q);
       }
     }
-    localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(deduped));
+    this.set(STORAGE_KEYS.QUESTIONS, deduped);
   }
   getQuestionsByTestId(testId) {
     return this.getQuestions().filter(q => q.testId === testId).sort((a,b) => a.number - b.number);
@@ -2939,7 +3040,7 @@ class AppStore {
     return JSON.parse(localStorage.getItem(STORAGE_KEYS.ATTEMPTS) || '[]');
   }
   saveAttempts(attempts) {
-    localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(attempts));
+    this.set(STORAGE_KEYS.ATTEMPTS, attempts);
   }
   getAttemptsByUser(userId) {
     return this.getAttempts().filter(a => a.userId === userId);
@@ -2997,7 +3098,7 @@ class AppStore {
         unique.push(a);
       }
     }
-    localStorage.setItem(STORAGE_KEYS.ASSIGNMENTS, JSON.stringify(unique));
+    this.set(STORAGE_KEYS.ASSIGNMENTS, unique);
   }
   getAssignmentById(id) {
     return this.getAssignments().find(a => a.id === id);
@@ -3052,10 +3153,10 @@ class AppStore {
 
   // Submissions (With Checked Copy PDF uploaded by Admin/Teacher)
   getSubmissions() {
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS.SUBMISSIONS) || '[]');
+    return this.get(STORAGE_KEYS.SUBMISSIONS, []);
   }
   saveSubmissions(submissions) {
-    localStorage.setItem(STORAGE_KEYS.SUBMISSIONS, JSON.stringify(submissions));
+    this.set(STORAGE_KEYS.SUBMISSIONS, submissions);
   }
   getSubmissionsByUser(userId) {
     return this.getSubmissions().filter(s => s.studentId === userId);
@@ -3108,7 +3209,7 @@ class AppStore {
     }
   }
   saveBanners(banners) {
-    localStorage.setItem(STORAGE_KEYS.BANNERS, JSON.stringify(banners));
+    this.set(STORAGE_KEYS.BANNERS, banners);
   }
   getBannerById(id) {
     return this.getBanners().find(b => b.id === id);
@@ -3155,7 +3256,7 @@ class AppStore {
   }
 
   saveRankTiers(tiers) {
-    localStorage.setItem(STORAGE_KEYS.RANK_TIERS, JSON.stringify(tiers));
+    this.set(STORAGE_KEYS.RANK_TIERS, tiers);
   }
 
   resetRankTiersToDefault() {
@@ -3177,7 +3278,7 @@ class AppStore {
   }
 
   saveXpSettings(settings) {
-    localStorage.setItem(STORAGE_KEYS.XP_SETTINGS, JSON.stringify(settings));
+    this.set(STORAGE_KEYS.XP_SETTINGS, settings);
   }
 
 
@@ -3188,7 +3289,7 @@ class AppStore {
   }
 
   saveReferrals(referrals) {
-    localStorage.setItem(STORAGE_KEYS.REFERRALS, JSON.stringify(referrals));
+    this.set(STORAGE_KEYS.REFERRALS, referrals);
   }
 
   addReferral(record) {
@@ -3238,7 +3339,7 @@ class AppStore {
 
   saveReferralSettings(settings) {
     const merged = { ...DEFAULT_REFERRAL_SETTINGS, ...settings };
-    localStorage.setItem(STORAGE_KEYS.REFERRAL_SETTINGS, JSON.stringify(merged));
+    this.set(STORAGE_KEYS.REFERRAL_SETTINGS, merged);
     return merged;
   }
 
@@ -3254,7 +3355,7 @@ class AppStore {
 
   saveXpResetSettings(settings) {
     const merged = { ...DEFAULT_XP_RESET_SETTINGS, ...settings };
-    localStorage.setItem(STORAGE_KEYS.XP_RESET_SETTINGS, JSON.stringify(merged));
+    this.set(STORAGE_KEYS.XP_RESET_SETTINGS, merged);
     if (window.firebaseSync && typeof window.firebaseSync.saveXpResetSettings === 'function') {
       window.firebaseSync.saveXpResetSettings(merged);
     }
@@ -3283,7 +3384,7 @@ class AppStore {
     };
     history.unshift(item);
     // Keep last 100 events
-    localStorage.setItem(STORAGE_KEYS.XP_RESET_HISTORY, JSON.stringify(history.slice(0, 100)));
+    this.set(STORAGE_KEYS.XP_RESET_HISTORY, history.slice(0, 100));
     if (window.firebaseSync && typeof window.firebaseSync.saveXpResetEvent === 'function') {
       window.firebaseSync.saveXpResetEvent(item);
     }
