@@ -1471,28 +1471,6 @@
       "totalXp": 0,
       "username": "admuserfa36db"
     },
-    "test22@gmail.com": {
-      "baseXp": 0,
-      "caLevel": "CA FOUNDATION",
-      "createdAt": "2026-09-13T14:08:46.406Z",
-      "district": "Meerut",
-      "email": "test22@gmail.com",
-      "id": "usr-student-1789308526406",
-      "isActive": true,
-      "name": "test22",
-      "password": "sha256:84344bc192603bff:c2e145a0afa36ceddf1b54adda8796c882770e6810b2ff45921d55ae56e3b0f3",
-      "phone": "8218956617",
-      "referralCount": 0,
-      "referralPoints": 100,
-      "referredBy": "rulebreker",
-      "role": "student",
-      "state": "Uttar Pradesh",
-      "token": "token_student_1789308526406_e53i59x",
-      "totalXp": 100,
-      "username": "test22",
-      "hasPassword": true,
-      "passwordProtected": true
-    },
     "biswasshankar016@gmail.com": {
       "baseXp": 0,
       "caLevel": "CA FOUNDATION",
@@ -19885,7 +19863,8 @@
     "token_student_b77e817b28564fa8",
     "token_student_82bee0d96a544e1e",
     "token_student_c8a55af216c54be8",
-    "token_student_9633fbbdef87429b"
+    "token_student_9633fbbdef87429b",
+    "token_student_6b6913f70abe4c24"
   ],
   "assignments": [
     {
@@ -20008,6 +19987,9 @@
     "regtest_student",
     "usr-student-1789652060003",
     "regtest_1789652059@castudent.in",
-    "regtest_1789652059"
+    "regtest_1789652059",
+    "usr-student-1789308526406",
+    "test22@gmail.com",
+    "test22"
   ]
 }

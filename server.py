@@ -1012,7 +1012,7 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
         return data
 
     now = time.time()
-    all_keys = ['users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'assignments', 'papers']
+    all_keys = ['users', 'revoked_users', 'revoked_tokens', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'assignments', 'papers']
     target_keys = collections if collections else all_keys
 
     keys_to_fetch = [k for k in target_keys if (now - _collection_last_synced.get(k, 0)) >= min_interval]
@@ -1035,13 +1035,13 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
                 if key == 'users':
                     if isinstance(cloud_data, dict):
                         users_dict = data.setdefault('users', {})
-                        revoked_set = set(str(x).lower().strip() for x in data.get('revoked_users', []))
+                        revoked_set = set(str(x).lower().strip() for x in data.get('revoked_users', [])) | REVOKED_USERS
                         for uid, u in cloud_data.items():
                             if isinstance(u, dict):
                                 u_email = str(u.get('email') or '').strip().lower()
                                 u_id = str(u.get('id') or uid).strip()
                                 u_uname = str(u.get('username') or '').strip().lower().lstrip('@')
-                                if u_id.lower() in revoked_set or u_email in revoked_set or u_uname in revoked_set:
+                                if u_id.lower() in revoked_set or u_email in revoked_set or u_uname in revoked_set or u.get('isDeleted', False):
                                     continue
                                 target_key = None
                                 if u_email and u_email in users_dict:
@@ -1060,6 +1060,30 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
                                 else:
                                     k_name = u_email if u_email else u_id
                                     users_dict[k_name] = dict(u)
+                        _collection_last_synced[key] = now
+                        updated = True
+                elif key == 'revoked_users':
+                    if isinstance(cloud_data, (dict, list)):
+                        rev_list = data.setdefault('revoked_users', [])
+                        cloud_keys = list(cloud_data.keys()) if isinstance(cloud_data, dict) else cloud_data
+                        for r_k in cloud_keys:
+                            if r_k:
+                                clean_r = str(r_k).strip().lower()
+                                REVOKED_USERS.add(clean_r)
+                                if clean_r not in rev_list:
+                                    rev_list.append(clean_r)
+                        _collection_last_synced[key] = now
+                        updated = True
+                elif key == 'revoked_tokens':
+                    if isinstance(cloud_data, (dict, list)):
+                        tok_list = data.setdefault('revoked_tokens', [])
+                        cloud_keys = list(cloud_data.keys()) if isinstance(cloud_data, dict) else cloud_data
+                        for t_k in cloud_keys:
+                            if t_k:
+                                clean_t = str(t_k).strip()
+                                REVOKED_TOKENS.add(clean_t)
+                                if clean_t not in tok_list:
+                                    tok_list.append(clean_t)
                         _collection_last_synced[key] = now
                         updated = True
                 elif key in ['subscriptions', 'subscription_plans']:
@@ -1192,7 +1216,7 @@ def load_backend_data(refresh_collections=None):
                         cur_data = json.load(f)
                     
                     import urllib.request
-                    keys_to_fetch = ['users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'papers', 'assignments']
+                    keys_to_fetch = ['revoked_users', 'revoked_tokens', 'users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'papers', 'assignments']
                     
                     for key in keys_to_fetch:
                         try:
@@ -1205,16 +1229,36 @@ def load_backend_data(refresh_collections=None):
                                 if not cloud_data:
                                     continue
 
-                                if key == 'users':
+                                if key == 'revoked_users':
+                                    if isinstance(cloud_data, (dict, list)):
+                                        rev_list = cur_data.setdefault('revoked_users', [])
+                                        cloud_keys = list(cloud_data.keys()) if isinstance(cloud_data, dict) else cloud_data
+                                        for r_k in cloud_keys:
+                                            if r_k:
+                                                clean_r = str(r_k).strip().lower()
+                                                REVOKED_USERS.add(clean_r)
+                                                if clean_r not in rev_list:
+                                                    rev_list.append(clean_r)
+                                elif key == 'revoked_tokens':
+                                    if isinstance(cloud_data, (dict, list)):
+                                        tok_list = cur_data.setdefault('revoked_tokens', [])
+                                        cloud_keys = list(cloud_data.keys()) if isinstance(cloud_data, dict) else cloud_data
+                                        for t_k in cloud_keys:
+                                            if t_k:
+                                                clean_t = str(t_k).strip()
+                                                REVOKED_TOKENS.add(clean_t)
+                                                if clean_t not in tok_list:
+                                                    tok_list.append(clean_t)
+                                elif key == 'users':
                                     if isinstance(cloud_data, dict):
                                         users_dict = cur_data.setdefault('users', {})
-                                        revoked_set = set(str(x).lower().strip() for x in cur_data.get('revoked_users', []))
+                                        revoked_set = set(str(x).lower().strip() for x in cur_data.get('revoked_users', [])) | REVOKED_USERS
                                         for uid, u in cloud_data.items():
                                             if isinstance(u, dict):
                                                 u_email = str(u.get('email') or '').strip().lower()
                                                 u_id = str(u.get('id') or uid).strip()
                                                 u_uname = str(u.get('username') or '').strip().lower().lstrip('@')
-                                                if u_id.lower() in revoked_set or u_email in revoked_set or u_uname in revoked_set:
+                                                if u_id.lower() in revoked_set or u_email in revoked_set or u_uname in revoked_set or u.get('isDeleted', False):
                                                     continue
                                                 target_key = None
                                                 if u_email and u_email in users_dict:
@@ -1233,6 +1277,9 @@ def load_backend_data(refresh_collections=None):
                                                 else:
                                                     k_name = u_email if u_email else u_id
                                                     users_dict[k_name] = dict(u)
+                                        # Purge any revoked users in current data
+                                        for k in [k for k, u in users_dict.items() if (str(u.get('id') or '').lower().strip() in revoked_set or str(u.get('email') or '').lower().strip() in revoked_set or str(u.get('username') or '').lower().lstrip('@').strip() in revoked_set or u.get('isDeleted', False))]:
+                                            del users_dict[k]
                                 elif key in ['subscriptions', 'subscription_plans']:
                                     if isinstance(cloud_data, dict):
                                         cur_data.setdefault(key, {}).update(cloud_data)
@@ -4200,6 +4247,10 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     sync_to_firebase(f"users/{st_id}", {'isDeleted': True, 'isActive': False}, method='PATCH', sync=True)
                     sync_to_firebase(f"users/{st_id}", None, method='DELETE', sync=True)
                     sync_to_firebase(f"revoked_users/{st_id}", True, sync=True)
+                if st_uname:
+                    sync_to_firebase(f"revoked_users/{st_uname}", True, sync=True)
+                if st_token:
+                    sync_to_firebase(f"revoked_tokens/{st_token}", True, sync=True)
 
                 # Calculate remaining counts directly from fresh database state
                 revoked_set = set(str(x).lower().strip() for x in data.get('revoked_users', []))
