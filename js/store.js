@@ -1753,12 +1753,36 @@ class AppStore {
   initData() {
     // Reset/seed if fresh or update admin password
     const existingUsers = localStorage.getItem(STORAGE_KEYS.USERS);
+    let revoked = [];
+    try {
+      revoked = JSON.parse(localStorage.getItem('excellenceca_revoked_users') || '[]');
+    } catch (e) {}
+    const revokedSet = new Set(revoked.map(x => String(x).toLowerCase().replace(/^@+/, '').trim()));
+
     if (!existingUsers) {
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(DEFAULT_USERS));
+      const seeded = DEFAULT_USERS.filter(u => {
+        if (!u) return false;
+        const uId = String(u.id || '').toLowerCase().trim();
+        const uEmail = String(u.email || '').toLowerCase().trim();
+        const uUname = String(u.username || '').toLowerCase().replace(/^@+/, '').trim();
+        return !revokedSet.has(uId) && !revokedSet.has(uEmail) && !revokedSet.has(uUname);
+      });
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(seeded));
     } else {
       // Ensure admin password and username/email are updated and teachers exist
       let users = JSON.parse(existingUsers);
       
+      // Force purge any revoked users from existing storage
+      if (revokedSet.size > 0) {
+        users = users.filter(u => {
+          if (!u) return false;
+          const uId = String(u.id || '').toLowerCase().trim();
+          const uEmail = String(u.email || '').toLowerCase().trim();
+          const uUname = String(u.username || '').toLowerCase().replace(/^@+/, '').trim();
+          return !revokedSet.has(uId) && !revokedSet.has(uEmail) && !revokedSet.has(uUname);
+        });
+      }
+
       // Force Purge problematic account @divya_nair if present in localStorage
       users = users.filter(u => u.id !== 'usr-student-26' && u.username !== 'divya_nair' && u.email !== 'divya.nair@castudent.in');
       
@@ -1982,7 +2006,20 @@ class AppStore {
 
   // Users
   getUsers() {
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
+    let revoked = [];
+    try {
+      revoked = JSON.parse(localStorage.getItem('excellenceca_revoked_users') || '[]');
+    } catch (e) {}
+    if (!revoked || !revoked.length) return raw;
+    const revokedSet = new Set(revoked.map(x => String(x).toLowerCase().replace(/^@+/, '').trim()));
+    return raw.filter(u => {
+      if (!u) return false;
+      const uId = String(u.id || '').toLowerCase().trim();
+      const uEmail = String(u.email || '').toLowerCase().trim();
+      const uUname = String(u.username || '').toLowerCase().replace(/^@+/, '').trim();
+      return !revokedSet.has(uId) && !revokedSet.has(uEmail) && !revokedSet.has(uUname);
+    });
   }
   saveUsers(users) {
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
@@ -2100,9 +2137,34 @@ class AppStore {
       }
     }
 
+    // Persist revoked user identifiers in localStorage to prevent resurrecting
+    try {
+      const revoked = JSON.parse(localStorage.getItem('excellenceca_revoked_users') || '[]');
+      const addRevoked = (val) => {
+        if (!val) return;
+        const clean = String(val).toLowerCase().replace(/^@+/, '').trim();
+        if (clean && !revoked.includes(clean)) revoked.push(clean);
+      };
+      addRevoked(id);
+      if (user) {
+        addRevoked(user.email);
+        addRevoked(user.username);
+      }
+      localStorage.setItem('excellenceca_revoked_users', JSON.stringify(revoked));
+    } catch (e) {}
+
     // Deletion confirmed by server: prune from store
     const users = this.getUsers().filter(u => u.id !== id && (!user || !user.email || u.email !== user.email));
     this.saveUsers(users);
+
+    // If the deleted user is currently the active logged-in user in this session, immediately revoke
+    const activeCurrent = this.getCurrentUser();
+    if (activeCurrent && (activeCurrent.id === id || (user && user.email && activeCurrent.email === user.email))) {
+      this.clearCurrentUser();
+      if (window.auth && typeof window.auth.handleSessionRevoked === 'function') {
+        window.auth.handleSessionRevoked('Your account has been deleted by the administrator.');
+      }
+    }
 
     if (window.firebaseSync && typeof window.firebaseSync.deleteUser === 'function') {
       window.firebaseSync.deleteUser(id);

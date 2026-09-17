@@ -326,6 +326,16 @@ class AuthManager {
 
     // 2. Offline / Cloud Fallback: Local store & Firebase RTDB authentication
     if (!serverAvailable && window.store) {
+      // Reject permanently revoked accounts immediately
+      let revokedList = [];
+      try {
+        revokedList = JSON.parse(localStorage.getItem('excellenceca_revoked_users') || '[]');
+      } catch (e) {}
+      const revokedSet = new Set(revokedList.map(x => String(x).toLowerCase().replace(/^@+/, '').trim()));
+      if (revokedSet.has(cleanId) || revokedSet.has(cleanUname)) {
+        return { success: false, error: 'Login Failed: Account has been permanently removed.' };
+      }
+
       let users = window.store.getUsers();
 
       const findMatchingUser = (userList) => {
@@ -365,6 +375,15 @@ class AuthManager {
           }
         } catch (e) {
           console.warn('[AuthManager] Direct Firebase RTDB user lookup error:', e);
+        }
+      }
+
+      if (user) {
+        const uId = String(user.id || '').toLowerCase().trim();
+        const uEmail = String(user.email || '').toLowerCase().trim();
+        const uUname = String(user.username || '').toLowerCase().replace(/^@+/, '').trim();
+        if (revokedSet.has(uId) || revokedSet.has(uEmail) || revokedSet.has(uUname) || user.isDeleted) {
+          return { success: false, error: 'Login Failed: Account has been permanently removed.' };
         }
       }
 
@@ -772,16 +791,11 @@ class AuthManager {
         }
 
         if (res.status === 401) {
-          // Use 2-strike grace period: only revoke after 2 consecutive failures
-          // This prevents false logouts from transient server restarts
-          this._watchdogFailCount = (this._watchdogFailCount || 0) + 1;
-          if (this._watchdogFailCount >= 2) {
-            const text = await res.text();
-            let data = null;
-            try { data = JSON.parse(text); } catch (e) {}
-            const msg = (data && data.error) ? data.error : 'Your account has been deleted or deactivated by the administrator.';
-            this.handleSessionRevoked(msg);
-          }
+          const text = await res.text();
+          let data = null;
+          try { data = JSON.parse(text); } catch (e) {}
+          const msg = (data && data.error) ? data.error : 'Your account has been deleted or deactivated by the administrator.';
+          this.handleSessionRevoked(msg);
           return;
         }
 
@@ -799,7 +813,10 @@ class AuthManager {
       }
     };
 
-    // Use 30s interval instead of 3s — aggressive 3s polling caused false session revocations
+    // Immediately verify on startup / watchdog start
+    setTimeout(checkSession, 100);
+
+    // Periodic heartbeat verification every 30s
     this._sessionWatchdogTimer = setInterval(checkSession, 30000);
 
     this._visibilityHandler = () => {

@@ -1127,9 +1127,12 @@ class FirebaseSyncManager {
 
   deleteUser(userId) {
     if (!this.db || !userId) return Promise.resolve();
-    return this.db.ref('users/' + userId).remove().catch(err => {
-      console.warn('[FirebaseSync] deleteUser error:', err);
-    });
+    return this.db.ref('users/' + userId).update({ isDeleted: true, isActive: false })
+      .catch(() => {})
+      .then(() => this.db.ref('users/' + userId).remove())
+      .catch(err => {
+        console.warn('[FirebaseSync] deleteUser error:', err);
+      });
   }
 
   saveAssignment(assignment) {

@@ -1483,7 +1483,9 @@
       "state": "Uttar Pradesh",
       "token": "token_student_1789308526406_e53i59x",
       "totalXp": 100,
-      "username": "test22"
+      "username": "test22",
+      "hasPassword": true,
+      "passwordProtected": true
     },
     "biswasshankar016@gmail.com": {
       "baseXp": 0,
@@ -1534,6 +1536,39 @@
       "baseXp": 0,
       "createdAt": "2026-09-13T12:12:41.074727+00:00",
       "phone": "9876543210"
+    },
+    "amankumarchaurasiya270@gmail.com": {
+      "baseXp": 0,
+      "caLevel": "CA FOUNDATION",
+      "createdAt": "2026-09-15T05:08:13.385153+00:00",
+      "email": "amankumarchaurasiya270@gmail.com",
+      "id": "usr-student-1789448893385",
+      "isActive": true,
+      "name": "Aman kumar chaurasiya",
+      "password": "sha256:2416bb625e4a4326:b3605326377f16c2ebf9032b0a17556c91076036db7f3626d17b96bb930a11c4",
+      "phone": "9706405306",
+      "referralCount": 0,
+      "referralPoints": 0,
+      "role": "student",
+      "token": "token_student_2fe4443a36dd4dab",
+      "totalXp": 0,
+      "username": "aman4"
+    },
+    "noorshah250607@gmail.com": {
+      "baseXp": 0,
+      "caLevel": "CA FOUNDATION",
+      "createdAt": "2026-09-16T18:58:11.062208+00:00",
+      "email": "noorshah250607@gmail.com",
+      "id": "usr-student-1789585091062",
+      "isActive": true,
+      "name": "nasru shah",
+      "phone": "8828478108",
+      "referralCount": 0,
+      "referralPoints": 0,
+      "role": "student",
+      "token": "token_student_5f154e08b99a488c",
+      "totalXp": 0,
+      "username": "nasru"
     }
   },
   "papers": [
@@ -19728,7 +19763,10 @@
     "token_student_4e9276ffe1d9463a",
     "token_student_e9086e0180cc4266",
     "token_student_d905746d7b09408a",
-    "token_student_f9e1de13df07403e"
+    "token_student_f9e1de13df07403e",
+    "token_student_77063abe84454318",
+    "token_student_a62549f3096d4681",
+    "token_student_dd25e256c9594beb"
   ],
   "assignments": [
     {

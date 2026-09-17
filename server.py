@@ -1566,7 +1566,8 @@ def authenticate_token(token_or_email):
             # Check revocation
             if (u_token and (u_token in REVOKED_TOKENS or u_token in persisted_revoked_tokens)) or \
                (u_id and (u_id.lower() in REVOKED_USERS or u_id.lower() in persisted_revoked_users)) or \
-               (u_email and (u_email in REVOKED_USERS or u_email in persisted_revoked_users)):
+               (u_email and (u_email in REVOKED_USERS or u_email in persisted_revoked_users)) or \
+               (u_uname and (u_uname in REVOKED_USERS or u_uname in persisted_revoked_users)):
                 return None
             if u.get('isActive', True) and not u.get('isDeleted', False):
                 return u
@@ -1589,6 +1590,9 @@ def authenticate_token(token_or_email):
 
     # 4. Recognized standard student credentials
     if clean_token == 'token_rohan_sharma_student' or clean_token == 'usr-student-1':
+        if ('usr-student-1' in persisted_revoked_users or 'usr-student-1' in REVOKED_USERS or 
+            'token_rohan_sharma_student' in persisted_revoked_tokens or 'token_rohan_sharma_student' in REVOKED_TOKENS):
+            return None
         st_u = next((u for u in data.get('users', {}).values() if u.get('id') == 'usr-student-1'), None)
         if st_u and st_u.get('isActive', True) and not st_u.get('isDeleted', False):
             return st_u
@@ -2252,7 +2256,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not user or user.get('role') != 'admin':
                 self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
                 return
-            data = load_backend_data()
+            data = load_backend_data(refresh_collections=['users'])
             users_list = []
             revoked_set = set(str(x).lower().strip() for x in data.get('revoked_users', []))
             for u in data.get('users', {}).values():
@@ -3059,6 +3063,14 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     return
 
                 data = load_backend_data(refresh_collections=['users'])
+                persisted_revoked_users = set(str(x).lower().strip() for x in data.get('revoked_users', []))
+                if (identifier in persisted_revoked_users or 
+                    clean_uname in persisted_revoked_users or 
+                    identifier in REVOKED_USERS or 
+                    clean_uname in REVOKED_USERS):
+                    self.send_json(401, {'success': False, 'error': 'Login Failed: Account has been permanently removed.'})
+                    return
+
                 users_dict = data.get('users', {})
                 matched_user = None
 
@@ -3085,8 +3097,14 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json(401, {'success': False, 'error': 'Login Failed: Invalid username or password.'})
                     return
 
-                if matched_user.get('isDeleted', False):
-                    self.send_json(401, {'success': False, 'error': 'Login Failed: Invalid username or password.'})
+                m_id = str(matched_user.get('id') or '').lower().strip()
+                m_email = str(matched_user.get('email') or '').lower().strip()
+                m_uname = str(matched_user.get('username') or '').lower().lstrip('@').strip()
+                if (m_id in persisted_revoked_users or m_id in REVOKED_USERS or
+                    m_email in persisted_revoked_users or m_email in REVOKED_USERS or
+                    m_uname in persisted_revoked_users or m_uname in REVOKED_USERS or
+                    matched_user.get('isDeleted', False)):
+                    self.send_json(401, {'success': False, 'error': 'Login Failed: Account has been permanently removed.'})
                     return
 
                 if not matched_user.get('isActive', True):
@@ -3140,6 +3158,11 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     return
 
                 data = load_backend_data()
+                revoked_set = set(str(x).lower().strip() for x in data.get('revoked_users', []))
+                if raw_email in revoked_set or (raw_uname and raw_uname in revoked_set):
+                    self.send_json(409, {'success': False, 'error': 'This username or email has been permanently decommissioned or deactivated.'})
+                    return
+
                 users_dict = data.get('users', {})
 
                 # Check uniqueness
@@ -4143,7 +4166,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 # Delete from Firebase Realtime Database
                 if st_id:
+                    sync_to_firebase(f"users/{st_id}", {'isDeleted': True, 'isActive': False}, method='PATCH')
                     sync_to_firebase(f"users/{st_id}", None, method='DELETE')
+                    sync_to_firebase(f"revoked_users/{st_id}", True)
 
                 # Calculate remaining counts directly from fresh database state
                 revoked_set = set(str(x).lower().strip() for x in data.get('revoked_users', []))
