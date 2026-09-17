@@ -519,6 +519,8 @@ class FirebaseSyncManager {
             if (tbody && typeof window.adminDashboard._renderXpAuditRows === 'function') {
               tbody.innerHTML = window.adminDashboard._renderXpAuditRows();
             }
+          } else if (window.adminDashboard.currentTab === 'teachers') {
+            window.adminDashboard.renderTeachers();
           }
           if (newStudentArrived && window.app && window.app.showToast) {
             window.app.showToast(`New Student Registered Live: ${newStudentArrived.name} (${newStudentArrived.caLevel || 'CA'})`, 'info');

@@ -2040,23 +2040,74 @@ class AppStore {
     }
     return updated;
   }
-  deleteUser(id) {
-    const user = this.getUserById(id);
-    const users = this.getUsers().filter(u => u.id !== id);
-    this.saveUsers(users);
-    if (window.firebaseSync && typeof window.firebaseSync.deleteUser === 'function') {
-      window.firebaseSync.deleteUser(id);
+  syncUsersFromDatabase(serverUsers) {
+    if (!Array.isArray(serverUsers)) return [];
+    const localUsers = this.getUsers();
+    const localMap = new Map();
+    localUsers.forEach(u => {
+      if (u && u.id) localMap.set(u.id, u);
+      if (u && u.email) localMap.set(String(u.email).toLowerCase(), u);
+    });
+
+    // Authoritative replacement from server: only keep users present in serverUsers!
+    const synchronizedUsers = serverUsers.map(serverUser => {
+      if (!serverUser) return null;
+      const matched = localMap.get(serverUser.id) || (serverUser.email ? localMap.get(String(serverUser.email).toLowerCase()) : null);
+      if (!matched) {
+        return { ...serverUser };
+      }
+      const merged = { ...matched, ...serverUser };
+      // Preserve credentials if sanitized by server response
+      if (!merged.password && matched.password) {
+        merged.password = matched.password;
+      }
+      if (!merged.token && matched.token) {
+        merged.token = matched.token;
+      }
+      return merged;
+    }).filter(Boolean);
+
+    // Save pruned array: deleted users are completely removed
+    this.saveUsers(synchronizedUsers);
+
+    // Refresh active session if needed
+    const current = this.getCurrentUser();
+    if (current) {
+      const freshCurrent = synchronizedUsers.find(u => u.id === current.id || (u.email && current.email && String(u.email).toLowerCase() === String(current.email).toLowerCase()));
+      if (freshCurrent) {
+        this.setCurrentUser(freshCurrent);
+        if (window.auth) window.auth.currentUser = freshCurrent;
+      }
     }
-    // Call backend API to permanently remove student, wipe attempts/submissions, and sync deletion to Firebase
+    return synchronizedUsers;
+  }
+
+  async deleteUser(id) {
+    const user = this.getUserById(id);
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    // Call backend API first - wait for authoritative confirmation
     if (typeof fetch !== 'undefined') {
-      const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-      const token = currentUser ? (currentUser.token || currentUser.email) : '';
-      fetch('/api/admin/users/delete', {
+      const resp = await fetch('/api/admin/users/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ studentId: id, username: user ? user.username : undefined, email: user ? user.email : undefined })
-      }).catch(err => console.warn('Backend user deletion error:', err));
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'Server rejected user deletion request.');
+      }
     }
+
+    // Deletion confirmed by server: prune from store
+    const users = this.getUsers().filter(u => u.id !== id && (!user || !user.email || u.email !== user.email));
+    this.saveUsers(users);
+
+    if (window.firebaseSync && typeof window.firebaseSync.deleteUser === 'function') {
+      window.firebaseSync.deleteUser(id);
+    }
+    return true;
   }
   toggleUserStatus(id) {
     const user = this.getUserById(id);

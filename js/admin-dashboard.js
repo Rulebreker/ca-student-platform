@@ -29,6 +29,7 @@ class AdminDashboard {
       return;
     }
 
+    this.syncBackendUsers();
     this.renderTabs();
 
     if (this.currentTab === 'overview') this.renderOverview();
@@ -119,43 +120,56 @@ class AdminDashboard {
     if (window.lucide) window.lucide.createIcons();
   }
 
-  syncBackendUsers(callback) {
-    if (this._isSyncingUsers || typeof fetch === 'undefined') return;
+  async syncBackendUsers(callback) {
+    if (this._isSyncingUsers) {
+      if (this._syncPromise) {
+        return this._syncPromise.then(() => {
+          if (typeof callback === 'function') callback();
+        });
+      }
+      if (typeof callback === 'function') callback();
+      return Promise.resolve();
+    }
+    if (typeof fetch === 'undefined') {
+      if (typeof callback === 'function') callback();
+      return Promise.resolve();
+    }
+
     this._isSyncingUsers = true;
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
     const token = currentUser ? (currentUser.token || currentUser.email) : '';
-    fetch('/api/admin/users', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    }).then(r => r.ok ? r.json() : null).then(data => {
-      if (data && Array.isArray(data.users)) {
-        const currentUsers = window.store.getUsers();
-        let changed = false;
-        data.users.forEach(bu => {
-          const existIdx = currentUsers.findIndex(u => u.id === bu.id || (u.email && bu.email && u.email.toLowerCase() === bu.email.toLowerCase()));
-          if (existIdx === -1) {
-            currentUsers.unshift(bu);
-            changed = true;
-          } else {
-            const existing = currentUsers[existIdx];
-            const mergedFields = ['name', 'email', 'username', 'phone', 'caLevel', 'role', 'token', 'isActive', 'createdAt'];
-            mergedFields.forEach(f => {
-              if (bu[f] !== undefined && bu[f] !== null) {
-                if (existing[f] !== bu[f]) {
-                  existing[f] = bu[f];
-                  changed = true;
-                }
-              }
-            });
-          }
-        });
-        if (changed) {
-          window.store.saveUsers(currentUsers);
-          if (typeof callback === 'function') callback();
-        }
+
+    this._syncPromise = fetch(`/api/admin/users?_t=${Date.now()}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
       }
-    }).catch(() => {}).finally(() => {
+    })
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (data && Array.isArray(data.users)) {
+        // Authoritative Database Sync: Replace and prune local store with exact database records
+        window.store.syncUsersFromDatabase(data.users);
+      }
+      if (typeof callback === 'function') {
+        callback();
+      }
+      return data;
+    })
+    .catch(err => {
+      console.warn('[syncBackendUsers] Failed to fetch users from database:', err);
+      if (typeof callback === 'function') {
+        callback();
+      }
+      return null;
+    })
+    .finally(() => {
       this._isSyncingUsers = false;
+      this._syncPromise = null;
     });
+
+    return this._syncPromise;
   }
 
   // --- 1. OVERVIEW & KPIS ---
@@ -722,19 +736,46 @@ class AdminDashboard {
     this.renderStudents();
   }
 
-  confirmRemoveStudent(studentId) {
+  async confirmRemoveStudent(studentId) {
+    if (this._isDeletingStudent) return;
     const student = window.store.getUserById(studentId);
     if (!student) return;
 
-    if (confirm(`Permanently remove student "${student.name}" (@${student.username || studentId})?\n\nThis will delete their account, quiz attempts, and paper submissions permanently from the server and database.`)) {
-      window.store.deleteUser(studentId);
-      window.app.showToast(`Student ${student.name} permanently removed.`, 'info');
+    if (!confirm(`Permanently remove student "${student.name}" (@${student.username || studentId})?\n\nThis will delete their account, quiz attempts, and paper submissions permanently from the server and database.`)) {
+      return;
+    }
+
+    this._isDeletingStudent = true;
+    const removeBtn = document.querySelector(`button[onclick*="confirmRemoveStudent('${studentId}')"]`);
+    if (removeBtn) {
+      removeBtn.disabled = true;
+      removeBtn.innerHTML = '<i data-lucide="loader-2" class="w-3 h-3 animate-spin inline mr-1"></i>Removing...';
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    try {
+      // 1. Authoritative delete: send delete request to backend and await confirmation
+      await window.store.deleteUser(studentId);
+
+      // 2. Immediately fetch the latest student list from the backend/database
+      await this.syncBackendUsers();
+
+      // 3. Update UI and recalculate counts from fresh database state
+      window.app.showToast(`Student ${student.name} permanently removed.`, 'success');
       this.renderStudents(true);
+      if (this.currentTab === 'overview') this.renderOverview();
+    } catch (err) {
+      console.error('[confirmRemoveStudent] Deletion failed:', err);
+      window.app.showToast(`Failed to remove student: ${err.message || err}`, 'error');
+      // On failure, student was not removed; re-render table to restore button state
+      this.renderStudents(true);
+    } finally {
+      this._isDeletingStudent = false;
     }
   }
 
-  deleteStudent(studentId) {
-    this.confirmRemoveStudent(studentId);
+  async deleteStudent(studentId) {
+    return this.confirmRemoveStudent(studentId);
   }
 
   openAddStudentModal() {
@@ -1145,9 +1186,15 @@ class AdminDashboard {
   }
 
   // --- 3. TEACHER & PRIVILEGES MANAGEMENT ---
-  renderTeachers() {
+  renderTeachers(skipSync = false) {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
+
+    if (!skipSync) {
+      this.syncBackendUsers(() => {
+        if (this.currentTab === 'teachers') this.renderTeachers(true);
+      });
+    }
 
     const teachers = window.store.getTeachers();
     const subjects = window.store.getSubjects();
@@ -1434,14 +1481,21 @@ class AdminDashboard {
     this.renderTeachers();
   }
 
-  deleteTeacher(teacherId) {
+  async deleteTeacher(teacherId) {
     const teacher = window.store.getUserById(teacherId);
     if (!teacher) return;
 
     if (confirm(`Remove teacher ${teacher.name}?`)) {
-      window.store.deleteUser(teacherId);
-      window.app.showToast('Teacher removed.', 'info');
-      this.renderTeachers();
+      try {
+        await window.store.deleteUser(teacherId);
+        await this.syncBackendUsers();
+        window.app.showToast('Teacher removed.', 'info');
+        this.renderTeachers();
+        if (this.currentTab === 'overview') this.renderOverview();
+      } catch (err) {
+        window.app.showToast(`Failed to remove teacher: ${err.message || err}`, 'error');
+        this.renderTeachers();
+      }
     }
   }
 

@@ -1035,10 +1035,14 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
                 if key == 'users':
                     if isinstance(cloud_data, dict):
                         users_dict = data.setdefault('users', {})
+                        revoked_set = set(str(x).lower().strip() for x in data.get('revoked_users', []))
                         for uid, u in cloud_data.items():
                             if isinstance(u, dict):
                                 u_email = str(u.get('email') or '').strip().lower()
                                 u_id = str(u.get('id') or uid).strip()
+                                u_uname = str(u.get('username') or '').strip().lower().lstrip('@')
+                                if u_id.lower() in revoked_set or u_email in revoked_set or u_uname in revoked_set:
+                                    continue
                                 target_key = None
                                 if u_email and u_email in users_dict:
                                     target_key = u_email
@@ -1202,10 +1206,14 @@ def load_backend_data(refresh_collections=None):
                                 if key == 'users':
                                     if isinstance(cloud_data, dict):
                                         users_dict = cur_data.setdefault('users', {})
+                                        revoked_set = set(str(x).lower().strip() for x in cur_data.get('revoked_users', []))
                                         for uid, u in cloud_data.items():
                                             if isinstance(u, dict):
                                                 u_email = str(u.get('email') or '').strip().lower()
                                                 u_id = str(u.get('id') or uid).strip()
+                                                u_uname = str(u.get('username') or '').strip().lower().lstrip('@')
+                                                if u_id.lower() in revoked_set or u_email in revoked_set or u_uname in revoked_set:
+                                                    continue
                                                 target_key = None
                                                 if u_email and u_email in users_dict:
                                                     target_key = u_email
@@ -1315,8 +1323,14 @@ def load_backend_data(refresh_collections=None):
                         d[lk] = list(d[lk].values())
                 if 'referral_settings' not in d: d['referral_settings'] = {'referrerReward': 100, 'newStudentReward': 100}
                 if 'xp_reset_settings' not in d: d['xp_reset_settings'] = {'enabled': False, 'nextReset': None, 'intervalDays': 90, 'customSeconds': None, 'lastReset': None}
-                # Sync seed users and hashed passwords
+                # Sync seed users and hashed passwords (skipping any permanently revoked accounts)
+                revoked_set = set(str(x).lower().strip() for x in d.get('revoked_users', []))
                 for email, init_u in INITIAL_USERS.items():
+                    u_email = str(email or '').lower().strip()
+                    u_id = str(init_u.get('id') or '').lower().strip()
+                    u_uname = str(init_u.get('username') or '').lower().lstrip('@').strip()
+                    if u_email in revoked_set or u_id in revoked_set or u_uname in revoked_set:
+                        continue
                     if email not in d.get('users', {}):
                         d.setdefault('users', {})[email] = dict(init_u)
                     else:
@@ -2231,7 +2245,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             })
             return
 
-        # Admin Users Directory (Returns all registered students and teachers)
+        # Admin Users Directory (Returns all registered students and teachers directly from database)
         if path == '/api/admin/users':
             token = self.get_auth_token()
             user = authenticate_token(token)
@@ -2240,13 +2254,36 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             data = load_backend_data()
             users_list = []
+            revoked_set = set(str(x).lower().strip() for x in data.get('revoked_users', []))
             for u in data.get('users', {}).values():
+                if not isinstance(u, dict):
+                    continue
+                u_id = str(u.get('id') or '').lower().strip()
+                u_email = str(u.get('email') or '').lower().strip()
+                u_uname = str(u.get('username') or '').lower().lstrip('@').strip()
+                if u_id in revoked_set or u_email in revoked_set or u_uname in revoked_set:
+                    continue
+                if u.get('isDeleted', False):
+                    continue
                 u_copy = dict(u)
                 u_copy.pop('password', None)
                 u_copy['hasPassword'] = bool(u.get('password'))
                 u_copy['passwordProtected'] = True
                 users_list.append(u_copy)
-            self.send_json(200, {'users': users_list, 'total': len(users_list)})
+
+            # Sort newest first for consistent presentation
+            users_list.sort(key=lambda x: str(x.get('createdAt') or ''), reverse=True)
+            students_count = len([u for u in users_list if u.get('role') == 'student'])
+            teachers_count = len([u for u in users_list if u.get('role') == 'teacher'])
+            active_students_count = len([u for u in users_list if u.get('role') == 'student' and u.get('isActive', True) is not False])
+
+            self.send_json(200, {
+                'users': users_list,
+                'total': len(users_list),
+                'students': students_count,
+                'teachers': teachers_count,
+                'activeStudents': active_students_count
+            })
             return
 
         # Descriptive Papers
@@ -4086,6 +4123,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     data['revoked_users'].append(str(st_id).strip().lower())
                 if st_email and st_email not in data['revoked_users']:
                     data['revoked_users'].append(st_email)
+                if st_uname and st_uname not in data['revoked_users']:
+                    data['revoked_users'].append(st_uname)
 
                 # Permanently remove student
                 del users[target_key]
@@ -4106,10 +4145,24 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 if st_id:
                     sync_to_firebase(f"users/{st_id}", None, method='DELETE')
 
+                # Calculate remaining counts directly from fresh database state
+                revoked_set = set(str(x).lower().strip() for x in data.get('revoked_users', []))
+                active_users = [
+                    u for u in users.values() 
+                    if isinstance(u, dict) and 
+                    str(u.get('id') or '').lower().strip() not in revoked_set and 
+                    str(u.get('email') or '').lower().strip() not in revoked_set and 
+                    str(u.get('username') or '').lower().lstrip('@').strip() not in revoked_set and 
+                    not u.get('isDeleted', False)
+                ]
+                remaining_students = [u for u in active_users if u.get('role') == 'student']
+
                 self.send_json(200, {
                     'success': True,
                     'message': f"Student account for {target_student.get('name')} (@{target_student.get('username')}) permanently deleted.",
-                    'deletedId': st_id
+                    'deletedId': st_id,
+                    'totalRemaining': len(active_users),
+                    'studentsRemaining': len(remaining_students)
                 })
                 return
             except Exception as e:

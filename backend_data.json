@@ -220,23 +220,6 @@
       "createdAt": "2026-09-13T11:37:22.504680+00:00",
       "phone": "9876543211"
     },
-    "testregstudent1@castudent.in": {
-      "id": "usr-student-1789301561074",
-      "name": "Test Reg Student",
-      "username": "testregstudent1",
-      "email": "testregstudent1@castudent.in",
-      "password": "sha256:2a5d8f2545534109:5dd7ff61539130917793218782108043d83d8fcedbc603b2f532240b2ea3f159",
-      "role": "student",
-      "token": "token_student_4107115c27ad45fe",
-      "isActive": true,
-      "caLevel": "CA FOUNDATION",
-      "referralPoints": 0,
-      "referralCount": 0,
-      "totalXp": 0,
-      "baseXp": 0,
-      "createdAt": "2026-09-13T12:12:41.074727+00:00",
-      "phone": "9876543210"
-    },
     "kavita.singhal@castudent.in": {
       "id": "usr-student-5",
       "name": "Kavita Singhal",
@@ -1534,6 +1517,23 @@
       "token": "token_student_d9142d2e77724948",
       "totalXp": 0,
       "username": "sarmad22"
+    },
+    "testregstudent1@castudent.in": {
+      "id": "usr-student-1789301561074",
+      "name": "Test Reg Student",
+      "username": "testregstudent1",
+      "email": "testregstudent1@castudent.in",
+      "password": "sha256:2a5d8f2545534109:5dd7ff61539130917793218782108043d83d8fcedbc603b2f532240b2ea3f159",
+      "role": "student",
+      "token": "token_student_4107115c27ad45fe",
+      "isActive": true,
+      "caLevel": "CA FOUNDATION",
+      "referralPoints": 0,
+      "referralCount": 0,
+      "totalXp": 0,
+      "baseXp": 0,
+      "createdAt": "2026-09-13T12:12:41.074727+00:00",
+      "phone": "9876543210"
     }
   },
   "papers": [
@@ -19784,5 +19784,6 @@
       "title": "Indian Regulatory Framework \u2014 Descriptive Practice Test 2",
       "topic": "Indian Regulatory Framework"
     }
-  ]
+  ],
+  "revoked_users": []
 }
