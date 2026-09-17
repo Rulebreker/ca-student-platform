@@ -7828,6 +7828,37 @@ class AdminDashboard {
 
     this.setupCascadingSyllabus('ai-gen-level', 'ai-gen-subject', 'ai-gen-chapter');
     if (window.lucide) window.lucide.createIcons();
+    this.checkForActiveAiJob();
+  }
+
+  async checkForActiveAiJob() {
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    if (!token) return;
+
+    try {
+      const resp = await fetch(`/api/admin/ai/jobs/active?_t=${Date.now()}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      if (data.hasActiveJob && data.job) {
+        const job = data.job;
+        this.aiActiveJobId = job.id;
+        const idlePanel = document.getElementById('ai-idle-state');
+        const activePanel = document.getElementById('ai-active-pipeline');
+        const btn = document.getElementById('ai-btn-generate');
+        if (idlePanel) idlePanel.classList.add('hidden');
+        if (activePanel) activePanel.classList.remove('hidden');
+        if (btn) {
+          btn.disabled = true;
+          btn.innerHTML = `<span class="inline-block animate-spin mr-2">⚙</span> Generating (${job.currentQuestionIndex || 0}/${job.totalQuestions || 10})...`;
+        }
+        this.pollAiJobStatus(job.id, job.totalQuestions || 10);
+      }
+    } catch (err) {
+      console.warn('[CHECK_ACTIVE_JOB_ERROR]', err);
+    }
   }
 
   handleAiPdfFilesSelected(files) {
@@ -8042,6 +8073,10 @@ class AdminDashboard {
           if (progressCounter) {
             progressCounter.innerText = `${job.currentQuestionIndex || 0} / ${job.totalQuestions || targetCount} Questions Verified`;
           }
+          // Live streaming: show verified questions as they arrive
+          if (questionsList && Array.isArray(job.generatedQuestions) && job.generatedQuestions.length > 0) {
+            this._renderStreamedQuestions(job.generatedQuestions, questionsList);
+          }
         }
 
         // Stream completed questions if job finished or result exists
@@ -8055,44 +8090,62 @@ class AdminDashboard {
           }
           if (progressBar) progressBar.style.width = '100%';
           if (progressPct) progressPct.innerText = '100%';
-          if (progressCounter) progressCounter.innerText = `${job.result.questions.length} / ${job.result.questions.length} Questions Verified`;
-          if (completionCard) completionCard.classList.remove('hidden');
+          const finalQs = (job.result && job.result.questions) || job.generatedQuestions || [];
+          if (progressCounter) progressCounter.innerText = `${finalQs.length} / ${finalQs.length} Questions Verified`;
+          if (completionCard) {
+            completionCard.className = 'p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-3';
+            const titleEl = document.getElementById('ai-complete-test-title');
+            const idEl = document.getElementById('ai-complete-test-id');
+            if (titleEl) titleEl.innerText = job.title || (job.result?.test?.title) || 'MCQ Test';
+            if (idEl) idEl.innerText = (job.result?.test?.id) || job.testId || '';
+            completionCard.classList.remove('hidden');
+          }
 
           if (btn) {
             btn.disabled = false;
             btn.innerHTML = `<i data-lucide="sparkles" class="w-4 h-4"></i> Generate & Host Test Now`;
           }
 
-          // Render streamed questions list
-          if (questionsList && job.result.questions) {
-            questionsList.innerHTML = job.result.questions.map((q, idx) => `
-              <div class="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
-                <div class="flex items-center justify-between">
-                  <span class="font-black text-rose-700">Question ${idx + 1}</span>
-                  <div class="flex items-center gap-1 text-[10px] font-bold text-slate-500">
-                    <span class="px-1.5 py-0.5 bg-slate-200 rounded">${q.providerUsed || 'Gemini'}</span>
-                    <span>•</span>
-                    <span class="text-emerald-600 font-black">Verified Answer: ${q.correctOption}</span>
-                  </div>
-                </div>
-                <p class="font-bold text-slate-900">${q.text}</p>
-                <div class="grid grid-cols-2 gap-2 text-slate-700">
-                  <div class="p-1.5 rounded ${q.correctOption === 'A' ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300' : 'bg-white border border-slate-200'}">A: ${q.optionA}</div>
-                  <div class="p-1.5 rounded ${q.correctOption === 'B' ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300' : 'bg-white border border-slate-200'}">B: ${q.optionB}</div>
-                  <div class="p-1.5 rounded ${q.correctOption === 'C' ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300' : 'bg-white border border-slate-200'}">C: ${q.optionC}</div>
-                  <div class="p-1.5 rounded ${q.correctOption === 'D' ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300' : 'bg-white border border-slate-200'}">D: ${q.optionD}</div>
-                </div>
-                <details class="text-[11px] text-slate-600 bg-white p-2 rounded border border-slate-200 cursor-pointer">
-                  <summary class="font-bold text-slate-800">ICAI Step-by-Step Explanation</summary>
-                  <p class="mt-1 leading-relaxed text-slate-700">${q.explanation}</p>
-                </details>
-              </div>
-            `).join('');
+          if (questionsList && finalQs.length > 0) {
+            this._renderStreamedQuestions(finalQs, questionsList);
           }
 
           // Authoritative sync: reload store tests and questions
           if (window.store && window.store.refreshTests) window.store.refreshTests();
           window.app.showToast('AI MCQ Test successfully created and hosted in ExcellenceCA!', 'success');
+          if (window.lucide) window.lucide.createIcons();
+        } else if (job.status === 'PARTIAL' && job.result) {
+          clearInterval(this.aiJobPollInterval);
+          this.aiJobPollInterval = null;
+
+          if (badge) {
+            badge.innerText = 'PARTIAL';
+            badge.className = 'px-2.5 py-1 text-xs font-black rounded-lg bg-amber-100 text-amber-800 border border-amber-200';
+          }
+          if (progressBar) progressBar.style.width = '100%';
+          if (progressPct) progressPct.innerText = '100%';
+          const finalQs = (job.result && job.result.questions) || job.generatedQuestions || [];
+          if (progressCounter) progressCounter.innerText = `${finalQs.length} / ${job.totalQuestions || targetCount} Questions Verified`;
+          if (completionCard) {
+            completionCard.className = 'p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3';
+            const titleEl = document.getElementById('ai-complete-test-title');
+            const idEl = document.getElementById('ai-complete-test-id');
+            if (titleEl) titleEl.innerText = `${job.title || (job.result?.test?.title) || 'MCQ Test'} (Partially Completed: ${finalQs.length} MCQs)`;
+            if (idEl) idEl.innerText = (job.result?.test?.id) || job.testId || '';
+            completionCard.classList.remove('hidden');
+          }
+
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<i data-lucide="sparkles" class="w-4 h-4"></i> Generate & Host Test Now`;
+          }
+
+          if (questionsList && finalQs.length > 0) {
+            this._renderStreamedQuestions(finalQs, questionsList);
+          }
+
+          if (window.store && window.store.refreshTests) window.store.refreshTests();
+          window.app.showToast(`Test created with ${finalQs.length} verified MCQs.`, 'warning');
           if (window.lucide) window.lucide.createIcons();
         } else if (job.status === 'FAILED') {
           clearInterval(this.aiJobPollInterval);
@@ -8113,6 +8166,33 @@ class AdminDashboard {
         console.warn('[AI_POLL_WARNING]', pollErr);
       }
     }, 1500);
+  }
+
+  _renderStreamedQuestions(questions, listEl) {
+    if (!listEl || !Array.isArray(questions)) return;
+    listEl.innerHTML = questions.map((q, idx) => `
+      <div class="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+        <div class="flex items-center justify-between">
+          <span class="font-black text-rose-700">Question ${idx + 1}</span>
+          <div class="flex items-center gap-1 text-[10px] font-bold text-slate-500">
+            <span class="px-1.5 py-0.5 bg-slate-200 rounded">${q.providerUsed || 'AI Engine'}</span>
+            <span>•</span>
+            <span class="text-emerald-600 font-black">Verified Answer: ${q.correctOption}</span>
+          </div>
+        </div>
+        <p class="font-bold text-slate-900">${q.text}</p>
+        <div class="grid grid-cols-2 gap-2 text-slate-700">
+          <div class="p-1.5 rounded ${q.correctOption === 'A' ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300' : 'bg-white border border-slate-200'}">A: ${q.optionA}</div>
+          <div class="p-1.5 rounded ${q.correctOption === 'B' ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300' : 'bg-white border border-slate-200'}">B: ${q.optionB}</div>
+          <div class="p-1.5 rounded ${q.correctOption === 'C' ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300' : 'bg-white border border-slate-200'}">C: ${q.optionC}</div>
+          <div class="p-1.5 rounded ${q.correctOption === 'D' ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300' : 'bg-white border border-slate-200'}">D: ${q.optionD}</div>
+        </div>
+        <details class="text-[11px] text-slate-600 bg-white p-2 rounded border border-slate-200 cursor-pointer">
+          <summary class="font-bold text-slate-800">ICAI Step-by-Step Explanation</summary>
+          <p class="mt-1 leading-relaxed text-slate-700">${q.explanation || 'Step-by-step conceptual solution.'}</p>
+        </details>
+      </div>
+    `).join('');
   }
 
   // --- SUB-TAB 2: PDF / SOURCE LIBRARY ---
@@ -8583,6 +8663,7 @@ class AdminDashboard {
                         <span class="px-2 py-0.5 text-[11px] font-bold rounded ${task.scheduleType === 'recurring' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-purple-50 text-purple-700 border border-purple-100'}">
                           ${task.scheduleType === 'recurring' ? `🔁 Daily at ${escapeHtml(task.dailyTime || '20:00')} IST` : `🎯 One-Time: ${formatIstDateTime(task.scheduledDateTime || task.nextRunAt)}`}
                         </span>
+                        ${task.isLiveEvent ? `<span class="px-2 py-0.5 text-[11px] font-bold rounded bg-rose-50 text-rose-700 border border-rose-100">⚡ Live Window: ${task.liveDurationMinutes || 60}m</span>` : ''}
                       </div>
                       <p class="text-xs text-slate-500 mt-1">
                         Title Template: <code class="text-[11px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 font-mono">${escapeHtml(task.titleTemplate || '[Subject] Daily Conceptual Sprint')}</code>
@@ -8594,6 +8675,14 @@ class AdminDashboard {
                       ${task.status === 'processing' 
                         ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 animate-pulse">
                              <i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Generating &amp; Hosting...
+                           </span>`
+                        : task.status === 'live'
+                        ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-600 text-white shadow-sm animate-pulse">
+                             <span class="w-2 h-2 rounded-full bg-white animate-ping"></span>⚡ LIVE NOW
+                           </span>`
+                        : task.status === 'expired'
+                        ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                             <i data-lucide="clock" class="w-3.5 h-3.5"></i> Expired
                            </span>`
                         : task.enabled && task.status === 'scheduled'
                         ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
@@ -8755,10 +8844,18 @@ class AdminDashboard {
                 </div>
 
                 <!-- One-Time Date & Time (IST) -->
-                <div id="ai-sched-datetime-container" class="hidden">
-                  <label class="block text-xs font-bold text-slate-700 mb-1">Scheduled Date &amp; Time (IST) <span class="text-rose-600">*</span></label>
-                  <input type="datetime-local" id="ai-sched-datetime" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-                  <span class="text-[10px] text-slate-400 mt-0.5 block">Executes once at scheduled IST timestamp</span>
+                <div id="ai-sched-datetime-container" class="hidden space-y-1.5">
+                  <div class="grid grid-cols-2 gap-2">
+                    <div>
+                      <label class="block text-xs font-bold text-slate-700 mb-1">Date (IST) <span class="text-rose-600">*</span></label>
+                      <input type="date" id="ai-sched-date" class="w-full px-2.5 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none bg-white" />
+                    </div>
+                    <div>
+                      <label class="block text-xs font-bold text-slate-700 mb-1">Time (IST) <span class="text-rose-600">*</span></label>
+                      <input type="time" id="ai-sched-time" value="10:00" class="w-full px-2.5 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none bg-white" />
+                    </div>
+                  </div>
+                  <span class="text-[10px] text-slate-400 block">Indian Standard Time (Asia/Kolkata, UTC+05:30)</span>
                 </div>
               </div>
 
@@ -8876,6 +8973,22 @@ class AdminDashboard {
                 <input type="checkbox" id="ai-sched-autopublish" checked class="w-4 h-4 text-rose-600 rounded focus:ring-rose-500 cursor-pointer" />
               </div>
 
+              <!-- Live Event Configuration -->
+              <div class="p-3.5 bg-rose-50/50 border border-rose-200 rounded-xl space-y-2.5">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <span class="text-xs font-bold text-rose-950 block">⚡ Host as Live Timed Event</span>
+                    <span class="text-[11px] text-rose-700 block">Automatically activates at scheduled time and auto-expires when window closes</span>
+                  </div>
+                  <input type="checkbox" id="ai-sched-is-live" checked class="w-4 h-4 text-rose-600 rounded focus:ring-rose-500 cursor-pointer" />
+                </div>
+                <div class="pt-2 border-t border-rose-200/60">
+                  <label class="block text-[11px] font-bold text-slate-700 mb-1">Live Window Duration (Minutes)</label>
+                  <input type="number" id="ai-sched-live-duration" min="5" max="1440" value="60" class="w-full sm:w-1/2 px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none bg-white" />
+                  <span class="text-[10px] text-slate-400 block mt-0.5">Test will automatically transition to Expired after this many minutes.</span>
+                </div>
+              </div>
+
               <!-- Modal Actions -->
               <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
                 <button type="button" onclick="window.adminDashboard.closeScheduleModal()" class="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors">
@@ -8915,7 +9028,23 @@ class AdminDashboard {
     document.getElementById('ai-sched-modal-title').innerText = 'Create Scheduled MCQ Task';
     document.getElementById('ai-sched-name').value = '';
     document.getElementById('ai-sched-daily-time').value = '09:00';
-    document.getElementById('ai-sched-datetime').value = '';
+
+    // Set default IST date and time
+    const nowIst = new Date(Date.now() + (330 + new Date().getTimezoneOffset()) * 60000);
+    const todayIst = nowIst.toISOString().slice(0, 10);
+    const dateInput = document.getElementById('ai-sched-date');
+    if (dateInput) {
+      dateInput.value = todayIst;
+      dateInput.min = todayIst;
+    }
+    const timeInput = document.getElementById('ai-sched-time');
+    if (timeInput) timeInput.value = '10:00';
+
+    const isLiveCheckbox = document.getElementById('ai-sched-is-live');
+    if (isLiveCheckbox) isLiveCheckbox.checked = true;
+    const liveDurInput = document.getElementById('ai-sched-live-duration');
+    if (liveDurInput) liveDurInput.value = '60';
+
     document.getElementById('ai-sched-title-template').value = '[Subject] Daily Conceptual Sprint';
     document.getElementById('ai-sched-topic').value = 'Daily Comprehensive Exam Practice';
     document.getElementById('ai-sched-count').value = '5';
@@ -8956,7 +9085,32 @@ class AdminDashboard {
     document.getElementById('ai-sched-modal-title').innerText = `Edit Schedule: ${task.name || 'Task'}`;
     document.getElementById('ai-sched-name').value = task.name || '';
     document.getElementById('ai-sched-daily-time').value = task.dailyTime || '09:00';
-    document.getElementById('ai-sched-datetime').value = task.scheduledDateTime || '';
+
+    let sDate = task.scheduledDate || '';
+    let sTime = task.scheduledTime || '10:00';
+    if (!sDate && task.scheduledDateTime) {
+      const parts = task.scheduledDateTime.split('T');
+      sDate = parts[0] || '';
+      sTime = parts[1] ? parts[1].slice(0, 5) : '10:00';
+    } else if (!sDate && task.nextRunAt) {
+      try {
+        const dt = new Date(task.nextRunAt);
+        const istOffset = 5.5 * 60 * 60 * 1000;
+        const ist = new Date(dt.getTime() + istOffset);
+        sDate = ist.toISOString().slice(0, 10);
+        sTime = ist.toISOString().slice(11, 16);
+      } catch (e) {}
+    }
+    const dateInput = document.getElementById('ai-sched-date');
+    if (dateInput) dateInput.value = sDate;
+    const timeInput = document.getElementById('ai-sched-time');
+    if (timeInput) timeInput.value = sTime;
+
+    const isLiveCheckbox = document.getElementById('ai-sched-is-live');
+    if (isLiveCheckbox) isLiveCheckbox.checked = task.isLiveEvent !== false;
+    const liveDurInput = document.getElementById('ai-sched-live-duration');
+    if (liveDurInput) liveDurInput.value = task.liveDurationMinutes || 60;
+
     document.getElementById('ai-sched-title-template').value = task.titleTemplate || '[Subject] Daily Conceptual Sprint';
     document.getElementById('ai-sched-topic').value = task.topic || 'Daily Comprehensive Exam Practice';
     document.getElementById('ai-sched-count').value = task.questionCount || 5;
@@ -9009,7 +9163,30 @@ class AdminDashboard {
     const scheduleTypeRadio = document.querySelector('input[name="ai-sched-type-radio"]:checked');
     const scheduleType = scheduleTypeRadio ? scheduleTypeRadio.value : 'recurring';
     const dailyTime = document.getElementById('ai-sched-daily-time')?.value || '09:00';
-    const scheduledDateTime = document.getElementById('ai-sched-datetime')?.value || null;
+    
+    const scheduledDate = document.getElementById('ai-sched-date')?.value || '';
+    const scheduledTime = document.getElementById('ai-sched-time')?.value || '10:00';
+    const isLiveEvent = document.getElementById('ai-sched-is-live')?.checked ?? true;
+    const liveDurationMinutes = parseInt(document.getElementById('ai-sched-live-duration')?.value || '60', 10);
+
+    if (scheduleType === 'one_time') {
+      if (!scheduledDate || !scheduledTime) {
+        window.app.showToast('Please select both a scheduled date and time for the one-time event.', 'error');
+        return;
+      }
+      try {
+        const targetIst = new Date(`${scheduledDate}T${scheduledTime}:00+05:30`);
+        if (isNaN(targetIst.getTime()) || targetIst.getTime() <= Date.now()) {
+          window.app.showToast('Scheduled date & time must be in the future (Asia/Kolkata IST).', 'error');
+          return;
+        }
+      } catch (dateErr) {
+        window.app.showToast('Invalid date or time format.', 'error');
+        return;
+      }
+    }
+
+    const scheduledDateTime = scheduleType === 'one_time' ? `${scheduledDate}T${scheduledTime}:00` : null;
 
     const levelSelect = document.getElementById('ai-sched-level');
     const examLevel = levelSelect?.value || 'CA Foundation';
@@ -9046,7 +9223,11 @@ class AdminDashboard {
       name,
       scheduleType,
       dailyTime,
+      scheduledDate,
+      scheduledTime,
       scheduledDateTime,
+      isLiveEvent,
+      liveDurationMinutes,
       examLevel,
       examLevelId,
       subject,
@@ -9108,6 +9289,10 @@ class AdminDashboard {
   async deleteScheduledTask(taskId) {
     if (!confirm('Are you sure you want to delete this scheduled task? This schedule will be removed permanently.')) return;
 
+    // Immediately remove from DOM to give instant visual feedback
+    const card = document.getElementById(`task-card-${taskId}`);
+    if (card) card.remove();
+
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
     const token = currentUser ? (currentUser.token || currentUser.email) : '';
 
@@ -9130,6 +9315,7 @@ class AdminDashboard {
       await this.renderAiAutopilotSubTab(document.getElementById('ai-subtab-container'));
     } catch (err) {
       window.app.showToast(`Delete failed: ${err.message}`, 'error');
+      await this.renderAiAutopilotSubTab(document.getElementById('ai-subtab-container'));
     }
   }
 

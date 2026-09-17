@@ -472,14 +472,33 @@ class TestEngine {
       const attemptsUsed = testAttempts.length;
       const maxAttempts = test.maxAttempts || 1;
       const attemptsRemaining = Math.max(0, maxAttempts - attemptsUsed);
-      const canTake = isEligible && (attemptsRemaining > 0);
+
+      const nowMs = Date.now();
+      const startsAtMs = test.liveStartsAt ? new Date(test.liveStartsAt).getTime() : null;
+      const expiresAtMs = test.liveExpiresAt ? new Date(test.liveExpiresAt).getTime() : null;
+
+      const isExpired = (expiresAtMs && nowMs >= expiresAtMs) || test.status === 'Expired' || test.status === 'Completed/Expired';
+      const isCurrentlyLive = !isExpired && (
+        test.isLive || 
+        test.status === 'Live' || 
+        (startsAtMs && expiresAtMs && nowMs >= startsAtMs && nowMs < expiresAtMs)
+      );
+
+      const canTake = isEligible && !isExpired && (attemptsRemaining > 0);
       const bestAttempt = testAttempts.length > 0 ? Math.max(...testAttempts.map(a => a.percentage)) : null;
       const isBm = user && window.store.isBookmarked ? window.store.isBookmarked(user.id, test.id) : false;
       const points = test.pointsPerCorrect || 10;
       const requiredPlansText = this.formatRequiredPlans(test.allowedPlans, test.requiredTier);
 
+      let liveClosingNotice = '';
+      if (isCurrentlyLive && expiresAtMs) {
+        const diffMins = Math.max(1, Math.round((expiresAtMs - nowMs) / 60000));
+        const closingText = diffMins < 60 ? `Closes in ${diffMins}m` : `Closes in ${Math.floor(diffMins / 60)}h ${diffMins % 60}m`;
+        liveClosingNotice = `<span class="text-[10px] font-bold text-rose-600 flex items-center gap-1"><i data-lucide="clock" class="w-3 h-3"></i> ${closingText}</span>`;
+      }
+
       return `
-        <div class="bg-white border ${isEligible ? 'border-slate-200' : 'border-amber-200/90'} rounded-xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between relative group">
+        <div class="bg-white border ${isCurrentlyLive ? 'border-rose-300 ring-1 ring-rose-200' : isEligible ? 'border-slate-200' : 'border-amber-200/90'} rounded-xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between relative group">
           <div>
             <div class="flex items-center justify-between gap-2 mb-3">
               <div class="flex items-center gap-1.5 flex-wrap">
@@ -489,6 +508,17 @@ class TestEngine {
                 <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
                   ${test.examLevel || 'CA Foundation'}
                 </span>
+                ${isCurrentlyLive ? `
+                  <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-600 text-white shadow-xs animate-pulse">
+                    <span class="w-1.5 h-1.5 rounded-full bg-white animate-ping"></span>
+                    ⚡ LIVE NOW
+                  </span>
+                ` : ''}
+                ${isExpired ? `
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700 border border-slate-300">
+                    <i data-lucide="clock" class="w-3 h-3 text-slate-500"></i> Expired Live Event
+                  </span>
+                ` : ''}
                 ${!isEligible ? `
                   <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
                     <i data-lucide="lock" class="w-3 h-3 text-amber-700"></i> Locked
@@ -513,6 +543,15 @@ class TestEngine {
 
             <h3 class="text-base font-bold text-slate-900 mb-2 leading-snug">${test.title}</h3>
             <p class="text-xs text-slate-600 line-clamp-2 mb-3 leading-relaxed">${test.description}</p>
+
+            ${liveClosingNotice ? `
+              <div class="mb-3 px-3 py-1.5 rounded-lg bg-rose-50 border border-rose-200 flex items-center justify-between text-xs">
+                <span class="font-bold text-rose-900 flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-rose-600 animate-ping"></span> Live Window Active
+                </span>
+                ${liveClosingNotice}
+              </div>
+            ` : ''}
 
             ${!isEligible ? `
               <div class="mb-3 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200/90 flex items-center gap-2 text-xs text-amber-900">
@@ -540,7 +579,11 @@ class TestEngine {
           <div>
             <div class="text-xs py-2 border-t border-slate-100 mb-3 space-y-1">
               <div class="flex items-center justify-between">
-                ${isEligible ? `
+                ${isExpired ? `
+                  <span class="text-slate-500 font-semibold flex items-center gap-1">
+                    <i data-lucide="alert-circle" class="w-3.5 h-3.5 text-slate-400"></i> Event has concluded. Submissions closed.
+                  </span>
+                ` : isEligible ? `
                   <span class="${canTake ? 'text-slate-600' : 'text-rose-600 font-semibold'}">
                     ${canTake ? `You have <strong>${attemptsRemaining} of ${maxAttempts}</strong> attempt(s) remaining.` : '<strong class="text-rose-600">You have no attempts remaining.</strong>'}
                   </span>
@@ -554,17 +597,25 @@ class TestEngine {
             </div>
 
             <div class="flex items-center gap-2">
-              ${isEligible ? `
+              ${isExpired ? `
+                <button 
+                  disabled 
+                  class="w-full py-2.5 text-xs font-bold rounded-lg bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  <i data-lucide="lock" class="w-3.5 h-3.5"></i> Live Event Expired
+                </button>
+              ` : isEligible ? `
                 <button 
                   onclick="window.testEngine.showInstructionsModal('${test.id}')"
                   class="w-full py-2.5 text-xs font-bold rounded-lg ${
                     canTake 
-                      ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm' 
+                      ? (isCurrentlyLive ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-sm' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm')
                       : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                  } transition-colors cursor-pointer"
+                  } transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                   ${!canTake ? 'disabled' : ''}
                 >
-                  ${attemptsUsed === 0 ? 'Start Mock Test' : (canTake ? 'Re-attempt Test' : 'Attempts Limit Reached')}
+                  ${isCurrentlyLive ? '<i data-lucide="zap" class="w-3.5 h-3.5"></i>' : ''}
+                  <span>${isCurrentlyLive ? (attemptsUsed === 0 ? 'Enter Live Mock Test' : 'Re-enter Live Test') : (attemptsUsed === 0 ? 'Start Mock Test' : (canTake ? 'Re-attempt Test' : 'Attempts Limit Reached'))}</span>
                 </button>
               ` : `
                 <button 
@@ -845,6 +896,14 @@ class TestEngine {
     const test = window.store.getTestById(testId);
     if (!test) return;
 
+    const nowMs = Date.now();
+    const expiresAtMs = test.liveExpiresAt ? new Date(test.liveExpiresAt).getTime() : null;
+    const isExpired = (expiresAtMs && nowMs >= expiresAtMs) || test.status === 'Expired' || test.status === 'Completed/Expired';
+    if (isExpired) {
+      window.app.showToast('This scheduled live event has expired and is no longer accepting submissions.', 'error');
+      return;
+    }
+
     const user = window.auth.getCurrentUser();
     if (!user) {
       window.app.showAuthModal('login');
@@ -966,6 +1025,14 @@ class TestEngine {
 
     const test = window.store.getTestById(testId);
     if (!test) return;
+
+    const nowMs = Date.now();
+    const expiresAtMs = test.liveExpiresAt ? new Date(test.liveExpiresAt).getTime() : null;
+    const isExpired = (expiresAtMs && nowMs >= expiresAtMs) || test.status === 'Expired' || test.status === 'Completed/Expired';
+    if (isExpired) {
+      window.app.showToast('This scheduled live event has expired and can no longer be started.', 'error');
+      return;
+    }
 
     if (!this.isPreview) {
       if (!this.isTestEligibleForStudent(test)) {

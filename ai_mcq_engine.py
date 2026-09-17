@@ -282,11 +282,13 @@ def generate_exact_mcqs_pipeline(
     exam_level_id: str = '',
     subject_id: str = '',
     chapter: str = '',
-    chapter_id: str = ''
+    chapter_id: str = '',
+    on_question_verified: Optional[Any] = None
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Main resilient generation pipeline guaranteeing EXACT count of validated MCQs.
     Employs single-item failure recovery: only the failed item is regenerated.
+    Persists valid MCQs immediately via on_question_verified callback.
     """
     if existing_questions is None:
         existing_questions = []
@@ -324,6 +326,7 @@ def generate_exact_mcqs_pipeline(
 
     max_total_attempts = max(count * 4, 15)
     total_attempts = 0
+    consecutive_failures = 0
 
     while len(generated_questions) < count and total_attempts < max_total_attempts:
         current_index = len(generated_questions) + 1
@@ -359,10 +362,13 @@ def generate_exact_mcqs_pipeline(
                 data=data
             )
             metrics['providersUsed'].add(gen_prov)
+            consecutive_failures = 0
         except Exception as gen_err:
-            print(f"[AI_PIPELINE_RETRY] Generation error on item {current_index}: {gen_err}. Retrying item...", flush=True)
+            consecutive_failures += 1
+            backoff = min(1.5 ** min(consecutive_failures, 5), 8.0)
+            print(f"[AI_PIPELINE_RETRY] Generation error on item {current_index} (fail #{consecutive_failures}): {gen_err}. Backing off {backoff:.1f}s...", flush=True)
             metrics['regenerationAttempts'] += 1
-            time.sleep(1.0)
+            time.sleep(backoff)
             continue
 
         # Step 2: Duplicate & near-duplicate check
@@ -437,6 +443,12 @@ def generate_exact_mcqs_pipeline(
 
         generated_questions.append(q_record)
         concept_summaries.append(final_q['text'][:120])
+        if on_question_verified:
+            try:
+                on_question_verified(q_record, generated_questions, current_index, count)
+            except Exception as cb_err:
+                print(f"[AI_PIPELINE_CB_WARNING] on_question_verified callback error: {cb_err}", flush=True)
+
         print(f"[AI_PIPELINE_SUCCESS] Successfully generated and verified question {current_index}/{count} (Provider: {gen_prov}, Validator: {val_prov}).", flush=True)
 
     metrics['generatedCount'] = len(generated_questions)

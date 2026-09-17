@@ -10,15 +10,102 @@ import ai_provider_manager
 import ai_document_indexer
 import ai_mcq_engine
 
-# Active jobs in memory
+# Active jobs in memory cache
 _active_jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 
-def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
+def save_job_record(
+    job_record: Dict[str, Any],
+    data: Optional[Dict[str, Any]] = None,
+    save_callback: Optional[Any] = None,
+    firebase_sync_callback: Optional[Any] = None
+):
+    """
+    Authoritative persistence for AI Generation Jobs across:
+    1. In-memory dictionary cache
+    2. Persistent local data store (data['ai_generation_jobs'])
+    3. Firebase Realtime Database (/ai_generation_jobs/{job_id})
+    """
+    job_id = job_record.get('id')
+    if not job_id:
+        return
+    with _jobs_lock:
+        _active_jobs[job_id] = dict(job_record)
+    
+    if data is not None and isinstance(data, dict):
+        jobs_list = data.setdefault('ai_generation_jobs', [])
+        found = False
+        for idx, j in enumerate(jobs_list):
+            if isinstance(j, dict) and j.get('id') == job_id:
+                jobs_list[idx] = dict(job_record)
+                found = True
+                break
+        if not found:
+            jobs_list.insert(0, dict(job_record))
+            if len(jobs_list) > 50:
+                data['ai_generation_jobs'] = jobs_list[:50]
+        
+        if save_callback:
+            try:
+                save_callback(data)
+            except Exception as e:
+                print(f"[AI_JOB_SAVE_WARNING] Failed to save backend data: {e}", flush=True)
+
+    if firebase_sync_callback:
+        try:
+            # Sync to Firebase non-blocking or sync
+            firebase_sync_callback(f"ai_generation_jobs/{job_id}", job_record, method='PUT', sync=False)
+        except Exception as fb_err:
+            print(f"[AI_JOB_FB_WARNING] Failed to sync job to Firebase: {fb_err}", flush=True)
+
+def get_job_status(job_id: str, data: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve job status by ID, checking memory cache, data store, and cloud sync.
+    """
     with _jobs_lock:
         job = _active_jobs.get(job_id)
         if job:
             return dict(job)
+    if data and isinstance(data, dict):
+        jobs = data.get('ai_generation_jobs', [])
+        if isinstance(jobs, dict):
+            jobs = list(jobs.values())
+        elif not isinstance(jobs, list):
+            jobs = []
+        for j in jobs:
+            if isinstance(j, dict) and j.get('id') == job_id:
+                with _jobs_lock:
+                    _active_jobs[job_id] = dict(j)
+                return dict(j)
+    return None
+
+def get_active_generation_job(data: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve the most recent active generation job (QUEUED, PROCESSING, GENERATING)
+    created within the last 15 minutes to restore UI on page refresh.
+    """
+    now_ts = time.time()
+    active_statuses = {'QUEUED', 'PROCESSING', 'GENERATING'}
+    
+    with _jobs_lock:
+        for j in sorted(_active_jobs.values(), key=lambda x: x.get('createdTs', 0), reverse=True):
+            if j.get('status') in active_statuses and (now_ts - j.get('createdTs', 0)) < 900:
+                return dict(j)
+
+    if data and isinstance(data, dict):
+        try:
+            jobs = data.get('ai_generation_jobs', [])
+            if isinstance(jobs, dict):
+                jobs = list(jobs.values())
+            elif not isinstance(jobs, list):
+                jobs = []
+            for j in sorted(jobs, key=lambda x: (isinstance(x, dict) and x.get('createdTs', 0)) or 0, reverse=True):
+                if isinstance(j, dict) and j.get('status') in active_statuses and (now_ts - j.get('createdTs', 0)) < 900:
+                    with _jobs_lock:
+                        _active_jobs[j['id']] = dict(j)
+                    return dict(j)
+        except Exception:
+            pass
     return None
 
 def create_generation_job(
@@ -29,6 +116,7 @@ def create_generation_job(
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Validate parameters and queue a background MCQ generation job.
+    Persists job record immediately to production DB before launching worker.
     """
     title = str(params.get('title', '')).strip()
     subject = str(params.get('subject', '')).strip()
@@ -51,44 +139,51 @@ def create_generation_job(
                 j.get('status') in ['QUEUED', 'PROCESSING', 'GENERATING']):
                 return True, None, j
 
-        job_id = f"job-ai-{int(now_ts * 1000)}-{uuid.uuid4().hex[:6]}"
-        chapter = params.get('chapter', '') or params.get('chapterName', '')
-        chapter_id = params.get('chapterId', '')
-        exam_level_id = params.get('examLevelId', 'foundation')
-        platform_xp = float(params.get('platformXp', 10))
-        allowed_plans = params.get('allowedPlans', ['free', 'trial', 'core', 'plus', 'elite'])
+    job_id = f"job-ai-{int(now_ts * 1000)}-{uuid.uuid4().hex[:6]}"
+    chapter = params.get('chapter', '') or params.get('chapterName', '')
+    chapter_id = params.get('chapterId', '')
+    exam_level_id = params.get('examLevelId', 'foundation')
+    platform_xp = float(params.get('platformXp', 10))
+    allowed_plans = params.get('allowedPlans', ['free', 'trial', 'core', 'plus', 'elite'])
 
-        job_record = {
-            'id': job_id,
-            'title': title,
-            'subject': subject,
-            'subjectId': params.get('subjectId', 'sub-1'),
-            'chapter': chapter,
-            'chapterId': chapter_id,
-            'topic': topic,
-            'examLevel': params.get('examLevel', 'CA Foundation'),
-            'examLevelId': exam_level_id,
-            'difficulty': params.get('difficulty', 'ICAI Exam Standard'),
-            'durationMinutes': int(params.get('durationMinutes', 15)),
-            'count': count,
-            'marksPerCorrect': float(params.get('marksPerCorrect', 2.0)),
-            'negativeMarksPerWrong': float(params.get('negativeMarksPerWrong', 0.5)),
-            'platformXp': platform_xp,
-            'maxAttempts': int(params.get('maxAttempts', 3)),
-            'allowedPlans': allowed_plans,
-            'autoPublish': bool(params.get('autoPublish', True)),
-            'status': 'QUEUED',
-            'progressPct': 5,
-            'currentStage': 'Initializing Generation Pipeline...',
-            'currentQuestionIndex': 0,
-            'totalQuestions': count,
-            'generatedQuestions': [],
-            'createdTs': now_ts,
-            'createdAt': datetime.now(timezone.utc).isoformat(),
-            'error': None,
-            'result': None
-        }
-        _active_jobs[job_id] = job_record
+    job_record = {
+        'id': job_id,
+        'title': title,
+        'subject': subject,
+        'subjectId': params.get('subjectId', 'sub-1'),
+        'chapter': chapter,
+        'chapterId': chapter_id,
+        'topic': topic,
+        'examLevel': params.get('examLevel', 'CA Foundation'),
+        'examLevelId': exam_level_id,
+        'difficulty': params.get('difficulty', 'ICAI Exam Standard'),
+        'durationMinutes': int(params.get('durationMinutes', 15)),
+        'count': count,
+        'requestedCount': count,
+        'generatedCount': 0,
+        'failedCount': 0,
+        'retryCount': 0,
+        'marksPerCorrect': float(params.get('marksPerCorrect', 2.0)),
+        'negativeMarksPerWrong': float(params.get('negativeMarksPerWrong', 0.5)),
+        'platformXp': platform_xp,
+        'maxAttempts': int(params.get('maxAttempts', 3)),
+        'allowedPlans': allowed_plans,
+        'autoPublish': bool(params.get('autoPublish', True)),
+        'status': 'QUEUED',
+        'progressPct': 5,
+        'currentStage': 'Initializing Generation Pipeline...',
+        'currentQuestionIndex': 0,
+        'totalQuestions': count,
+        'generatedQuestions': [],
+        'testId': None,
+        'createdTs': now_ts,
+        'createdAt': datetime.now(timezone.utc).isoformat(),
+        'error': None,
+        'result': None
+    }
+
+    # Persist job record immediately in DB & Firebase
+    save_job_record(job_record, data, save_callback, firebase_sync_callback)
 
     # Launch worker in background thread
     worker_thread = threading.Thread(
@@ -141,6 +236,10 @@ def run_generation_job_synchronous(
         'difficulty': params.get('difficulty', 'ICAI Exam Standard'),
         'durationMinutes': int(params.get('durationMinutes', 15)),
         'count': count,
+        'requestedCount': count,
+        'generatedCount': 0,
+        'failedCount': 0,
+        'retryCount': 0,
         'marksPerCorrect': float(params.get('marksPerCorrect', 2.0)),
         'negativeMarksPerWrong': float(params.get('negativeMarksPerWrong', 0.5)),
         'platformXp': platform_xp,
@@ -153,24 +252,25 @@ def run_generation_job_synchronous(
         'currentQuestionIndex': 0,
         'totalQuestions': count,
         'generatedQuestions': [],
+        'testId': None,
         'createdTs': now_ts,
         'createdAt': datetime.now(timezone.utc).isoformat(),
         'error': None,
         'result': None
     }
-    with _jobs_lock:
-        _active_jobs[job_id] = job_record
+    save_job_record(job_record, data, save_callback, firebase_sync_callback)
 
     # Run directly on current thread
     _run_generation_job_worker(job_id, params, data, save_callback, firebase_sync_callback)
 
-    with _jobs_lock:
-        final_job = _active_jobs.get(job_id, {})
-        if final_job.get('status') == 'COMPLETED':
-            return True, None, final_job.get('result')
-        else:
-            err = final_job.get('error') or "Generation job failed to complete."
-            return False, err, None
+    final_job = get_job_status(job_id, data) or {}
+    if final_job.get('status') in ['COMPLETED', 'PARTIAL']:
+        return True, None, final_job.get('result')
+    else:
+        err = final_job.get('error') or "Generation job failed to complete."
+        return False, err, None
+
+execute_ai_generation_job_sync = run_generation_job_synchronous
 
 def _run_generation_job_worker(
     job_id: str,
@@ -181,37 +281,31 @@ def _run_generation_job_worker(
 ):
     print(f"[AI_JOB_START] Job {job_id} initiated for '{params.get('title')}'.", flush=True)
     
-    with _jobs_lock:
-        if job_id in _active_jobs:
-            _active_jobs[job_id]['status'] = 'PROCESSING'
-            _active_jobs[job_id]['progressPct'] = 10
-            _active_jobs[job_id]['currentStage'] = 'Loading Source Documents & Analyzing Knowledge Base...'
+    job_record = get_job_status(job_id, data) or {}
+    job_record['status'] = 'GENERATING'
+    job_record['progressPct'] = 10
+    job_record['currentStage'] = 'Loading Source Documents & Initializing Test Container...'
+    save_job_record(job_record, data, save_callback, firebase_sync_callback)
+
+    test_record = None
+    test_id = f"tst-ai-{int(time.time() * 1000)}"
 
     try:
         # 1. Fetch source documents & existing questions for duplicate checking
         source_docs = data.get('ai_source_documents', [])
         existing_qs = data.get('questions', [])
 
-        def _on_progress(p_info):
-            with _jobs_lock:
-                if job_id in _active_jobs:
-                    _active_jobs[job_id]['status'] = 'GENERATING'
-                    _active_jobs[job_id]['progressPct'] = p_info.get('progressPct', 20)
-                    _active_jobs[job_id]['currentStage'] = p_info.get('status', 'Generating MCQs...')
-                    _active_jobs[job_id]['currentQuestionIndex'] = p_info.get('current', 0)
-
-        # 2. Run MCQ Engine with recovery loop
         count = int(params.get('count', 5))
-        test_id = f"tst-ai-{int(time.time() * 1000)}"
-        
         chapter = params.get('chapter', '') or params.get('chapterName', '')
         chapter_id = params.get('chapterId', '')
         exam_level_id = params.get('examLevelId', 'foundation')
         platform_xp = float(params.get('platformXp', 10))
         allowed_plans = params.get('allowedPlans', ['free', 'trial', 'core', 'plus', 'elite'])
         max_attempts = int(params.get('maxAttempts', 3))
+        auto_publish = bool(params.get('autoPublish', True))
+        marks_per_correct = float(params.get('marksPerCorrect', 2.0))
+        negative_marks = float(params.get('negativeMarksPerWrong', 0.5))
 
-        # Map subjectId if needed
         sub_id = params.get('subjectId')
         if not sub_id:
             sub_map = {
@@ -222,39 +316,9 @@ def _run_generation_job_worker(
             }
             sub_id = sub_map.get(params.get('subject'), 'sub-1')
 
-        questions, metrics = ai_mcq_engine.generate_exact_mcqs_pipeline(
-            subject=params.get('subject', 'Accounting'),
-            topic=params.get('topic', 'General'),
-            count=count,
-            exam_level=params.get('examLevel', 'CA Foundation'),
-            difficulty=params.get('difficulty', 'ICAI Exam Standard'),
-            test_id=test_id,
-            source_documents=source_docs,
-            existing_questions=existing_qs,
-            job_id=job_id,
-            marks_per_correct=float(params.get('marksPerCorrect', 2.0)),
-            negative_marks=float(params.get('negativeMarksPerWrong', 0.5)),
-            progress_callback=_on_progress,
-            data=data,
-            exam_level_id=exam_level_id,
-            subject_id=sub_id,
-            chapter=chapter,
-            chapter_id=chapter_id
-        )
-
-        with _jobs_lock:
-            if job_id in _active_jobs:
-                _active_jobs[job_id]['generatedQuestions'] = questions
-                _active_jobs[job_id]['status'] = 'SAVING'
-                _active_jobs[job_id]['progressPct'] = 92
-                _active_jobs[job_id]['currentStage'] = 'Hosting Test and Saving to Database...'
-
-        # 3. Create Test Record
+        # 2. Create and persist Draft Test record immediately in production DB
         now_utc = datetime.now(timezone.utc)
         now_iso = now_utc.isoformat()
-        auto_publish = bool(params.get('autoPublish', True))
-        marks_per_correct = float(params.get('marksPerCorrect', 2.0))
-        max_marks = float(len(questions) * marks_per_correct)
 
         test_record = {
             'id': test_id,
@@ -268,14 +332,14 @@ def _run_generation_job_worker(
             'examLevel': params.get('examLevel', 'CA Foundation'),
             'examLevelId': exam_level_id,
             'durationMinutes': int(params.get('durationMinutes', 15)),
-            'totalQuestions': len(questions),
+            'totalQuestions': 0,
             'marksPerCorrect': marks_per_correct,
-            'negativeMarksPerWrong': float(params.get('negativeMarksPerWrong', 0.5)),
-            'maximumMarks': max_marks,
+            'negativeMarksPerWrong': negative_marks,
+            'maximumMarks': 0.0,
             'allowedPlans': allowed_plans,
             'hideFromNonEligible': False,
-            'isPublished': auto_publish,
-            'status': 'Published' if auto_publish else 'Draft',
+            'isPublished': False,
+            'status': 'Draft',
             'pointsPerCorrect': platform_xp,
             'platformXp': platform_xp,
             'unattemptedMarks': 0.0,
@@ -286,23 +350,134 @@ def _run_generation_job_worker(
             'updatedAt': now_iso
         }
 
-        # 4. Insert Test and Questions into memory data store
         if 'tests' not in data:
             data['tests'] = []
         if 'questions' not in data:
             data['questions'] = []
-            
-        data['tests'].insert(0, test_record)
-        for q in questions:
-            q['testId'] = test_id
-            q['points'] = platform_xp
-            q['xp'] = platform_xp
-            q['chapter'] = chapter
-            q['chapterId'] = chapter_id
-            q['examLevel'] = params.get('examLevel', 'CA Foundation')
-            data['questions'].append(q)
 
-        # 5. Create Telemetry Log
+        data['tests'].insert(0, test_record)
+        job_record['testId'] = test_id
+        
+        if save_callback:
+            save_callback(data)
+        if firebase_sync_callback:
+            firebase_sync_callback(f"tests/{test_id}", test_record, method='PUT', sync=False)
+        save_job_record(job_record, data, save_callback, firebase_sync_callback)
+
+        # 3. Incremental persistence callback: Persists each question to DB the instant it is verified
+        def _on_question_verified_cb(q_record, all_qs, current_idx, total_count):
+            q_record['testId'] = test_id
+            q_record['points'] = platform_xp
+            q_record['xp'] = platform_xp
+            q_record['chapter'] = chapter
+            q_record['chapterId'] = chapter_id
+            q_record['examLevel'] = params.get('examLevel', 'CA Foundation')
+
+            # Insert question into authoritative data store
+            data['questions'].append(q_record)
+            
+            # Incrementally update test record
+            test_record['totalQuestions'] = len(all_qs)
+            test_record['maximumMarks'] = round(len(all_qs) * marks_per_correct, 2)
+            test_record['updatedAt'] = datetime.now(timezone.utc).isoformat()
+
+            # Update job telemetry
+            job_record['generatedCount'] = len(all_qs)
+            job_record['currentQuestionIndex'] = len(all_qs)
+            job_record['currentStage'] = f"Formulated & Verified Question {len(all_qs)} of {total_count}"
+            job_record['progressPct'] = min(92, int((len(all_qs) / total_count) * 82) + 10)
+            job_record['generatedQuestions'] = all_qs
+
+            # Incremental DB & Cloud writes
+            if save_callback:
+                save_callback(data)
+            if firebase_sync_callback:
+                firebase_sync_callback(f"questions/{q_record['id']}", q_record, method='PUT', sync=False)
+                firebase_sync_callback(f"tests/{test_id}", test_record, method='PUT', sync=False)
+            save_job_record(job_record, data, save_callback, firebase_sync_callback)
+
+        def _on_progress_cb(p_info):
+            job_record['currentStage'] = p_info.get('status', 'Generating MCQs...')
+            save_job_record(job_record, data, save_callback, firebase_sync_callback)
+
+        # 4. Run MCQ Engine with incremental persistence and recovery
+        questions, metrics = ai_mcq_engine.generate_exact_mcqs_pipeline(
+            subject=params.get('subject', 'Accounting'),
+            topic=params.get('topic', 'General'),
+            count=count,
+            exam_level=params.get('examLevel', 'CA Foundation'),
+            difficulty=params.get('difficulty', 'ICAI Exam Standard'),
+            test_id=test_id,
+            source_documents=source_docs,
+            existing_questions=existing_qs,
+            job_id=job_id,
+            marks_per_correct=marks_per_correct,
+            negative_marks=negative_marks,
+            progress_callback=_on_progress_cb,
+            data=data,
+            exam_level_id=exam_level_id,
+            subject_id=sub_id,
+            chapter=chapter,
+            chapter_id=chapter_id,
+            on_question_verified=_on_question_verified_cb
+        )
+
+        completed_iso = datetime.now(timezone.utc).isoformat()
+
+        # 5. Finalize Test & Job States
+        if len(questions) == count:
+            # Full completion
+            test_record['totalQuestions'] = len(questions)
+            test_record['maximumMarks'] = round(len(questions) * marks_per_correct, 2)
+            test_record['isPublished'] = auto_publish
+            test_record['status'] = 'Published' if auto_publish else 'Draft'
+            test_record['updatedAt'] = completed_iso
+
+            job_record['status'] = 'COMPLETED'
+            job_record['progressPct'] = 100
+            job_record['currentStage'] = 'Test Hosted & Published Successfully!'
+            job_record['generatedCount'] = len(questions)
+            job_record['failedCount'] = 0
+            job_record['result'] = {
+                'test': test_record,
+                'questions': questions,
+                'metrics': metrics,
+                'job': dict(job_record)
+            }
+
+        elif len(questions) > 0:
+            # Partial completion: some MCQs generated safely
+            test_record['totalQuestions'] = len(questions)
+            test_record['maximumMarks'] = round(len(questions) * marks_per_correct, 2)
+            test_record['isPublished'] = auto_publish
+            test_record['status'] = 'Published' if auto_publish else 'Draft'
+            test_record['updatedAt'] = completed_iso
+
+            job_record['status'] = 'PARTIAL'
+            job_record['progressPct'] = 100
+            job_record['currentStage'] = f"Partially Completed: {len(questions)} of {count} MCQs generated & hosted."
+            job_record['generatedCount'] = len(questions)
+            job_record['failedCount'] = count - len(questions)
+            job_record['result'] = {
+                'test': test_record,
+                'questions': questions,
+                'metrics': metrics,
+                'job': dict(job_record)
+            }
+
+        else:
+            # Complete failure: 0 questions produced
+            # Purge empty test from DB so no empty test is displayed
+            data['tests'] = [t for t in data.get('tests', []) if t.get('id') != test_id]
+            if firebase_sync_callback:
+                firebase_sync_callback(f"tests/{test_id}", None, method='DELETE', sync=True)
+
+            job_record['status'] = 'FAILED'
+            job_record['error'] = 'Failed to generate valid questions after maximum attempts.'
+            job_record['currentStage'] = 'Failed: No valid questions generated.'
+            job_record['failedCount'] = count
+
+        # 6. Telemetry Log
         if 'ai_generation_logs' not in data:
             data['ai_generation_logs'] = []
 
@@ -310,9 +485,9 @@ def _run_generation_job_worker(
             'id': f"log-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}",
             'jobId': job_id,
             'testId': test_id,
-            'testTitle': test_record['title'],
-            'subject': test_record['subject'],
-            'topic': test_record['topic'],
+            'testTitle': test_record.get('title', 'MCQ Test') if len(questions) > 0 else 'Failed Generation',
+            'subject': params.get('subject'),
+            'topic': params.get('topic'),
             'requestedCount': count,
             'generatedCount': len(questions),
             'rejectedDuplicates': metrics.get('rejectedDuplicates', 0),
@@ -321,42 +496,38 @@ def _run_generation_job_worker(
             'durationSeconds': metrics.get('durationSeconds', 0),
             'providersUsed': metrics.get('providersUsed', []),
             'validationProvidersUsed': metrics.get('validationProvidersUsed', []),
-            'status': 'COMPLETED' if len(questions) == count else 'PARTIALLY_FAILED',
-            'isPublished': auto_publish,
-            'timestamp': now_iso
+            'status': job_record['status'],
+            'isPublished': auto_publish if len(questions) > 0 else False,
+            'timestamp': completed_iso
         }
         data['ai_generation_logs'].insert(0, log_record)
 
-        # 6. Synchronous Persistence to disk and Firebase RTDB
+        # 7. Authoritative Sync
         if save_callback:
             save_callback(data)
 
         if firebase_sync_callback:
-            firebase_sync_callback(f"tests/{test_id}", test_record, method='PUT', sync=True)
-            for q in questions:
-                firebase_sync_callback(f"questions/{q['id']}", q, method='PUT', sync=True)
-            firebase_sync_callback(f"ai_generation_logs/{log_record['id']}", log_record, method='PUT', sync=True)
+            if len(questions) > 0:
+                firebase_sync_callback(f"tests/{test_id}", test_record, method='PUT', sync=True)
+            firebase_sync_callback(f"ai_generation_logs/{log_record['id']}", log_record, method='PUT', sync=False)
 
-        # 7. Complete job state
-        with _jobs_lock:
-            if job_id in _active_jobs:
-                _active_jobs[job_id]['status'] = 'COMPLETED'
-                _active_jobs[job_id]['progressPct'] = 100
-                _active_jobs[job_id]['currentStage'] = 'Test Hosted & Published Successfully!'
-                _active_jobs[job_id]['result'] = {
-                    'test': test_record,
-                    'questions': questions,
-                    'metrics': metrics,
-                    'log': log_record
-                }
-
-        print(f"[AI_JOB_COMPLETE] Job {job_id} finished successfully. Created test {test_id} with {len(questions)} MCQs.", flush=True)
+        save_job_record(job_record, data, save_callback, firebase_sync_callback)
+        print(f"[AI_JOB_COMPLETE] Job {job_id} finished with status '{job_record['status']}'. Created test {test_id} with {len(questions)} MCQs.", flush=True)
 
     except Exception as e:
         err_msg = str(e)
-        print(f"[AI_JOB_ERROR] Job {job_id} failed: {err_msg}", flush=True)
-        with _jobs_lock:
-            if job_id in _active_jobs:
-                _active_jobs[job_id]['status'] = 'FAILED'
-                _active_jobs[job_id]['error'] = err_msg
-                _active_jobs[job_id]['currentStage'] = f"Error: {err_msg}"
+        print(f"[AI_JOB_ERROR] Job {job_id} failed with exception: {err_msg}", flush=True)
+        job_record['status'] = 'FAILED'
+        job_record['error'] = err_msg
+        job_record['currentStage'] = f"Error: {err_msg}"
+        
+        # Purge empty test if 0 questions generated
+        if test_record and test_record.get('totalQuestions', 0) == 0:
+            data['tests'] = [t for t in data.get('tests', []) if t.get('id') != test_id]
+            if firebase_sync_callback:
+                try:
+                    firebase_sync_callback(f"tests/{test_id}", None, method='DELETE', sync=True)
+                except Exception:
+                    pass
+
+        save_job_record(job_record, data, save_callback, firebase_sync_callback)

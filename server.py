@@ -1004,6 +1004,25 @@ def check_scheduled_mcq_tests(data, sync_fn=None):
             except Exception as e:
                 print(f"[MCQ_SCHEDULE_ERROR] Error checking test {test.get('id')}: {e}", flush=True)
 
+        # Check automatic expiry for tests with liveExpiresAt
+        live_expires_at = test.get('liveExpiresAt')
+        if live_expires_at and (test.get('isLive') or status == 'Live'):
+            try:
+                clean_exp = str(live_expires_at).replace('Z', '+00:00')
+                exp_dt = datetime.fromisoformat(clean_exp)
+                if exp_dt.tzinfo is None:
+                    exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+                if now_utc >= exp_dt:
+                    test['status'] = 'Expired'
+                    test['isLive'] = False
+                    test['expiredAt'] = now_iso
+                    dirty = True
+                    print(f"[MCQ_SCHEDULE] Test '{test.get('title')}' ({test.get('id')}) transitioned to EXPIRED at {now_iso}", flush=True)
+                    if sync_fn:
+                        sync_fn(f"tests/{test['id']}", test)
+            except Exception as exp_err:
+                print(f"[MCQ_EXPIRE_ERROR] Error expiring test {test.get('id')}: {exp_err}", flush=True)
+
     return dirty
 
 _backend_data_lock = threading.RLock()
@@ -1018,7 +1037,7 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
         return data
 
     now = time.time()
-    all_keys = ['users', 'revoked_users', 'revoked_tokens', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'assignments', 'papers', 'ai_source_documents', 'ai_generation_logs', 'ai_providers', 'ai_autopilot_config', 'ai_scheduled_tasks']
+    all_keys = ['users', 'revoked_users', 'revoked_tokens', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'assignments', 'papers', 'ai_source_documents', 'ai_generation_logs', 'ai_providers', 'ai_autopilot_config', 'ai_scheduled_tasks', 'ai_generation_jobs']
     target_keys = collections if collections else all_keys
 
     keys_to_fetch = [k for k in target_keys if (now - _collection_last_synced.get(k, 0)) >= min_interval]
@@ -1036,6 +1055,10 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
                     continue
                 cloud_data = json.loads(raw_bytes.decode('utf-8'))
                 if cloud_data is None:
+                    if key == 'ai_scheduled_tasks':
+                        data['ai_scheduled_tasks'] = []
+                        _collection_last_synced[key] = now
+                        updated = True
                     continue
 
                 if key == 'users':
@@ -1238,14 +1261,23 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
                             updated = True
                 elif key == 'ai_scheduled_tasks':
                     items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                    if items is not None:
-                        t_map = {t.get('id'): t for t in data.get('ai_scheduled_tasks', []) if isinstance(t, dict) and t.get('id')}
-                        for t in items:
-                            if isinstance(t, dict) and t.get('id'):
-                                t_map[t['id']] = t
-                        data['ai_scheduled_tasks'] = list(t_map.values())
-                        _collection_last_synced[key] = now
-                        updated = True
+                    tombstones = set(data.get('deleted_scheduled_tasks', []))
+                    data['ai_scheduled_tasks'] = [
+                        t for t in items 
+                        if isinstance(t, dict) and t.get('id') and t.get('id') not in tombstones and not t.get('isDeleted') and t.get('status') != 'deleted'
+                    ]
+                    _collection_last_synced[key] = now
+                    updated = True
+                elif key == 'ai_generation_jobs':
+                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                    j_map = {j.get('id'): j for j in data.get('ai_generation_jobs', []) if isinstance(j, dict) and j.get('id')}
+                    for j in items:
+                        if isinstance(j, dict) and j.get('id'):
+                            j_map[j['id']] = j
+                    sorted_jobs = sorted(j_map.values(), key=lambda x: x.get('createdTs', 0), reverse=True)[:50]
+                    data['ai_generation_jobs'] = sorted_jobs
+                    _collection_last_synced[key] = now
+                    updated = True
         except Exception:
             pass
 
@@ -1274,7 +1306,7 @@ def load_backend_data(refresh_collections=None):
                         cur_data = json.load(f)
                     
                     import urllib.request
-                    keys_to_fetch = ['revoked_users', 'revoked_tokens', 'users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'papers', 'assignments', 'ai_source_documents', 'ai_generation_logs', 'ai_providers', 'ai_autopilot_config', 'subjects', 'ai_scheduled_tasks']
+                    keys_to_fetch = ['revoked_users', 'revoked_tokens', 'users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'papers', 'assignments', 'ai_source_documents', 'ai_generation_logs', 'ai_providers', 'ai_autopilot_config', 'subjects', 'ai_scheduled_tasks', 'ai_generation_jobs']
                     
                     for key in keys_to_fetch:
                         try:
@@ -1433,12 +1465,14 @@ def load_backend_data(refresh_collections=None):
                                         cur_data['subjects'] = items
                                 elif key == 'ai_scheduled_tasks':
                                     items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                                    if items is not None:
-                                        t_map = {t.get('id'): t for t in cur_data.get('ai_scheduled_tasks', []) if isinstance(t, dict) and t.get('id')}
-                                        for t in items:
-                                            if isinstance(t, dict) and t.get('id'):
-                                                t_map[t['id']] = t
-                                        cur_data['ai_scheduled_tasks'] = list(t_map.values())
+                                    tombstones = set(cur_data.get('deleted_scheduled_tasks', []))
+                                    cur_data['ai_scheduled_tasks'] = [
+                                        t for t in items 
+                                        if isinstance(t, dict) and t.get('id') and t.get('id') not in tombstones and not t.get('isDeleted') and t.get('status') != 'deleted'
+                                    ]
+                                elif key == 'ai_generation_jobs':
+                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                                    cur_data['ai_generation_jobs'] = items
                         except Exception as err:
                             print(f"[COLD_START] Failed to fetch {key} from Firebase: {err}", flush=True)
 
@@ -1459,7 +1493,7 @@ def load_backend_data(refresh_collections=None):
                     d = None
 
             if d is not None:
-                list_keys = ['tests', 'questions', 'test_attempts', 'submissions', 'papers', 'xp_transactions', 'notifications', 'bookmarks', 'subjects', 'referrals', 'payment_sessions', 'payment_channels', 'admin_audit_logs', 'xp_reset_history', 'ai_source_documents', 'ai_generation_logs', 'ai_scheduled_tasks']
+                list_keys = ['tests', 'questions', 'test_attempts', 'submissions', 'papers', 'xp_transactions', 'notifications', 'bookmarks', 'subjects', 'referrals', 'payment_sessions', 'payment_channels', 'admin_audit_logs', 'xp_reset_history', 'ai_source_documents', 'ai_generation_logs', 'ai_scheduled_tasks', 'ai_generation_jobs']
                 for lk in list_keys:
                     if lk not in d:
                         d[lk] = []
@@ -2998,11 +3032,24 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not job_id:
                 self.send_json(400, {'error': 'Missing jobId parameter', 'code': 400})
                 return
-            job = ai_job_manager.get_job_status(job_id)
+            data = load_backend_data(refresh_collections=['ai_generation_jobs'])
+            job = ai_job_manager.get_job_status(job_id, data)
             if job:
                 self.send_json(200, {'success': True, 'job': job})
             else:
                 self.send_json(404, {'error': 'Job not found', 'code': 404})
+            return
+
+        # 3.1 AI Generation Active Job for Session / Page Refresh Recovery
+        if path == '/api/admin/ai/jobs/active':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            data = load_backend_data(refresh_collections=['ai_generation_jobs'])
+            active_job = ai_job_manager.get_active_generation_job(data)
+            self.send_json(200, {'success': True, 'job': active_job, 'hasActiveJob': bool(active_job)})
             return
 
         # 4. AI Generation Telemetry Logs
@@ -3357,8 +3404,11 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 sync_to_firebase(f"ai_scheduled_tasks/{task['id']}", task, method='PUT', sync=True)
                 self.send_json(200, {'success': True, 'task': task})
                 return
+            except ValueError as ve:
+                self.send_json(400, {'success': False, 'error': str(ve), 'code': 400})
+                return
             except Exception as e:
-                self.send_json(500, {'error': f'Failed to save scheduled task: {str(e)}', 'code': 500})
+                self.send_json(500, {'success': False, 'error': f'Failed to save scheduled task: {str(e)}', 'code': 500})
                 return
 
         # 6.2 Delete Scheduled Task
@@ -3374,7 +3424,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 req_data = json.loads(body.decode('utf-8'))
                 task_id = req_data.get('id') or req_data.get('taskId')
                 if not task_id:
-                    self.send_json(400, {'error': 'Task ID is required.', 'code': 400})
+                    self.send_json(400, {'success': False, 'error': 'Task ID is required.', 'code': 400})
                     return
                 
                 data = load_backend_data(refresh_collections=['ai_scheduled_tasks'])
@@ -3387,10 +3437,14 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     sync_to_firebase(f"ai_scheduled_tasks/{task_id}", None, method='DELETE', sync=True)
                     self.send_json(200, {'success': True, 'deletedId': task_id})
                 else:
-                    self.send_json(404, {'error': f"Task '{task_id}' not found.", 'code': 404})
+                    # Idempotency: if already deleted, return confirmed deletion
+                    if task_id in data.get('deleted_scheduled_tasks', []):
+                        self.send_json(200, {'success': True, 'deletedId': task_id, 'alreadyDeleted': True})
+                    else:
+                        self.send_json(404, {'success': False, 'error': f"Task '{task_id}' not found.", 'code': 404})
                 return
             except Exception as e:
-                self.send_json(500, {'error': f'Failed to delete task: {str(e)}', 'code': 500})
+                self.send_json(500, {'success': False, 'error': f'Failed to delete task: {str(e)}', 'code': 500})
                 return
 
         # 6.3 Toggle Scheduled Task (Pause / Resume)
