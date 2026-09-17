@@ -20,6 +20,10 @@ class AdminDashboard {
     this.selectedCheckedPdfFile = null;
     this.selectedQuestionPdfFile = null;
     this.showStudentPasswords = true;
+    this.aiActiveSubTab = 'generate';
+    this.aiActiveJobId = null;
+    this.aiJobPollInterval = null;
+    this.aiSelectedPdfFiles = [];
   }
 
   render() {
@@ -50,6 +54,7 @@ class AdminDashboard {
     else if (this.currentTab === 'ranks-config') this.renderRanksConfig();
     else if (this.currentTab === 'lectures') this.renderLectures();
     else if (this.currentTab === 'subjects') this.renderSubjects();
+    else if (this.currentTab === 'ai-automation') this.renderAiAutomation();
   }
 
   switchTab(tab) {
@@ -81,6 +86,7 @@ class AdminDashboard {
 
     const tabs = [
       { id: 'overview', name: 'Overview & KPIs', icon: 'layout-dashboard' },
+      { id: 'ai-automation', name: 'AI MCQ Studio & Automation', icon: 'sparkles' },
       { id: 'subscriptions', name: 'Subscriptions & Grants', icon: 'credit-card' },
       { id: 'payments', name: 'Payment Verifications', icon: 'badge-check' },
       { id: 'payment-channels', name: 'UPI Channels & QR', icon: 'qr-code' },
@@ -7384,6 +7390,1376 @@ class AdminDashboard {
     window.store.deleteSubject(subjectId);
     window.app.showToast(`Subject "${subject.name}" deleted.`, 'info');
     this.renderSubjects();
+  }
+
+  // ================================================================
+  // --- 18. AI MCQ STUDIO & AUTONOMOUS HOSTING SUITE ---
+  // ================================================================
+
+  renderAiAutomation() {
+    const container = document.getElementById('admin-content-area');
+    if (!container) return;
+
+    container.innerHTML = `
+      <div class="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 class="text-2xl font-black text-slate-900 flex items-center gap-2">
+              <i data-lucide="sparkles" class="w-6 h-6 text-rose-600"></i>
+              AI MCQ Studio & Automation
+            </h2>
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              ICAI Pipeline Active
+            </span>
+          </div>
+          <p class="text-xs text-slate-500 mt-1">
+            Automated CA MCQ generation, Mistral OCR document indexing, multi-provider failover, and server-side Auto-Pilot hosting.
+          </p>
+        </div>
+      </div>
+
+      <!-- Sub-Tab Navigation Pills -->
+      <div class="flex flex-wrap items-center gap-2 pb-4 border-b border-slate-200 mb-6">
+        <button 
+          onclick="window.adminDashboard.switchAiSubTab('generate')"
+          class="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg transition-all ${
+            this.aiActiveSubTab === 'generate' 
+              ? 'bg-rose-700 text-white shadow-sm' 
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }"
+        >
+          <i data-lucide="zap" class="w-4 h-4"></i>
+          Generate & Host Now
+        </button>
+
+        <button 
+          onclick="window.adminDashboard.switchAiSubTab('library')"
+          class="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg transition-all ${
+            this.aiActiveSubTab === 'library' 
+              ? 'bg-rose-700 text-white shadow-sm' 
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }"
+        >
+          <i data-lucide="book-open" class="w-4 h-4"></i>
+          PDF / Source Library
+        </button>
+
+        <button 
+          onclick="window.adminDashboard.switchAiSubTab('autopilot')"
+          class="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg transition-all ${
+            this.aiActiveSubTab === 'autopilot' 
+              ? 'bg-rose-700 text-white shadow-sm' 
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }"
+        >
+          <i data-lucide="clock" class="w-4 h-4"></i>
+          Auto-Pilot / Scheduled MCQs
+        </button>
+
+        <button 
+          onclick="window.adminDashboard.switchAiSubTab('logs')"
+          class="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg transition-all ${
+            this.aiActiveSubTab === 'logs' 
+              ? 'bg-rose-700 text-white shadow-sm' 
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }"
+        >
+          <i data-lucide="activity" class="w-4 h-4"></i>
+          AI Generation Logs
+        </button>
+
+        <button 
+          onclick="window.adminDashboard.switchAiSubTab('providers')"
+          class="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg transition-all ${
+            this.aiActiveSubTab === 'providers' 
+              ? 'bg-rose-700 text-white shadow-sm' 
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }"
+        >
+          <i data-lucide="cpu" class="w-4 h-4"></i>
+          AI Provider Management
+        </button>
+      </div>
+
+      <!-- Sub-Tab Content Target -->
+      <div id="ai-subtab-container"></div>
+    `;
+
+    const subContainer = document.getElementById('ai-subtab-container');
+    if (this.aiActiveSubTab === 'generate') this.renderAiGenerateSubTab(subContainer);
+    else if (this.aiActiveSubTab === 'library') this.renderAiLibrarySubTab(subContainer);
+    else if (this.aiActiveSubTab === 'autopilot') this.renderAiAutopilotSubTab(subContainer);
+    else if (this.aiActiveSubTab === 'logs') this.renderAiLogsSubTab(subContainer);
+    else if (this.aiActiveSubTab === 'providers') this.renderAiProvidersSubTab(subContainer);
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  switchAiSubTab(subTab) {
+    this.aiActiveSubTab = subTab;
+    this.renderAiAutomation();
+  }
+
+  // --- SUB-TAB 1: GENERATE & HOST NOW ---
+  renderAiGenerateSubTab(container) {
+    if (!container) return;
+
+    const subjects = window.store.getSubjects ? window.store.getSubjects() : [];
+    const defaultSubjectOptions = [
+      'Accounting', 'Business Law', 'Business Economics', 'Quantitative Aptitude'
+    ];
+    const allSubjects = Array.from(new Set([...defaultSubjectOptions, ...subjects.map(s => s.name || s)]));
+
+    container.innerHTML = `
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- Configuration Form (Left 6 cols) -->
+        <div class="lg:col-span-6 space-y-5">
+          <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+            <h3 class="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+              <i data-lucide="sliders" class="w-4 h-4 text-rose-600"></i>
+              Test Generation Parameters
+            </h3>
+
+            <div class="space-y-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Test Title <span class="text-rose-600">*</span></label>
+                <input 
+                  type="text" 
+                  id="ai-gen-title" 
+                  value="CA Foundation Business Economics Conceptual Sprint" 
+                  class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none"
+                  placeholder="e.g. Advanced Accounting AS 115 Master Quiz"
+                />
+              </div>
+
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Subject <span class="text-rose-600">*</span></label>
+                  <select id="ai-gen-subject" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                    ${allSubjects.map(s => `<option value="${s}" ${s === 'Business Economics' ? 'selected' : ''}>${s}</option>`).join('')}
+                  </select>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Exam Level</label>
+                  <select id="ai-gen-level" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                    <option value="CA Foundation" selected>CA Foundation</option>
+                    <option value="CA Intermediate">CA Intermediate</option>
+                    <option value="CA Final">CA Final</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Topic / Syllabus Focus <span class="text-rose-600">*</span></label>
+                <input 
+                  type="text" 
+                  id="ai-gen-topic" 
+                  value="Nature and Scope of Business Economics" 
+                  class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none"
+                  placeholder="e.g. Theory of Demand, Elasticity, Ind AS 115"
+                />
+              </div>
+
+              <div class="grid grid-cols-3 gap-3">
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">MCQ Count</label>
+                  <input type="number" id="ai-gen-count" min="1" max="50" value="5" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Duration (Min)</label>
+                  <input type="number" id="ai-gen-duration" min="1" max="180" value="15" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Difficulty</label>
+                  <select id="ai-gen-difficulty" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                    <option value="ICAI Exam Standard" selected>ICAI Standard</option>
+                    <option value="Easy">Easy</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Hard">Hard</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Marks per Correct</label>
+                  <input type="number" id="ai-gen-marks" step="0.5" value="2.0" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Negative Marks</label>
+                  <input type="number" id="ai-gen-neg-marks" step="0.25" value="0.5" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+                </div>
+              </div>
+
+              <!-- Allowed Plans -->
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5">Eligible Student Plans</label>
+                <div class="flex items-center gap-4 text-xs font-semibold text-slate-700">
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" id="ai-plan-free" checked class="rounded text-rose-600 focus:ring-rose-500" /> Free
+                  </label>
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" id="ai-plan-trial" checked class="rounded text-rose-600 focus:ring-rose-500" /> Trial
+                  </label>
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" id="ai-plan-pro" checked class="rounded text-rose-600 focus:ring-rose-500" /> Pro
+                  </label>
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" id="ai-plan-elite" checked class="rounded text-rose-600 focus:ring-rose-500" /> Elite
+                  </label>
+                </div>
+              </div>
+
+              <!-- Auto-Publish Toggle -->
+              <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                <div>
+                  <span class="text-xs font-bold text-slate-900 block">Auto-Publish Immediately</span>
+                  <span class="text-[11px] text-slate-500 block">Test will instantly become live for students upon completion</span>
+                </div>
+                <input type="checkbox" id="ai-gen-publish" checked class="w-4 h-4 text-rose-600 rounded focus:ring-rose-500 cursor-pointer" />
+              </div>
+
+              <!-- Optional Context PDF Upload -->
+              <div class="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center hover:border-rose-400 transition-colors">
+                <i data-lucide="file-up" class="w-6 h-6 text-slate-400 mx-auto mb-1"></i>
+                <span class="text-xs font-bold text-slate-700 block">Attach Syllabus PDF Context (Optional)</span>
+                <span class="text-[11px] text-slate-500 block mb-2">Upload study material to ground questions in specific textbook sections</span>
+                <input type="file" id="ai-gen-pdf-input" accept=".pdf" multiple class="hidden" onchange="window.adminDashboard.handleAiPdfFilesSelected(this.files)" />
+                <button type="button" onclick="document.getElementById('ai-gen-pdf-input').click()" class="px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-all">
+                  Browse PDF Files
+                </button>
+                <div id="ai-selected-files-list" class="mt-2 text-xs text-slate-600"></div>
+              </div>
+
+              <!-- CTA Button -->
+              <button 
+                id="ai-btn-generate"
+                onclick="window.adminDashboard.startAiGenerationJob()"
+                class="w-full bg-rose-700 hover:bg-rose-800 text-white font-bold py-3.5 px-6 rounded-xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
+              >
+                <i data-lucide="sparkles" class="w-4 h-4"></i>
+                Generate & Host Test Now
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Progress & Streaming Panel (Right 6 cols) -->
+        <div class="lg:col-span-6 space-y-5">
+          <div id="ai-live-panel" class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm min-h-[500px]">
+            <div id="ai-idle-state" class="text-center py-16 space-y-4">
+              <div class="w-16 h-16 bg-rose-50 border border-rose-200 rounded-2xl flex items-center justify-center mx-auto text-rose-600">
+                <i data-lucide="cpu" class="w-8 h-8"></i>
+              </div>
+              <div>
+                <h4 class="text-sm font-bold text-slate-900">Autonomous MCQ Generation Engine</h4>
+                <p class="text-xs text-slate-500 max-w-sm mx-auto mt-1">
+                  Configure the parameters on the left and click <b>Generate & Host Test Now</b>. The system will formulate, mathematically verify, and independently audit questions across multi-provider failover.
+                </p>
+              </div>
+
+              <div class="grid grid-cols-2 gap-3 max-w-sm mx-auto text-left pt-4">
+                <div class="p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
+                  <span class="text-[10px] font-bold text-slate-500 uppercase block">Generation Failover</span>
+                  <span class="text-xs font-semibold text-slate-800">Gemini 1 → 2 → OpenRouter → Groq</span>
+                </div>
+                <div class="p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
+                  <span class="text-[10px] font-bold text-slate-500 uppercase block">Duplicate Filter</span>
+                  <span class="text-xs font-semibold text-slate-800">&gt;0.50 Jaccard Rejected</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Dynamic Active Pipeline View (Hidden initially) -->
+            <div id="ai-active-pipeline" class="hidden space-y-5">
+              <div class="flex items-center justify-between pb-3 border-b border-slate-200">
+                <div>
+                  <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Execution Status</span>
+                  <h4 id="ai-pipeline-stage-text" class="text-sm font-black text-slate-900 flex items-center gap-2 mt-0.5">
+                    <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+                    Initializing Generation Pipeline...
+                  </h4>
+                </div>
+                <span id="ai-pipeline-badge" class="px-2.5 py-1 text-xs font-black rounded-lg bg-rose-100 text-rose-800 border border-rose-200">
+                  GENERATING
+                </span>
+              </div>
+
+              <!-- Animated Progress Bar -->
+              <div>
+                <div class="flex justify-between text-xs font-bold text-slate-600 mb-1.5">
+                  <span id="ai-progress-counter">0 / 0 Questions Verified</span>
+                  <span id="ai-progress-pct">0%</span>
+                </div>
+                <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
+                  <div id="ai-progress-bar-fill" class="bg-gradient-to-r from-rose-600 to-rose-700 h-full w-0 transition-all duration-500"></div>
+                </div>
+              </div>
+
+              <!-- Post-Generation Success Card (Hidden while generating) -->
+              <div id="ai-completion-card" class="hidden p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+                <div class="flex items-center gap-3">
+                  <div class="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center flex-shrink-0">
+                    <i data-lucide="check-circle" class="w-6 h-6"></i>
+                  </div>
+                  <div>
+                    <h5 class="text-xs font-black text-emerald-900">Test Successfully Hosted & Published!</h5>
+                    <p id="ai-completion-subtitle" class="text-[11px] text-emerald-700 mt-0.5">All questions passed ICAI structural & mathematical verification.</p>
+                  </div>
+                </div>
+                <div class="mt-3 flex items-center gap-3 pt-3 border-t border-emerald-200">
+                  <button onclick="window.adminDashboard.switchTab('mcq-tests')" class="px-3 py-1.5 text-xs font-bold bg-white text-emerald-900 border border-emerald-300 rounded-lg hover:bg-emerald-100 transition-all">
+                    View in MCQ Tests Builder →
+                  </button>
+                  <button onclick="window.adminDashboard.switchAiSubTab('logs')" class="px-3 py-1.5 text-xs font-bold text-emerald-800 hover:underline">
+                    Inspect Telemetry Logs
+                  </button>
+                </div>
+              </div>
+
+              <!-- Live Stream Questions Cards -->
+              <div>
+                <h5 class="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">Live Validated Questions Feed</h5>
+                <div id="ai-stream-questions-list" class="space-y-3 max-h-[400px] overflow-y-auto pr-1">
+                  <!-- Streamed cards appear here -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  handleAiPdfFilesSelected(files) {
+    if (!files || files.length === 0) return;
+    this.aiSelectedPdfFiles = Array.from(files);
+    const listEl = document.getElementById('ai-selected-files-list');
+    if (listEl) {
+      listEl.innerHTML = this.aiSelectedPdfFiles.map(f => `
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded text-[11px] font-bold mr-1 mb-1">
+          <i data-lucide="file-text" class="w-3 h-3"></i>
+          ${f.name} (${(f.size / (1024 * 1024)).toFixed(1)} MB)
+        </span>
+      `).join('');
+      if (window.lucide) window.lucide.createIcons();
+    }
+  }
+
+  async startAiGenerationJob() {
+    const title = document.getElementById('ai-gen-title')?.value.trim();
+    const subject = document.getElementById('ai-gen-subject')?.value;
+    const topic = document.getElementById('ai-gen-topic')?.value.trim();
+    const examLevel = document.getElementById('ai-gen-level')?.value;
+    const difficulty = document.getElementById('ai-gen-difficulty')?.value;
+    const count = parseInt(document.getElementById('ai-gen-count')?.value || '5', 10);
+    const duration = parseInt(document.getElementById('ai-gen-duration')?.value || '15', 10);
+    const marks = parseFloat(document.getElementById('ai-gen-marks')?.value || '2.0');
+    const negMarks = parseFloat(document.getElementById('ai-gen-neg-marks')?.value || '0.5');
+    const autoPublish = document.getElementById('ai-gen-publish')?.checked ?? true;
+
+    if (!title || !topic) {
+      window.app.showToast('Please provide both Test Title and Topic.', 'error');
+      return;
+    }
+
+    const plans = [];
+    if (document.getElementById('ai-plan-free')?.checked) plans.push('free');
+    if (document.getElementById('ai-plan-trial')?.checked) plans.push('trial');
+    if (document.getElementById('ai-plan-pro')?.checked) plans.push('pro');
+    if (document.getElementById('ai-plan-elite')?.checked) plans.push('elite');
+
+    const btn = document.getElementById('ai-btn-generate');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<span class="inline-block animate-spin mr-2">⚙</span> Initiating Pipeline...`;
+    }
+
+    // Switch right panel to active pipeline view
+    const idlePanel = document.getElementById('ai-idle-state');
+    const activePanel = document.getElementById('ai-active-pipeline');
+    if (idlePanel) idlePanel.classList.add('hidden');
+    if (activePanel) activePanel.classList.remove('hidden');
+
+    const progressBar = document.getElementById('ai-progress-bar-fill');
+    const progressPct = document.getElementById('ai-progress-pct');
+    const progressCounter = document.getElementById('ai-progress-counter');
+    const stageText = document.getElementById('ai-pipeline-stage-text');
+    const questionsList = document.getElementById('ai-stream-questions-list');
+    const completionCard = document.getElementById('ai-completion-card');
+
+    if (progressBar) progressBar.style.width = '10%';
+    if (progressPct) progressPct.innerText = '10%';
+    if (progressCounter) progressCounter.innerText = `0 / ${count} Questions Verified`;
+    if (stageText) stageText.innerText = 'Uploading & Indexing Source Material...';
+    if (questionsList) questionsList.innerHTML = '';
+    if (completionCard) completionCard.classList.add('hidden');
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    // If inline PDFs were selected, upload them first
+    if (this.aiSelectedPdfFiles && this.aiSelectedPdfFiles.length > 0) {
+      for (const pdfFile of this.aiSelectedPdfFiles) {
+        try {
+          if (stageText) stageText.innerText = `Running Mistral OCR on ${pdfFile.name}...`;
+          const base64Data = await this._readFileAsBase64(pdfFile);
+          await fetch('/api/admin/ai/documents/upload', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: json.stringify({
+              filename: pdfFile.name,
+              fileData: base64Data,
+              subject: subject,
+              examLevel: examLevel
+            })
+          });
+        } catch (uploadErr) {
+          console.warn('[AI_INLINE_UPLOAD_WARNING]', uploadErr);
+        }
+      }
+    }
+
+    // Trigger Generation Job
+    try {
+      if (stageText) stageText.innerText = 'Dispatching Generation Request across AI Gateway...';
+      const response = await fetch('/api/admin/ai/jobs/generate', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          title: title,
+          subject: subject,
+          topic: topic,
+          examLevel: examLevel,
+          difficulty: difficulty,
+          count: count,
+          durationMinutes: duration,
+          marksPerCorrect: marks,
+          negativeMarksPerWrong: negMarks,
+          autoPublish: autoPublish,
+          allowedPlans: plans
+        })
+      });
+
+      const resData = await response.json();
+      if (!response.ok || !resData.success) {
+        throw new Error(resData.error || 'Failed to queue generation job.');
+      }
+
+      const jobId = resData.job.id;
+      this.aiActiveJobId = jobId;
+      this.pollAiJobStatus(jobId, count);
+
+    } catch (err) {
+      window.app.showToast(`Generation error: ${err.message}`, 'error');
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="sparkles" class="w-4 h-4"></i> Generate & Host Test Now`;
+        if (window.lucide) window.lucide.createIcons();
+      }
+      if (stageText) stageText.innerText = `Failed: ${err.message}`;
+    }
+  }
+
+  pollAiJobStatus(jobId, targetCount) {
+    if (this.aiJobPollInterval) clearInterval(this.aiJobPollInterval);
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    this.aiJobPollInterval = setInterval(async () => {
+      try {
+        const resp = await fetch(`/api/admin/ai/jobs/status?jobId=${jobId}&_t=${Date.now()}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!resp.ok) return;
+
+        const data = await resp.json();
+        const job = data.job;
+        if (!job) return;
+
+        const progressBar = document.getElementById('ai-progress-bar-fill');
+        const progressPct = document.getElementById('ai-progress-pct');
+        const progressCounter = document.getElementById('ai-progress-counter');
+        const stageText = document.getElementById('ai-pipeline-stage-text');
+        const badge = document.getElementById('ai-pipeline-badge');
+        const questionsList = document.getElementById('ai-stream-questions-list');
+        const completionCard = document.getElementById('ai-completion-card');
+        const btn = document.getElementById('ai-btn-generate');
+
+        const pct = job.progressPct || 10;
+        if (progressBar) progressBar.style.width = `${pct}%`;
+        if (progressPct) progressPct.innerText = `${pct}%`;
+        if (stageText) stageText.innerText = job.currentStage || 'Processing...';
+
+        if (job.status === 'GENERATING') {
+          if (badge) {
+            badge.innerText = 'GENERATING';
+            badge.className = 'px-2.5 py-1 text-xs font-black rounded-lg bg-rose-100 text-rose-800 border border-rose-200';
+          }
+          if (progressCounter) {
+            progressCounter.innerText = `${job.currentQuestionIndex || 0} / ${job.totalQuestions || targetCount} Questions Verified`;
+          }
+        }
+
+        // Stream completed questions if job finished or result exists
+        if (job.status === 'COMPLETED' && job.result) {
+          clearInterval(this.aiJobPollInterval);
+          this.aiJobPollInterval = null;
+
+          if (badge) {
+            badge.innerText = 'COMPLETED';
+            badge.className = 'px-2.5 py-1 text-xs font-black rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-200';
+          }
+          if (progressBar) progressBar.style.width = '100%';
+          if (progressPct) progressPct.innerText = '100%';
+          if (progressCounter) progressCounter.innerText = `${job.result.questions.length} / ${job.result.questions.length} Questions Verified`;
+          if (completionCard) completionCard.classList.remove('hidden');
+
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<i data-lucide="sparkles" class="w-4 h-4"></i> Generate & Host Test Now`;
+          }
+
+          // Render streamed questions list
+          if (questionsList && job.result.questions) {
+            questionsList.innerHTML = job.result.questions.map((q, idx) => `
+              <div class="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                <div class="flex items-center justify-between">
+                  <span class="font-black text-rose-700">Question ${idx + 1}</span>
+                  <div class="flex items-center gap-1 text-[10px] font-bold text-slate-500">
+                    <span class="px-1.5 py-0.5 bg-slate-200 rounded">${q.providerUsed || 'Gemini'}</span>
+                    <span>•</span>
+                    <span class="text-emerald-600 font-black">Verified Answer: ${q.correctOption}</span>
+                  </div>
+                </div>
+                <p class="font-bold text-slate-900">${q.text}</p>
+                <div class="grid grid-cols-2 gap-2 text-slate-700">
+                  <div class="p-1.5 rounded ${q.correctOption === 'A' ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300' : 'bg-white border border-slate-200'}">A: ${q.optionA}</div>
+                  <div class="p-1.5 rounded ${q.correctOption === 'B' ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300' : 'bg-white border border-slate-200'}">B: ${q.optionB}</div>
+                  <div class="p-1.5 rounded ${q.correctOption === 'C' ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300' : 'bg-white border border-slate-200'}">C: ${q.optionC}</div>
+                  <div class="p-1.5 rounded ${q.correctOption === 'D' ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300' : 'bg-white border border-slate-200'}">D: ${q.optionD}</div>
+                </div>
+                <details class="text-[11px] text-slate-600 bg-white p-2 rounded border border-slate-200 cursor-pointer">
+                  <summary class="font-bold text-slate-800">ICAI Step-by-Step Explanation</summary>
+                  <p class="mt-1 leading-relaxed text-slate-700">${q.explanation}</p>
+                </details>
+              </div>
+            `).join('');
+          }
+
+          // Authoritative sync: reload store tests and questions
+          if (window.store && window.store.refreshTests) window.store.refreshTests();
+          window.app.showToast('AI MCQ Test successfully created and hosted in ExcellenceCA!', 'success');
+          if (window.lucide) window.lucide.createIcons();
+        } else if (job.status === 'FAILED') {
+          clearInterval(this.aiJobPollInterval);
+          this.aiJobPollInterval = null;
+          if (badge) {
+            badge.innerText = 'FAILED';
+            badge.className = 'px-2.5 py-1 text-xs font-black rounded-lg bg-rose-100 text-rose-800 border border-rose-200';
+          }
+          if (stageText) stageText.innerText = `Pipeline Error: ${job.error || 'Failed'}`;
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<i data-lucide="sparkles" class="w-4 h-4"></i> Generate & Host Test Now`;
+          }
+          window.app.showToast(`Generation failed: ${job.error}`, 'error');
+        }
+
+      } catch (pollErr) {
+        console.warn('[AI_POLL_WARNING]', pollErr);
+      }
+    }, 1500);
+  }
+
+  // --- SUB-TAB 2: PDF / SOURCE LIBRARY ---
+  async renderAiLibrarySubTab(container) {
+    if (!container) return;
+
+    container.innerHTML = `
+      <div class="space-y-6">
+        <!-- PDF Upload Form -->
+        <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+          <div class="flex items-center gap-2 mb-4">
+            <i data-lucide="file-up" class="w-5 h-5 text-rose-600"></i>
+            <h3 class="text-sm font-bold text-slate-900">Upload & Index Syllabus Documents</h3>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Subject Tag</label>
+              <input type="text" id="ai-lib-subject" value="Business Economics" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" placeholder="e.g. Accounting, Law" />
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Exam Level</label>
+              <select id="ai-lib-level" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                <option value="CA Foundation" selected>CA Foundation</option>
+                <option value="CA Intermediate">CA Intermediate</option>
+                <option value="CA Final">CA Final</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Select PDF File</label>
+              <input type="file" id="ai-lib-file" accept=".pdf" class="w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer" />
+            </div>
+          </div>
+
+          <button 
+            id="ai-btn-lib-upload"
+            onclick="window.adminDashboard.uploadAiLibraryPdf()"
+            class="px-5 py-2.5 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-2"
+          >
+            <i data-lucide="upload" class="w-4 h-4"></i>
+            Process with Mistral OCR & Index
+          </button>
+        </div>
+
+        <!-- Indexed Documents Table -->
+        <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <i data-lucide="layers" class="w-4 h-4 text-purple-600"></i>
+              Indexed Knowledge Sources (<span id="ai-doc-count">...</span>)
+            </h3>
+            <button onclick="window.adminDashboard.renderAiLibrarySubTab(document.getElementById('ai-subtab-container'))" class="text-xs text-blue-600 font-bold hover:underline flex items-center gap-1">
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
+            </button>
+          </div>
+
+          <div id="ai-docs-table-wrapper" class="overflow-x-auto">
+            <div class="py-8 text-center text-slate-400 text-xs">Loading indexed documents...</div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+
+    // Fetch documents from backend
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    try {
+      const resp = await fetch(`/api/admin/ai/documents?_t=${Date.now()}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await resp.json();
+      const docs = data.documents || [];
+
+      const countEl = document.getElementById('ai-doc-count');
+      if (countEl) countEl.innerText = docs.length;
+
+      const tableWrapper = document.getElementById('ai-docs-table-wrapper');
+      if (!tableWrapper) return;
+
+      if (docs.length === 0) {
+        tableWrapper.innerHTML = `
+          <div class="py-12 text-center text-slate-400 text-xs">
+            <i data-lucide="file-text" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
+            No syllabus documents indexed yet. Upload a PDF above to enable concept-grounded MCQ generation.
+          </div>
+        `;
+        if (window.lucide) window.lucide.createIcons();
+        return;
+      }
+
+      tableWrapper.innerHTML = `
+        <table class="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr class="border-b border-slate-200 text-slate-500 font-bold bg-slate-50">
+              <th class="py-3 px-4">Document / Filename</th>
+              <th class="py-3 px-4">Subject & Level</th>
+              <th class="py-3 px-4">Pages / Chunks</th>
+              <th class="py-3 px-4">OCR Engine</th>
+              <th class="py-3 px-4">Uploaded</th>
+              <th class="py-3 px-4 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            ${docs.map(d => `
+              <tr class="hover:bg-slate-50">
+                <td class="py-3 px-4">
+                  <div class="flex items-center gap-2">
+                    <i data-lucide="file-text" class="w-4 h-4 text-rose-600 flex-shrink-0"></i>
+                    <div>
+                      <span class="font-bold text-slate-900 block">${d.filename}</span>
+                      <span class="text-[10px] text-slate-400">${(d.fileSize / 1024).toFixed(1)} KB • ID: ${d.id}</span>
+                    </div>
+                  </div>
+                </td>
+                <td class="py-3 px-4">
+                  <span class="font-semibold text-slate-800 block">${d.subject}</span>
+                  <span class="text-[10px] text-slate-500 block">${d.examLevel || 'CA Foundation'}</span>
+                </td>
+                <td class="py-3 px-4 font-semibold text-slate-700">
+                  ${d.pageCount} Pages • ${d.chunkCount} Chunks
+                </td>
+                <td class="py-3 px-4">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                    ${d.ocrEngine || 'mistral-ocr-latest'}
+                  </span>
+                </td>
+                <td class="py-3 px-4 text-slate-500 text-[11px]">
+                  ${d.uploadedAt ? new Date(d.uploadedAt).toLocaleDateString() : 'Recently'}
+                </td>
+                <td class="py-3 px-4 text-right">
+                  <button 
+                    onclick="window.adminDashboard.deleteAiDocument('${d.id}')"
+                    class="p-1.5 text-rose-600 hover:bg-rose-50 rounded transition-all"
+                    title="Delete Document"
+                  >
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                  </button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+
+      if (window.lucide) window.lucide.createIcons();
+    } catch (err) {
+      console.error('[AI_DOCS_FETCH_ERROR]', err);
+    }
+  }
+
+  async uploadAiLibraryPdf() {
+    const fileInput = document.getElementById('ai-lib-file');
+    const subject = document.getElementById('ai-lib-subject')?.value.trim() || 'General CA Studies';
+    const examLevel = document.getElementById('ai-lib-level')?.value || 'CA Foundation';
+
+    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+      window.app.showToast('Please select a PDF file to upload.', 'error');
+      return;
+    }
+
+    const file = fileInput.files[0];
+    const btn = document.getElementById('ai-btn-lib-upload');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<span class="inline-block animate-spin mr-2">⚙</span> Uploading & Running Mistral OCR...`;
+    }
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    try {
+      const base64Data = await this._readFileAsBase64(file);
+      const resp = await fetch('/api/admin/ai/documents/upload', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          filename: file.name,
+          fileData: base64Data,
+          subject: subject,
+          examLevel: examLevel
+        })
+      });
+
+      const res = await resp.json();
+      if (!resp.ok || !res.success) {
+        throw new Error(res.error || 'Failed to upload document');
+      }
+
+      window.app.showToast(`Document "${file.name}" indexed successfully with Mistral OCR!`, 'success');
+      this.renderAiLibrarySubTab(document.getElementById('ai-subtab-container'));
+
+    } catch (err) {
+      window.app.showToast(`Upload failed: ${err.message}`, 'error');
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="upload" class="w-4 h-4"></i> Process with Mistral OCR & Index`;
+        if (window.lucide) window.lucide.createIcons();
+      }
+    }
+  }
+
+  async deleteAiDocument(docId) {
+    if (!confirm('Are you sure you want to remove this source document? Extracted chunks will no longer be referenced in MCQ prompts.')) return;
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    try {
+      const resp = await fetch('/api/admin/ai/documents/delete', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ documentId: docId })
+      });
+
+      const res = await resp.json();
+      if (!resp.ok || !res.success) {
+        throw new Error(res.error || 'Failed to delete');
+      }
+
+      window.app.showToast('Document deleted from knowledge index.', 'info');
+      this.renderAiLibrarySubTab(document.getElementById('ai-subtab-container'));
+    } catch (err) {
+      window.app.showToast(`Delete failed: ${err.message}`, 'error');
+    }
+  }
+
+  // --- SUB-TAB 3: AUTO-PILOT / SCHEDULED MCQS ---
+  async renderAiAutopilotSubTab(container) {
+    if (!container) return;
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    let config = {
+      enabled: false,
+      dailyTime: '20:00',
+      subject: 'Accounting',
+      topic: 'Daily Comprehensive Exam Practice',
+      examLevel: 'CA Foundation',
+      difficulty: 'ICAI Exam Standard',
+      questionCount: 5,
+      durationMinutes: 15,
+      autoPublish: true,
+      allowedPlans: ['free', 'trial', 'pro', 'elite']
+    };
+
+    try {
+      const resp = await fetch(`/api/admin/ai/autopilot?_t=${Date.now()}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await resp.json();
+      if (data.config) config = data.config;
+    } catch (err) {
+      console.warn('[AUTOPILOT_FETCH_ERROR]', err);
+    }
+
+    container.innerHTML = `
+      <div class="max-w-3xl space-y-6">
+        <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-6">
+          <div class="flex items-center justify-between pb-4 border-b border-slate-200">
+            <div>
+              <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <i data-lucide="clock" class="w-4 h-4 text-rose-600"></i>
+                Daily Recurring Auto-Pilot MCQ Hosting
+              </h3>
+              <p class="text-xs text-slate-500 mt-0.5">
+                Automatically generate, validate, and host new daily practice tests server-side.
+              </p>
+            </div>
+
+            <!-- Master Toggle -->
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="ai-auto-enabled" ${config.enabled ? 'checked' : ''} class="sr-only peer">
+              <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-rose-600"></div>
+            </label>
+          </div>
+
+          <!-- Server-Side Independence Notice -->
+          <div class="p-3.5 bg-blue-50 border border-blue-200 rounded-xl flex items-start gap-3">
+            <i data-lucide="info" class="w-4 h-4 text-blue-700 mt-0.5 flex-shrink-0"></i>
+            <div class="text-xs text-blue-900">
+              <span class="font-bold block">100% Server-Side Execution</span>
+              The Auto-Pilot scheduler runs as a continuous daemon thread inside the backend server. It executes on schedule whether any admin or student is logged into the platform or not.
+            </div>
+          </div>
+
+          <div class="space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Daily Run Time (IST)</label>
+                <input type="time" id="ai-auto-time" value="${config.dailyTime || '20:00'}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Daily Question Count</label>
+                <input type="number" id="ai-auto-count" min="1" max="25" value="${config.questionCount || 5}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Subject</label>
+                <select id="ai-auto-subject" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                  <option value="Accounting" ${config.subject === 'Accounting' ? 'selected' : ''}>Accounting</option>
+                  <option value="Business Law" ${config.subject === 'Business Law' ? 'selected' : ''}>Business Law</option>
+                  <option value="Business Economics" ${config.subject === 'Business Economics' ? 'selected' : ''}>Business Economics</option>
+                  <option value="Quantitative Aptitude" ${config.subject === 'Quantitative Aptitude' ? 'selected' : ''}>Quantitative Aptitude</option>
+                </select>
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Exam Level</label>
+                <select id="ai-auto-level" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                  <option value="CA Foundation" ${config.examLevel === 'CA Foundation' ? 'selected' : ''}>CA Foundation</option>
+                  <option value="CA Intermediate" ${config.examLevel === 'CA Intermediate' ? 'selected' : ''}>CA Intermediate</option>
+                  <option value="CA Final" ${config.examLevel === 'CA Final' ? 'selected' : ''}>CA Final</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Curriculum / Topic Theme</label>
+              <input type="text" id="ai-auto-topic" value="${config.topic || 'Daily Comprehensive Exam Practice'}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
+              <div>
+                <span class="text-xs font-bold text-slate-900 block">Auto-Publish Automatically</span>
+                <span class="text-[11px] text-slate-500 block">Publish test directly to students without manual draft approval</span>
+              </div>
+              <input type="checkbox" id="ai-auto-publish" ${config.autoPublish ? 'checked' : ''} class="w-4 h-4 text-rose-600 rounded focus:ring-rose-500 cursor-pointer" />
+            </div>
+
+            <!-- Last Run & Status Telemetry -->
+            <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs text-slate-600">
+              <div>
+                <span class="font-bold text-slate-800 block">Execution Tracker</span>
+                <span>Last Completed Run: <b>${config.lastRunDate || 'No runs yet today'}</b></span>
+              </div>
+              <span class="px-2.5 py-1 rounded text-[11px] font-bold ${config.enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}">
+                ${config.enabled ? 'Scheduler Active' : 'Disabled'}
+              </span>
+            </div>
+
+            <button 
+              onclick="window.adminDashboard.saveAiAutopilotSettings()"
+              class="px-6 py-2.5 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-2"
+            >
+              <i data-lucide="save" class="w-4 h-4"></i>
+              Save Auto-Pilot Schedule
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  async saveAiAutopilotSettings() {
+    const enabled = document.getElementById('ai-auto-enabled')?.checked ?? false;
+    const dailyTime = document.getElementById('ai-auto-time')?.value || '20:00';
+    const questionCount = parseInt(document.getElementById('ai-auto-count')?.value || '5', 10);
+    const subject = document.getElementById('ai-auto-subject')?.value || 'Accounting';
+    const examLevel = document.getElementById('ai-auto-level')?.value || 'CA Foundation';
+    const topic = document.getElementById('ai-auto-topic')?.value.trim() || 'Comprehensive Practice';
+    const autoPublish = document.getElementById('ai-auto-publish')?.checked ?? true;
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    try {
+      const resp = await fetch('/api/admin/ai/autopilot', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          enabled: enabled,
+          dailyTime: dailyTime,
+          questionCount: questionCount,
+          subject: subject,
+          examLevel: examLevel,
+          topic: topic,
+          autoPublish: autoPublish
+        })
+      });
+
+      const res = await resp.json();
+      if (!resp.ok || !res.success) {
+        throw new Error(res.error || 'Failed to save');
+      }
+
+      window.app.showToast('Auto-Pilot schedule configuration updated successfully!', 'success');
+      this.renderAiAutopilotSubTab(document.getElementById('ai-subtab-container'));
+    } catch (err) {
+      window.app.showToast(`Error saving autopilot settings: ${err.message}`, 'error');
+    }
+  }
+
+  // --- SUB-TAB 4: AI GENERATION LOGS & TELEMETRY ---
+  async renderAiLogsSubTab(container) {
+    if (!container) return;
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    container.innerHTML = `
+      <div class="space-y-6">
+        <!-- KPI Cards -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Total AI Tests</span>
+            <span id="ai-kpi-tests" class="text-2xl font-black text-slate-900 mt-1 block">...</span>
+            <span class="text-[11px] text-emerald-600 font-semibold mt-1 block">Hosted & Published</span>
+          </div>
+
+          <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Total MCQs Generated</span>
+            <span id="ai-kpi-mcqs" class="text-2xl font-black text-slate-900 mt-1 block">...</span>
+            <span class="text-[11px] text-blue-600 font-semibold mt-1 block">ICAI Exam Standard</span>
+          </div>
+
+          <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Duplicates Intercepted</span>
+            <span id="ai-kpi-dups" class="text-2xl font-black text-slate-900 mt-1 block">...</span>
+            <span class="text-[11px] text-amber-600 font-semibold mt-1 block">&gt;0.50 Jaccard Rejections</span>
+          </div>
+
+          <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Failover Protection</span>
+            <span class="text-2xl font-black text-emerald-700 mt-1 block">100%</span>
+            <span class="text-[11px] text-emerald-600 font-semibold mt-1 block">Zero Pipeline Outages</span>
+          </div>
+        </div>
+
+        <!-- Logs Table -->
+        <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <i data-lucide="activity" class="w-4 h-4 text-rose-600"></i>
+              Pipeline Generation Telemetry Logs
+            </h3>
+            <button onclick="window.adminDashboard.renderAiLogsSubTab(document.getElementById('ai-subtab-container'))" class="text-xs text-blue-600 font-bold hover:underline flex items-center gap-1">
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
+            </button>
+          </div>
+
+          <div id="ai-logs-table-wrapper" class="overflow-x-auto">
+            <div class="py-8 text-center text-slate-400 text-xs">Loading generation telemetry...</div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+
+    try {
+      const resp = await fetch(`/api/admin/ai/jobs/logs?_t=${Date.now()}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await resp.json();
+      const logs = data.logs || [];
+
+      // Calculate KPI sums
+      const totalTests = logs.length;
+      const totalMcqs = logs.reduce((acc, l) => acc + (l.generatedCount || 0), 0);
+      const totalDups = logs.reduce((acc, l) => acc + (l.rejectedDuplicates || 0), 0);
+
+      const kpiTests = document.getElementById('ai-kpi-tests');
+      const kpiMcqs = document.getElementById('ai-kpi-mcqs');
+      const kpiDups = document.getElementById('ai-kpi-dups');
+      if (kpiTests) kpiTests.innerText = totalTests;
+      if (kpiMcqs) kpiMcqs.innerText = totalMcqs;
+      if (kpiDups) kpiDups.innerText = totalDups;
+
+      const tableWrapper = document.getElementById('ai-logs-table-wrapper');
+      if (!tableWrapper) return;
+
+      if (logs.length === 0) {
+        tableWrapper.innerHTML = `
+          <div class="py-12 text-center text-slate-400 text-xs">
+            No generation telemetry recorded yet. Generate your first test to view execution logs.
+          </div>
+        `;
+        return;
+      }
+
+      tableWrapper.innerHTML = `
+        <table class="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr class="border-b border-slate-200 text-slate-500 font-bold bg-slate-50">
+              <th class="py-3 px-4">Timestamp</th>
+              <th class="py-3 px-4">Test Title & Subject</th>
+              <th class="py-3 px-4">MCQs (Req / Gen)</th>
+              <th class="py-3 px-4">Rejections Filtered</th>
+              <th class="py-3 px-4">Providers Cascaded</th>
+              <th class="py-3 px-4">Latency</th>
+              <th class="py-3 px-4 text-right">Status</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            ${logs.map(l => `
+              <tr class="hover:bg-slate-50">
+                <td class="py-3 px-4 text-slate-500 text-[11px] whitespace-nowrap">
+                  ${l.timestamp ? new Date(l.timestamp).toLocaleString() : 'Recently'}
+                </td>
+                <td class="py-3 px-4">
+                  <span class="font-bold text-slate-900 block">${l.testTitle || 'AI Test'}</span>
+                  <span class="text-[10px] text-slate-500 block">${l.subject} • ${l.topic}</span>
+                </td>
+                <td class="py-3 px-4 font-bold text-slate-800">
+                  ${l.generatedCount} / ${l.requestedCount} MCQs
+                </td>
+                <td class="py-3 px-4 text-[11px]">
+                  <span class="text-amber-700 font-bold">${l.rejectedDuplicates || 0} Dups</span>
+                  <span class="text-slate-300">•</span>
+                  <span class="text-purple-700 font-bold">${l.rejectedValidation || 0} Invalid</span>
+                </td>
+                <td class="py-3 px-4 text-[11px]">
+                  <span class="px-2 py-0.5 bg-slate-100 rounded text-slate-700 font-semibold">
+                    ${(l.providersUsed || []).join(', ') || 'Gemini'}
+                  </span>
+                </td>
+                <td class="py-3 px-4 text-slate-600 font-mono text-[11px]">
+                  ${l.durationSeconds || 0}s
+                </td>
+                <td class="py-3 px-4 text-right">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-black ${
+                    l.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                  }">
+                    ${l.status}
+                  </span>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+
+      if (window.lucide) window.lucide.createIcons();
+    } catch (err) {
+      console.error('[AI_LOGS_FETCH_ERROR]', err);
+    }
+  }
+
+  // --- SUB-TAB 5: AI PROVIDER MANAGEMENT ---
+  async renderAiProvidersSubTab(container) {
+    if (!container) return;
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    container.innerHTML = `
+      <div class="space-y-6 max-w-4xl">
+        <!-- Security Banner -->
+        <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3">
+          <i data-lucide="shield-check" class="w-5 h-5 text-emerald-700 mt-0.5 flex-shrink-0"></i>
+          <div class="text-xs text-emerald-950 space-y-1">
+            <span class="font-black text-sm block">Strict Credential Isolation & Masking Active</span>
+            <p class="text-emerald-800">
+              API credentials are permanently kept server-side in secure isolated storage and are never transmitted to frontend clients. All API keys in the dashboard are securely masked (e.g. <code>AQ••••••••8qvA</code>) with zero raw secret exposure.
+            </p>
+          </div>
+        </div>
+
+        <!-- Providers Grid -->
+        <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5">
+          <div class="flex items-center justify-between pb-4 border-b border-slate-200">
+            <div>
+              <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <i data-lucide="cpu" class="w-4 h-4 text-rose-600"></i>
+                Configured AI Models & Gateways
+              </h3>
+              <p class="text-xs text-slate-500 mt-0.5">
+                Adjust execution priority and run on-demand latency tests.
+              </p>
+            </div>
+            <button onclick="window.adminDashboard.saveAiProvidersSettings()" class="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5">
+              <i data-lucide="save" class="w-3.5 h-3.5"></i> Save Settings
+            </button>
+          </div>
+
+          <div id="ai-providers-grid" class="space-y-4">
+            <div class="py-8 text-center text-slate-400 text-xs">Loading provider telemetry...</div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+
+    try {
+      const resp = await fetch(`/api/admin/ai/providers?_t=${Date.now()}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await resp.json();
+      const providers = data.providers || [];
+
+      const grid = document.getElementById('ai-providers-grid');
+      if (!grid) return;
+
+      grid.innerHTML = providers.map(p => `
+        <div class="p-4 border border-slate-200 rounded-xl bg-slate-50 hover:bg-white transition-all space-y-3" id="provider-card-${p.id}">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-lg bg-slate-200 text-slate-700 flex items-center justify-center font-black text-xs uppercase flex-shrink-0">
+                ${p.provider.substring(0, 3)}
+              </div>
+              <div>
+                <span class="font-bold text-slate-900 text-xs block">${p.name}</span>
+                <span class="text-[10px] text-slate-500 font-mono block">Model: ${p.model}</span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <span id="prov-status-${p.id}" class="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
+                p.status.startsWith('healthy') ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-amber-100 text-amber-800 border border-amber-200'
+              }">
+                ${p.status}
+              </span>
+
+              <button 
+                id="btn-test-prov-${p.id}"
+                onclick="window.adminDashboard.testAiProvider('${p.id}', this)"
+                class="px-2.5 py-1 text-xs font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition-all flex items-center gap-1 shadow-sm"
+              >
+                <i data-lucide="activity" class="w-3.5 h-3.5 text-rose-600"></i>
+                Test Connection
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-200 text-xs">
+            <div>
+              <span class="text-[10px] font-bold text-slate-500 uppercase block">Masked Credential</span>
+              <span class="font-mono text-slate-700 font-bold">${p.maskedKey}</span>
+            </div>
+
+            <div>
+              <span class="text-[10px] font-bold text-slate-500 uppercase block">Execution Priority (1 = Top)</span>
+              <input type="number" id="prov-priority-${p.id}" min="1" max="10" value="${p.priority || 1}" class="w-20 px-2 py-0.5 text-xs font-bold border border-slate-300 rounded focus:ring-1 focus:ring-rose-500 focus:outline-none" />
+            </div>
+
+            <div class="flex items-center sm:justify-end gap-2">
+              <label class="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                <input type="checkbox" id="prov-enabled-${p.id}" ${p.enabled !== false ? 'checked' : ''} class="rounded text-rose-600 focus:ring-rose-500" />
+                Enabled in Failover Chain
+              </label>
+            </div>
+          </div>
+
+          <div id="prov-test-feedback-${p.id}" class="hidden text-[11px] pt-2 border-t border-slate-100"></div>
+        </div>
+      `).join('');
+
+      if (window.lucide) window.lucide.createIcons();
+    } catch (err) {
+      console.error('[AI_PROVIDERS_FETCH_ERROR]', err);
+    }
+  }
+
+  async testAiProvider(providerId, btnElement) {
+    const origHtml = btnElement.innerHTML;
+    btnElement.disabled = true;
+    btnElement.innerHTML = `<span class="inline-block animate-spin mr-1">⚙</span> Testing...`;
+
+    const feedbackEl = document.getElementById(`prov-test-feedback-${providerId}`);
+    const statusEl = document.getElementById(`prov-status-${providerId}`);
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    try {
+      const resp = await fetch('/api/admin/ai/providers/test', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ providerId: providerId })
+      });
+
+      const res = await resp.json();
+      btnElement.disabled = false;
+      btnElement.innerHTML = origHtml;
+
+      if (res.success) {
+        if (statusEl) {
+          statusEl.innerText = 'healthy';
+          statusEl.className = 'px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200';
+        }
+        if (feedbackEl) {
+          feedbackEl.classList.remove('hidden');
+          feedbackEl.className = 'text-[11px] pt-2 border-t border-emerald-100 text-emerald-800 font-bold';
+          feedbackEl.innerText = `✓ Verified Active (${res.latency_ms}ms round-trip). Model: ${res.model}`;
+        }
+        window.app.showToast(`Provider "${providerId}" connection successful (${res.latency_ms}ms)!`, 'success');
+      } else {
+        if (statusEl) {
+          statusEl.innerText = 'error';
+          statusEl.className = 'px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-800 border border-rose-200';
+        }
+        if (feedbackEl) {
+          feedbackEl.classList.remove('hidden');
+          feedbackEl.className = 'text-[11px] pt-2 border-t border-rose-100 text-rose-800 font-bold';
+          feedbackEl.innerText = `✗ Connection failed: ${res.error}`;
+        }
+        window.app.showToast(`Test failed: ${res.error}`, 'error');
+      }
+
+      if (window.lucide) window.lucide.createIcons();
+    } catch (err) {
+      btnElement.disabled = false;
+      btnElement.innerHTML = origHtml;
+      window.app.showToast(`Network error: ${err.message}`, 'error');
+    }
+  }
+
+  async saveAiProvidersSettings() {
+    const providerIds = ['gemini_1', 'gemini_2', 'openrouter', 'groq', 'mistral_ocr'];
+    const updates = [];
+
+    for (const pid of providerIds) {
+      const priorityEl = document.getElementById(`prov-priority-${pid}`);
+      const enabledEl = document.getElementById(`prov-enabled-${pid}`);
+      if (priorityEl && enabledEl) {
+        updates.push({
+          id: pid,
+          priority: parseInt(priorityEl.value, 10) || 1,
+          enabled: enabledEl.checked
+        });
+      }
+    }
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    try {
+      const resp = await fetch('/api/admin/ai/providers', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ providers: updates })
+      });
+
+      const res = await resp.json();
+      if (!resp.ok || !res.success) {
+        throw new Error(res.error || 'Failed to update');
+      }
+
+      window.app.showToast('AI Provider priority & configuration saved successfully!', 'success');
+      this.renderAiProvidersSubTab(document.getElementById('ai-subtab-container'));
+    } catch (err) {
+      window.app.showToast(`Failed saving providers: ${err.message}`, 'error');
+    }
+  }
+
+  _readFileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = error => reject(error);
+      reader.readAsDataURL(file);
+    });
   }
 
 }

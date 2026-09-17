@@ -1,4 +1,9 @@
 import subscription_manager
+import ai_provider_manager
+import ai_document_indexer
+import ai_mcq_engine
+import ai_job_manager
+import ai_scheduler
 import http.server
 import socketserver
 import os
@@ -1012,7 +1017,7 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
         return data
 
     now = time.time()
-    all_keys = ['users', 'revoked_users', 'revoked_tokens', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'assignments', 'papers']
+    all_keys = ['users', 'revoked_users', 'revoked_tokens', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'assignments', 'papers', 'ai_source_documents', 'ai_generation_logs', 'ai_providers', 'ai_autopilot_config']
     target_keys = collections if collections else all_keys
 
     keys_to_fetch = [k for k in target_keys if (now - _collection_last_synced.get(k, 0)) >= min_interval]
@@ -1188,6 +1193,37 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
                         data['assignments'] = list(p_map.values())
                         _collection_last_synced[key] = now
                         updated = True
+                elif key == 'ai_source_documents':
+                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                    if items is not None:
+                        doc_map = {d.get('id'): d for d in data.get('ai_source_documents', []) if isinstance(d, dict) and d.get('id')}
+                        for d in items:
+                            if isinstance(d, dict) and d.get('id'):
+                                doc_map[d['id']] = d
+                        data['ai_source_documents'] = list(doc_map.values())
+                        _collection_last_synced[key] = now
+                        updated = True
+                elif key == 'ai_generation_logs':
+                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                    if items is not None:
+                        log_map = {l.get('id'): l for l in data.get('ai_generation_logs', []) if isinstance(l, dict) and l.get('id')}
+                        for l in items:
+                            if isinstance(l, dict) and l.get('id'):
+                                log_map[l['id']] = l
+                        data['ai_generation_logs'] = list(log_map.values())
+                        _collection_last_synced[key] = now
+                        updated = True
+                elif key == 'ai_providers':
+                    if isinstance(cloud_data, (dict, list)):
+                        items = list(cloud_data.values()) if isinstance(cloud_data, dict) else cloud_data
+                        data['ai_providers'] = items
+                        _collection_last_synced[key] = now
+                        updated = True
+                elif key == 'ai_autopilot_config':
+                    if isinstance(cloud_data, dict):
+                        data['ai_autopilot_config'] = cloud_data
+                        _collection_last_synced[key] = now
+                        updated = True
         except Exception:
             pass
 
@@ -1216,7 +1252,7 @@ def load_backend_data(refresh_collections=None):
                         cur_data = json.load(f)
                     
                     import urllib.request
-                    keys_to_fetch = ['revoked_users', 'revoked_tokens', 'users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'papers', 'assignments']
+                    keys_to_fetch = ['revoked_users', 'revoked_tokens', 'users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'papers', 'assignments', 'ai_source_documents', 'ai_generation_logs', 'ai_providers', 'ai_autopilot_config']
                     
                     for key in keys_to_fetch:
                         try:
@@ -1346,6 +1382,29 @@ def load_backend_data(refresh_collections=None):
                                                 p_map[p.get('id')] = p
                                         cur_data['papers'] = list(p_map.values())
                                         cur_data['assignments'] = list(p_map.values())
+                                elif key == 'ai_source_documents':
+                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                                    if items is not None:
+                                        doc_map = {d.get('id'): d for d in cur_data.get('ai_source_documents', []) if isinstance(d, dict) and d.get('id')}
+                                        for d in items:
+                                            if isinstance(d, dict) and d.get('id'):
+                                                doc_map[d['id']] = d
+                                        cur_data['ai_source_documents'] = list(doc_map.values())
+                                elif key == 'ai_generation_logs':
+                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                                    if items is not None:
+                                        log_map = {l.get('id'): l for l in cur_data.get('ai_generation_logs', []) if isinstance(l, dict) and l.get('id')}
+                                        for l in items:
+                                            if isinstance(l, dict) and l.get('id'):
+                                                log_map[l['id']] = l
+                                        cur_data['ai_generation_logs'] = list(log_map.values())
+                                elif key == 'ai_providers':
+                                    if isinstance(cloud_data, (dict, list)):
+                                        items = list(cloud_data.values()) if isinstance(cloud_data, dict) else cloud_data
+                                        cur_data['ai_providers'] = items
+                                elif key == 'ai_autopilot_config':
+                                    if isinstance(cloud_data, dict):
+                                        cur_data['ai_autopilot_config'] = cloud_data
                         except Exception as err:
                             print(f"[COLD_START] Failed to fetch {key} from Firebase: {err}", flush=True)
 
@@ -1366,12 +1425,16 @@ def load_backend_data(refresh_collections=None):
                     d = None
 
             if d is not None:
-                list_keys = ['tests', 'questions', 'test_attempts', 'submissions', 'papers', 'xp_transactions', 'notifications', 'bookmarks', 'subjects', 'referrals', 'payment_sessions', 'payment_channels', 'admin_audit_logs', 'xp_reset_history']
+                list_keys = ['tests', 'questions', 'test_attempts', 'submissions', 'papers', 'xp_transactions', 'notifications', 'bookmarks', 'subjects', 'referrals', 'payment_sessions', 'payment_channels', 'admin_audit_logs', 'xp_reset_history', 'ai_source_documents', 'ai_generation_logs']
                 for lk in list_keys:
                     if lk not in d:
                         d[lk] = []
                     elif isinstance(d[lk], dict):
                         d[lk] = list(d[lk].values())
+                if 'ai_autopilot_config' not in d or not isinstance(d['ai_autopilot_config'], dict):
+                    d['ai_autopilot_config'] = dict(ai_scheduler.DEFAULT_AUTOPILOT_CONFIG)
+                if 'ai_providers' not in d or not isinstance(d['ai_providers'], list):
+                    d['ai_providers'] = [dict(p) for p in ai_provider_manager.DEFAULT_PROVIDERS]
                 if 'referral_settings' not in d: d['referral_settings'] = {'referrerReward': 100, 'newStudentReward': 100}
                 if 'xp_reset_settings' not in d: d['xp_reset_settings'] = {'enabled': False, 'nextReset': None, 'intervalDays': 90, 'customSeconds': None, 'lastReset': None}
                 # Sync seed users and hashed passwords (skipping any permanently revoked accounts)
@@ -2821,6 +2884,76 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(500, {'error': f'Failed to read file: {str(e)}', 'code': 500})
                 return
 
+        # ================================================================
+        # AI MCQ STUDIO & AUTOMATION GET ENDPOINTS
+        # ================================================================
+
+        # 1. AI Providers List (Masked Keys & Telemetry)
+        if path == '/api/admin/ai/providers':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            data = load_backend_data(refresh_collections=['ai_providers'])
+            providers = ai_provider_manager.get_sanitized_providers(data)
+            self.send_json(200, {'success': True, 'providers': providers})
+            return
+
+        # 2. AI Source Documents List
+        if path == '/api/admin/ai/documents':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            data = load_backend_data(refresh_collections=['ai_source_documents'])
+            docs = data.get('ai_source_documents', [])
+            self.send_json(200, {'success': True, 'documents': docs})
+            return
+
+        # 3. AI Generation Job Live Status
+        if path == '/api/admin/ai/jobs/status':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            job_id = query.get('jobId', [''])[0]
+            if not job_id:
+                self.send_json(400, {'error': 'Missing jobId parameter', 'code': 400})
+                return
+            job = ai_job_manager.get_job_status(job_id)
+            if job:
+                self.send_json(200, {'success': True, 'job': job})
+            else:
+                self.send_json(404, {'error': 'Job not found', 'code': 404})
+            return
+
+        # 4. AI Generation Telemetry Logs
+        if path == '/api/admin/ai/jobs/logs':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            data = load_backend_data(refresh_collections=['ai_generation_logs'])
+            logs = data.get('ai_generation_logs', [])
+            self.send_json(200, {'success': True, 'logs': logs})
+            return
+
+        # 5. AI Auto-Pilot Scheduler Config
+        if path == '/api/admin/ai/autopilot':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            data = load_backend_data(refresh_collections=['ai_autopilot_config'])
+            cfg = ai_scheduler.get_autopilot_config(data)
+            self.send_json(200, {'success': True, 'config': cfg})
+            return
+
         super().do_GET()
 
     def do_POST(self):
@@ -2842,6 +2975,194 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(500, {'error': str(e)})
                 return
 
+
+        # ================================================================
+        # AI MCQ STUDIO & AUTOMATION POST ENDPOINTS
+        # ================================================================
+
+        # 1. Update AI Providers Configuration
+        if path == '/api/admin/ai/providers':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                providers_update = req_data.get('providers', [])
+                
+                data = load_backend_data(refresh_collections=['ai_providers'])
+                current_providers = ai_provider_manager.get_registered_providers(data)
+                update_map = {p.get('id'): p for p in providers_update if isinstance(p, dict) and p.get('id')}
+                
+                for p in current_providers:
+                    pid = p['id']
+                    if pid in update_map:
+                        for field in ['priority', 'enabled', 'model', 'fallback_model']:
+                            if field in update_map[pid]:
+                                p[field] = update_map[pid][field]
+                                
+                data['ai_providers'] = current_providers
+                save_backend_data(data)
+                sync_to_firebase('ai_providers', current_providers, method='PUT', sync=True)
+                sanitized = ai_provider_manager.get_sanitized_providers(data)
+                self.send_json(200, {'success': True, 'providers': sanitized})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Failed to update providers: {str(e)}', 'code': 500})
+                return
+
+        # 2. Test AI Provider Live Connection
+        if path == '/api/admin/ai/providers/test':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                provider_id = req_data.get('providerId')
+                if not provider_id:
+                    self.send_json(400, {'error': 'providerId is required.', 'code': 400})
+                    return
+                data = load_backend_data(refresh_collections=['ai_providers'])
+                res = ai_provider_manager.test_provider_connection(provider_id, data)
+                self.send_json(200, res)
+                return
+            except Exception as e:
+                self.send_json(500, {'success': False, 'error': f'Test connection failed: {str(e)}', 'code': 500})
+                return
+
+        # 3. Upload & Index PDF Source Document
+        if path == '/api/admin/ai/documents/upload':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                
+                file_data = req_data.get('fileData')
+                filename = req_data.get('filename') or 'syllabus_material.pdf'
+                subject = req_data.get('subject') or 'General CA Studies'
+                exam_level = req_data.get('examLevel') or 'CA Foundation'
+                
+                if not file_data:
+                    self.send_json(400, {'error': 'fileData (base64) is required.', 'code': 400})
+                    return
+                    
+                data = load_backend_data(refresh_collections=['ai_source_documents'])
+                ok, err, doc_record = ai_document_indexer.index_pdf_document(
+                    raw_data_or_b64=file_data,
+                    filename=filename,
+                    subject=subject,
+                    exam_level=exam_level,
+                    data=data
+                )
+                
+                if not ok or not doc_record:
+                    self.send_json(400, {'error': err, 'code': 400})
+                    return
+                    
+                save_backend_data(data)
+                sync_to_firebase(f"ai_source_documents/{doc_record['id']}", doc_record, method='PUT', sync=True)
+                self.send_json(200, {'success': True, 'document': doc_record})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Failed to index document: {str(e)}', 'code': 500})
+                return
+
+        # 4. Delete Source Document
+        if path == '/api/admin/ai/documents/delete':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                doc_id = req_data.get('documentId')
+                if not doc_id:
+                    self.send_json(400, {'error': 'documentId is required.', 'code': 400})
+                    return
+                    
+                data = load_backend_data(refresh_collections=['ai_source_documents'])
+                docs = data.get('ai_source_documents', [])
+                orig_len = len(docs)
+                data['ai_source_documents'] = [d for d in docs if d.get('id') != doc_id]
+                
+                if len(data['ai_source_documents']) < orig_len:
+                    save_backend_data(data)
+                    sync_to_firebase(f"ai_source_documents/{doc_id}", None, method='DELETE', sync=True)
+                    self.send_json(200, {'success': True, 'deletedId': doc_id})
+                else:
+                    self.send_json(404, {'error': 'Document not found.', 'code': 404})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Failed to delete document: {str(e)}', 'code': 500})
+                return
+
+        # 5. Generate & Host MCQs Now
+        if path == '/api/admin/ai/jobs/generate':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                
+                data = load_backend_data(refresh_collections=['tests', 'questions', 'ai_source_documents', 'ai_providers'])
+                
+                ok, err, job_record = ai_job_manager.create_generation_job(
+                    params=req_data,
+                    data=data,
+                    save_callback=save_backend_data,
+                    firebase_sync_callback=sync_to_firebase
+                )
+                
+                if not ok or not job_record:
+                    self.send_json(400, {'error': err, 'code': 400})
+                    return
+                    
+                self.send_json(200, {'success': True, 'job': job_record})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Failed to start generation job: {str(e)}', 'code': 500})
+                return
+
+        # 6. Update Auto-Pilot Scheduler Config
+        if path == '/api/admin/ai/autopilot':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                
+                data = load_backend_data(refresh_collections=['ai_autopilot_config'])
+                updated_cfg = ai_scheduler.update_autopilot_config(req_data, data)
+                save_backend_data(data)
+                sync_to_firebase('ai_autopilot_config', updated_cfg, method='PUT', sync=True)
+                self.send_json(200, {'success': True, 'config': updated_cfg})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Failed to update autopilot config: {str(e)}', 'code': 500})
+                return
 
         # ================================================================
         # SUBSCRIPTION & PAYMENT POST ENDPOINTS
@@ -5525,6 +5846,12 @@ def run_server(port=PORT):
         worker_thread.start()
         sub_worker_thread = threading.Thread(target=subscription_background_worker, daemon=True)
         sub_worker_thread.start()
+        # Start AI Auto-Pilot recurring scheduler
+        ai_scheduler.start_autopilot_scheduler(
+            load_backend_data,
+            save_backend_data,
+            lambda p, d, method='PUT': sync_to_firebase(p, d, method=method, sync=True)
+        )
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:

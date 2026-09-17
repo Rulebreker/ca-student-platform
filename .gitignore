@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 latest_user_request*.txt
 test_*.html
+.env
+.env.*
+*secrets*.json
+private_storage/
+tests/test_provider_api.py
