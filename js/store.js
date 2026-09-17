@@ -2112,6 +2112,7 @@ class AppStore {
     if (current) {
       const freshCurrent = synchronizedUsers.find(u => u.id === current.id || (u.email && current.email && String(u.email).toLowerCase() === String(current.email).toLowerCase()));
       if (freshCurrent) {
+        if (current.token) freshCurrent.token = current.token;
         this.setCurrentUser(freshCurrent);
         if (window.auth) window.auth.currentUser = freshCurrent;
       }

@@ -1054,6 +1054,8 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
                                 if target_key:
                                     for f_k, f_v in u.items():
                                         if f_v is not None and (f_k != 'password' or f_v):
+                                            if f_k == 'token' and (f_v in REVOKED_TOKENS or f_v in data.get('revoked_tokens', [])):
+                                                continue
                                             users_dict[target_key][f_k] = f_v
                                 else:
                                     k_name = u_email if u_email else u_id
@@ -1225,6 +1227,8 @@ def load_backend_data(refresh_collections=None):
                                                 if target_key:
                                                     for f_k, f_v in u.items():
                                                         if f_v is not None and (f_k != 'password' or f_v):
+                                                            if f_k == 'token' and (f_v in REVOKED_TOKENS or f_v in cur_data.get('revoked_tokens', [])):
+                                                                continue
                                                             users_dict[target_key][f_k] = f_v
                                                 else:
                                                     k_name = u_email if u_email else u_id
@@ -1909,6 +1913,25 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     matched = next((u for u in data.get('users', {}).values() if u.get('role') == 'teacher'), None)
 
             if not matched:
+                # If not found in memory/disk cache, refresh users from database to support newly issued tokens seamlessly
+                refreshed_data = load_backend_data(refresh_collections=['users'])
+                for email, u in refreshed_data.get('users', {}).items():
+                    u_token = u.get('token') or ''
+                    u_id = u.get('id') or ''
+                    u_email = (u.get('email') or '').lower()
+                    u_uname = (u.get('username') or '').lstrip('@').lower()
+                    if (clean_token == u_token or 
+                        clean_token == u_id or 
+                        clean_token.lower() == u_email or 
+                        clean_uname == u_uname or 
+                        clean_token.lower() == u_uname):
+                        matched = u
+                        data = refreshed_data
+                        persisted_revoked_tokens = set(data.get('revoked_tokens', []))
+                        persisted_revoked_users = set(data.get('revoked_users', []))
+                        break
+
+            if not matched:
                 self.send_json(401, {'authenticated': False, 'error': 'Invalid or expired token', 'code': 401})
                 return
 
@@ -2271,6 +2294,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     continue
                 u_copy = dict(u)
                 u_copy.pop('password', None)
+                u_copy.pop('token', None)
                 u_copy['hasPassword'] = bool(u.get('password'))
                 u_copy['passwordProtected'] = True
                 users_list.append(u_copy)
@@ -3115,20 +3139,19 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 if not matched_user.get('password', '').startswith('sha256:'):
                     matched_user['password'] = hash_password(password)
 
-                # Ensure active valid token exists
-                persisted_revoked_tokens = set(data.get('revoked_tokens', []))
-                curr_tok = matched_user.get('token')
-                if not curr_tok or curr_tok in REVOKED_TOKENS or curr_tok in persisted_revoked_tokens:
-                    matched_user['token'] = f"token_{matched_user.get('role', 'student')}_{uuid.uuid4().hex[:16]}"
+                # Issue fresh active session token on login and sync to persistent storage and Firebase
+                new_session_tok = f"token_{matched_user.get('role', 'student')}_{uuid.uuid4().hex[:16]}"
+                matched_user['token'] = new_session_tok
 
                 save_backend_data(data)
+                sync_to_firebase(f"users/{matched_user['id']}", {'token': new_session_tok}, method='PATCH', sync=True)
 
                 sanitized = dict(matched_user)
                 sanitized.pop('password', None)
                 self.send_json(200, {
                     'success': True,
                     'user': sanitized,
-                    'token': matched_user.get('token')
+                    'token': new_session_tok
                 })
                 return
             except Exception as e:
@@ -3786,19 +3809,20 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 save_backend_data(data)
 
-                # Sync to Firebase RTDB
+                # Sync to Firebase RTDB synchronously
                 sync_to_firebase(f"users/{target_student.get('id')}", {
                     'password': hashed,
                     'token': new_token
-                }, method='PATCH')
-                sync_to_firebase(f"admin_audit_logs/{audit_entry['id']}", audit_entry, method='PUT')
+                }, method='PATCH', sync=True)
+                sync_to_firebase(f"admin_audit_logs/{audit_entry['id']}", audit_entry, method='PUT', sync=True)
 
                 print(f"[ADMIN_RESET_PASSWORD] Password reset for {target_student.get('email')} ({target_student.get('id')}) by {user.get('email')}", flush=True)
 
                 self.send_json(200, {
                     'success': True,
                     'message': f'Password updated successfully for {target_student.get("name")}.',
-                    'studentId': target_student.get('id')
+                    'studentId': target_student.get('id'),
+                    'token': new_token
                 })
                 return
             except Exception as e:
@@ -4066,6 +4090,13 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     'createdAt': datetime.now(timezone.utc).isoformat()
                 }
 
+                # Clear any prior revocation tombstones for explicitly provisioned user
+                for rev_id in [user_id.lower(), raw_email, raw_uname]:
+                    if rev_id:
+                        REVOKED_USERS.discard(rev_id)
+                if 'revoked_users' in data:
+                    data['revoked_users'] = [x for x in data['revoked_users'] if str(x).lower().strip() not in [user_id.lower(), raw_email, raw_uname]]
+
                 users_dict[raw_email] = new_user
                 data['users'] = users_dict
                 save_backend_data(data)
@@ -4164,11 +4195,11 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 save_backend_data(data)
 
-                # Delete from Firebase Realtime Database
+                # Delete from Firebase Realtime Database synchronously
                 if st_id:
-                    sync_to_firebase(f"users/{st_id}", {'isDeleted': True, 'isActive': False}, method='PATCH')
-                    sync_to_firebase(f"users/{st_id}", None, method='DELETE')
-                    sync_to_firebase(f"revoked_users/{st_id}", True)
+                    sync_to_firebase(f"users/{st_id}", {'isDeleted': True, 'isActive': False}, method='PATCH', sync=True)
+                    sync_to_firebase(f"users/{st_id}", None, method='DELETE', sync=True)
+                    sync_to_firebase(f"revoked_users/{st_id}", True, sync=True)
 
                 # Calculate remaining counts directly from fresh database state
                 revoked_set = set(str(x).lower().strip() for x in data.get('revoked_users', []))

@@ -387,6 +387,21 @@ class AuthManager {
         }
       }
 
+      if (user && !this.verifyPassword(rawPass, user.password) && window.firebaseSync && window.firebaseSync.db) {
+        try {
+          const snap = await window.firebaseSync.db.ref('users/' + user.id).once('value');
+          const freshVal = snap.val();
+          if (freshVal && freshVal.password) {
+            user = { ...user, ...freshVal };
+            const uIdx = users.findIndex(u => u.id === user.id);
+            if (uIdx !== -1) {
+              users[uIdx] = user;
+              window.store.saveUsers(users);
+            }
+          }
+        } catch (e) {}
+      }
+
       if (!user || !this.verifyPassword(rawPass, user.password)) {
         return { success: false, error: 'Login Failed: Invalid username or password.' };
       }

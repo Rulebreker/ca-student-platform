@@ -1168,9 +1168,16 @@ class AdminDashboard {
         throw new Error(data.error || 'Failed to update student password on server.');
       }
 
-      // Update local store with hashed password or fallback
-      student.password = window.auth ? window.auth.hashPassword(newPass) : newPass;
-      window.store.updateUser(student);
+      // Update local store without overwriting backend/Firebase session tokens
+      const localUsers = window.store.getUsers();
+      const sIdx = localUsers.findIndex(u => u.id === studentId);
+      if (sIdx !== -1) {
+        localUsers[sIdx].hasPassword = true;
+        if (data.token) {
+          localUsers[sIdx].token = data.token;
+        }
+        window.store.saveUsers(localUsers);
+      }
 
       window.app.closeModal('admin-generic-modal');
       window.app.showToast(data.message || `Password updated successfully for ${student.name}`, 'success');

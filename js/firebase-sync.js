@@ -1051,11 +1051,13 @@ class FirebaseSyncManager {
           return;
         }
 
-        // Account is active; update current user in store & auth preserving local password, and refresh points UI
+        // Account is active; update current user in store & auth preserving active session token and local password, and refresh points UI
+        const activeToken = (current && current.token) || (val && val.token) || '';
         const merged = {
           ...current,
           ...val,
-          password: current.password || val.password
+          token: activeToken,
+          password: (current && current.password) || (val && val.password)
         };
         window.store.setCurrentUser(merged);
         if (window.auth) window.auth.currentUser = merged;
@@ -1099,7 +1101,9 @@ class FirebaseSyncManager {
 
   saveUser(user) {
     if (!this.db || !user || !user.id) return Promise.resolve();
-    return this.db.ref('users/' + user.id).set(user).catch(err => {
+    const userToSave = { ...user };
+    if (userToSave.token === undefined) delete userToSave.token;
+    return this.db.ref('users/' + user.id).update(userToSave).catch(err => {
       console.warn('[FirebaseSync] saveUser error:', err);
     });
   }
