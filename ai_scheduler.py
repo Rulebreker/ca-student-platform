@@ -1,18 +1,45 @@
 import os
 import time
+import uuid
 import threading
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 import ai_job_manager
 
 _scheduler_running = False
 _scheduler_thread = None
 
+# Indian Standard Time (UTC+05:30)
+IST_TZ = timezone(timedelta(hours=5, minutes=30))
+
+def get_now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+def get_now_ist() -> datetime:
+    return datetime.now(IST_TZ)
+
+def format_iso_utc(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+def parse_iso_utc(iso_str: str) -> Optional[datetime]:
+    if not iso_str:
+        return None
+    try:
+        cleaned = str(iso_str).replace('Z', '+00:00')
+        dt = datetime.fromisoformat(cleaned)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+# ======================================================================
+# BACKWARD COMPATIBILITY: LEGACY SINGLE AUTOPILOT CONFIG
+# ======================================================================
+
 DEFAULT_AUTOPILOT_CONFIG = {
     'enabled': False,
     'dailyTime': '20:00',
-    'timezoneOffsetHours': 5.5, # IST default
+    'timezoneOffsetHours': 5.5,
     'titleTemplate': 'Auto-Pilot: {subject} - {chapter} Daily Practice',
     'examLevel': 'CA Foundation',
     'examLevelId': 'foundation',
@@ -44,7 +71,6 @@ def get_autopilot_config(data: Dict[str, Any]) -> Dict[str, Any]:
     if 'ai_autopilot_config' not in data or not isinstance(data.get('ai_autopilot_config'), dict):
         data['ai_autopilot_config'] = dict(DEFAULT_AUTOPILOT_CONFIG)
     else:
-        # Merge any missing defaults
         for k, v in DEFAULT_AUTOPILOT_CONFIG.items():
             if k not in data['ai_autopilot_config']:
                 data['ai_autopilot_config'][k] = v
@@ -65,8 +91,418 @@ def update_autopilot_config(new_config: Dict[str, Any], data: Dict[str, Any]) ->
             cfg[k] = new_config[k]
     return cfg
 
+# ======================================================================
+# MULTI-TASK SCHEDULER ENGINE (INDEPENDENT TASKS)
+# ======================================================================
+
+def calculate_next_run(task: Dict[str, Any], from_time_utc: Optional[datetime] = None) -> Optional[str]:
+    """
+    Calculate the next execution timestamp (UTC ISO format) for a scheduled task.
+    All scheduled times are strictly interpreted in Indian Standard Time (IST / Asia/Kolkata).
+    """
+    if not task.get('enabled', True):
+        return None
+    if task.get('status') in ['cancelled', 'completed']:
+        return None
+
+    schedule_type = task.get('scheduleType', 'recurring')
+    from_utc = from_time_utc or get_now_utc()
+    from_ist = from_utc.astimezone(IST_TZ)
+
+    if schedule_type == 'one_time':
+        date_str = str(task.get('scheduledDate', '')).strip()
+        time_str = str(task.get('scheduledTime', '09:00')).strip()
+        if not date_str:
+            return None
+        try:
+            dp = [int(x) for x in date_str.split('-')]
+            tp = [int(x) for x in time_str.split(':')]
+            dt_ist = datetime(dp[0], dp[1], dp[2], tp[0], tp[1], 0, tzinfo=IST_TZ)
+            return format_iso_utc(dt_ist)
+        except Exception:
+            return None
+
+    else: # recurring daily
+        daily_time = str(task.get('dailyTime', '09:00')).strip()
+        try:
+            tp = [int(x) for x in daily_time.split(':')]
+            target_ist = from_ist.replace(hour=tp[0], minute=tp[1], second=0, microsecond=0)
+            if target_ist <= from_ist:
+                target_ist += timedelta(days=1)
+            return format_iso_utc(target_ist)
+        except Exception:
+            return None
+
+def get_scheduled_tasks(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Retrieve all scheduled tasks from the data store, ensuring list format."""
+    if 'ai_scheduled_tasks' not in data or not isinstance(data.get('ai_scheduled_tasks'), list):
+        data['ai_scheduled_tasks'] = []
+    
+    tasks = data['ai_scheduled_tasks']
+    # Sort: scheduled/processing first, then by nextRunAt or createdAt
+    def _sort_key(t):
+        st = t.get('status', 'scheduled')
+        order = 0 if st in ['scheduled', 'processing'] else (1 if st == 'paused' else 2)
+        return (order, t.get('nextRunAt') or '9999', t.get('createdAt') or '')
+    
+    return sorted(tasks, key=_sort_key)
+
+def get_scheduled_task_by_id(task_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    tasks = get_scheduled_tasks(data)
+    for t in tasks:
+        if t.get('id') == task_id:
+            return t
+    return None
+
+def save_scheduled_task(task_input: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, Any]:
+    """Create or update an independent scheduled task."""
+    tasks = get_scheduled_tasks(data)
+    task_id = task_input.get('id')
+    now_utc = get_now_utc()
+    now_iso = format_iso_utc(now_utc)
+
+    existing = None
+    if task_id:
+        for t in tasks:
+            if t.get('id') == task_id:
+                existing = t
+                break
+
+    if not existing:
+        task_id = f"sched-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}"
+        existing = {
+            'id': task_id,
+            'createdAt': now_iso,
+            'executionCount': 0,
+            'lastRunAt': None,
+            'lastJobId': None,
+            'lastTestId': None,
+            'lastTestTitle': None,
+            'lastError': None,
+            'status': 'scheduled'
+        }
+        tasks.append(existing)
+
+    # Update task fields
+    existing['name'] = str(task_input.get('name') or task_input.get('title') or 'Scheduled MCQ Practice').strip()
+    existing['scheduleType'] = task_input.get('scheduleType', 'recurring')
+    existing['dailyTime'] = str(task_input.get('dailyTime', '09:00')).strip()
+    existing['scheduledDate'] = str(task_input.get('scheduledDate', '')).strip()
+    existing['scheduledTime'] = str(task_input.get('scheduledTime', '09:00')).strip()
+    existing['timezone'] = 'Asia/Kolkata'
+
+    existing['titleTemplate'] = str(task_input.get('titleTemplate') or '[Subject] - [Chapter] Practice Test').strip()
+    existing['examLevel'] = task_input.get('examLevel', 'CA Foundation')
+    existing['examLevelId'] = task_input.get('examLevelId', 'foundation')
+    existing['subject'] = task_input.get('subject', 'Accounting')
+    existing['subjectId'] = task_input.get('subjectId', 'sub-1')
+    existing['chapter'] = task_input.get('chapter', '')
+    existing['chapterId'] = task_input.get('chapterId', '')
+    existing['topic'] = str(task_input.get('topic') or existing['chapter'] or 'Daily Practice').strip()
+    existing['difficulty'] = task_input.get('difficulty', 'ICAI Exam Standard')
+    existing['questionCount'] = max(1, min(50, int(task_input.get('questionCount', 5))))
+    existing['durationMinutes'] = max(5, min(180, int(task_input.get('durationMinutes', 15))))
+    existing['marksPerCorrect'] = float(task_input.get('marksPerCorrect', 2.0))
+    existing['negativeMarksPerWrong'] = float(task_input.get('negativeMarksPerWrong', 0.5))
+    existing['platformXp'] = float(task_input.get('platformXp', 10.0))
+    existing['maxAttempts'] = int(task_input.get('maxAttempts', 3))
+    existing['allowedPlans'] = task_input.get('allowedPlans', ['free', 'trial', 'core', 'plus', 'elite'])
+    existing['autoPublish'] = bool(task_input.get('autoPublish', True))
+    existing['enabled'] = bool(task_input.get('enabled', True))
+    existing['updatedAt'] = now_iso
+
+    # Calculate next execution time
+    if existing.get('status') not in ['completed', 'cancelled']:
+        if existing.get('enabled'):
+            existing['status'] = 'scheduled'
+            existing['nextRunAt'] = calculate_next_run(existing, now_utc)
+        else:
+            existing['status'] = 'paused'
+            existing['nextRunAt'] = None
+
+    return existing
+
+def delete_scheduled_task(task_id: str, data: Dict[str, Any]) -> bool:
+    """Delete a scheduled task from the collection."""
+    tasks = get_scheduled_tasks(data)
+    initial_len = len(tasks)
+    data['ai_scheduled_tasks'] = [t for t in tasks if t.get('id') != task_id]
+    return len(data['ai_scheduled_tasks']) < initial_len
+
+def toggle_scheduled_task(task_id: str, enabled: bool, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Enable or pause a scheduled task."""
+    task = get_scheduled_task_by_id(task_id, data)
+    if not task:
+        return None
+    task['enabled'] = bool(enabled)
+    now_utc = get_now_utc()
+    task['updatedAt'] = format_iso_utc(now_utc)
+    if task['enabled']:
+        if task.get('status') != 'completed':
+            task['status'] = 'scheduled'
+            task['nextRunAt'] = calculate_next_run(task, now_utc)
+    else:
+        task['status'] = 'paused'
+        task['nextRunAt'] = None
+    return task
+
+def cancel_scheduled_task(task_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Cancel a scheduled task."""
+    task = get_scheduled_task_by_id(task_id, data)
+    if not task:
+        return None
+    task['enabled'] = False
+    task['status'] = 'cancelled'
+    task['nextRunAt'] = None
+    task['updatedAt'] = format_iso_utc(get_now_utc())
+    return task
+
+# ======================================================================
+# EXECUTION & HOSTING ENGINE
+# ======================================================================
+
+def execute_scheduler_task_sync(
+    task: Dict[str, Any],
+    data: Dict[str, Any],
+    save_callback: Any,
+    firebase_sync_callback: Any
+) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Synchronously execute an independent scheduled task:
+    1. Lock task as 'processing'
+    2. Generate questions and construct test record
+    3. Host test into database (data['tests'] and data['questions'])
+    4. Update task record: set status, advance nextRunAt for recurring, record errors
+    5. Sync to disk and Firebase RTDB
+    """
+    task_id = task.get('id')
+    now_utc = get_now_utc()
+    now_iso = format_iso_utc(now_utc)
+    now_ist = now_utc.astimezone(IST_TZ)
+    date_str = now_ist.strftime('%d-%b-%Y')
+
+    print(f"[SCHEDULER_EXEC] Executing scheduled task '{task.get('name')}' (ID: {task_id})...", flush=True)
+
+    # 1. Lock task state
+    task['status'] = 'processing'
+    task['updatedAt'] = now_iso
+    if save_callback:
+        save_callback(data)
+    if firebase_sync_callback:
+        firebase_sync_callback(f"ai_scheduled_tasks/{task_id}", task, method='PUT', sync=True)
+
+    # 2. Formulate title and generation parameters
+    subject_name = task.get('subject', 'Accounting')
+    chapter_name = task.get('chapter', '') or task.get('topic', 'Daily Practice')
+    title_tpl = task.get('titleTemplate') or '[Subject] - [Chapter] Practice Challenge'
+    job_title = (title_tpl
+                 .replace('[Subject]', subject_name).replace('{subject}', subject_name)
+                 .replace('[Chapter]', chapter_name).replace('{chapter}', chapter_name)
+                 .replace('[Date]', date_str).replace('{date}', date_str))
+
+    params = {
+        'title': job_title,
+        'subject': subject_name,
+        'subjectId': task.get('subjectId', 'sub-1'),
+        'chapter': task.get('chapter', ''),
+        'chapterId': task.get('chapterId', ''),
+        'topic': task.get('topic') or chapter_name,
+        'examLevel': task.get('examLevel', 'CA Foundation'),
+        'examLevelId': task.get('examLevelId', 'foundation'),
+        'difficulty': task.get('difficulty', 'ICAI Exam Standard'),
+        'count': int(task.get('questionCount', 5)),
+        'durationMinutes': int(task.get('durationMinutes', 15)),
+        'marksPerCorrect': float(task.get('marksPerCorrect', 2.0)),
+        'negativeMarksPerWrong': float(task.get('negativeMarksPerWrong', 0.5)),
+        'platformXp': float(task.get('platformXp', 10.0)),
+        'maxAttempts': int(task.get('maxAttempts', 3)),
+        'allowedPlans': task.get('allowedPlans', ['free', 'trial', 'core', 'plus', 'elite']),
+        'autoPublish': bool(task.get('autoPublish', True)),
+        'description': f"Automated scheduled practice test generated by ExcellenceCA Auto-Pilot for {subject_name}.",
+        'instructions': 'Review all questions carefully. Negative marking applies for incorrect attempts.'
+    }
+
+    try:
+        # 3. Synchronously generate and host test
+        ok, err, res = ai_job_manager.run_generation_job_synchronous(
+            params=params,
+            data=data,
+            save_callback=save_callback,
+            firebase_sync_callback=firebase_sync_callback
+        )
+
+        completed_utc = get_now_utc()
+        completed_iso = format_iso_utc(completed_utc)
+
+        if ok and res:
+            test_info = res.get('test', {})
+            test_id = test_info.get('id')
+            task['lastRunAt'] = completed_iso
+            task['lastJobId'] = test_info.get('aiJobId')
+            task['lastTestId'] = test_id
+            task['lastTestTitle'] = test_info.get('title')
+            task['lastError'] = None
+            task['executionCount'] = task.get('executionCount', 0) + 1
+            task['updatedAt'] = completed_iso
+
+            # Advance nextRunAt
+            if task.get('scheduleType') == 'recurring':
+                task['status'] = 'scheduled'
+                task['nextRunAt'] = calculate_next_run(task, completed_utc)
+            else: # one-time
+                task['status'] = 'completed'
+                task['nextRunAt'] = None
+
+            if save_callback:
+                save_callback(data)
+            if firebase_sync_callback:
+                firebase_sync_callback(f"ai_scheduled_tasks/{task_id}", task, method='PUT', sync=True)
+
+            print(f"[SCHEDULER_SUCCESS] Task '{task.get('name')}' hosted test '{test_id}' successfully.", flush=True)
+            return True, None, res
+
+        else:
+            task['status'] = 'failed'
+            task['lastError'] = str(err)
+            task['updatedAt'] = completed_iso
+            # If recurring, advance nextRunAt to next day so it retries on schedule
+            if task.get('scheduleType') == 'recurring':
+                task['nextRunAt'] = calculate_next_run(task, completed_utc)
+
+            if save_callback:
+                save_callback(data)
+            if firebase_sync_callback:
+                firebase_sync_callback(f"ai_scheduled_tasks/{task_id}", task, method='PUT', sync=True)
+
+            print(f"[SCHEDULER_FAILED] Task '{task.get('name')}' failed: {err}", flush=True)
+            return False, err, None
+
+    except Exception as exc:
+        err_msg = str(exc)
+        task['status'] = 'failed'
+        task['lastError'] = err_msg
+        task['updatedAt'] = format_iso_utc(get_now_utc())
+        if task.get('scheduleType') == 'recurring':
+            task['nextRunAt'] = calculate_next_run(task, get_now_utc())
+
+        if save_callback:
+            save_callback(data)
+        if firebase_sync_callback:
+            firebase_sync_callback(f"ai_scheduled_tasks/{task_id}", task, method='PUT', sync=True)
+
+        print(f"[SCHEDULER_EXCEPTION] Task '{task.get('name')}' threw exception: {err_msg}", flush=True)
+        return False, err_msg, None
+
+def process_due_tasks(
+    data: Dict[str, Any],
+    save_callback: Any,
+    firebase_sync_callback: Any
+) -> Dict[str, Any]:
+    """
+    Evaluate all scheduled tasks and execute any that are due.
+    Idempotent: locks tasks in 'processing' before running.
+    Safe for Vercel Cron, opportunistic triggers, and background worker threads.
+    """
+    now_utc = get_now_utc()
+    now_iso = format_iso_utc(now_utc)
+    tasks = get_scheduled_tasks(data)
+
+    due_tasks = []
+    for t in tasks:
+        if not t.get('enabled', True):
+            continue
+        if t.get('status') != 'scheduled':
+            continue
+        next_run = t.get('nextRunAt')
+        if next_run and next_run <= now_iso:
+            due_tasks.append(t)
+
+    executed_results = []
+    for t in due_tasks:
+        ok, err, res = execute_scheduler_task_sync(t, data, save_callback, firebase_sync_callback)
+        executed_results.append({
+            'taskId': t.get('id'),
+            'taskName': t.get('name'),
+            'success': ok,
+            'error': err,
+            'testId': t.get('lastTestId')
+        })
+
+    # Also check legacy single autopilot config for backward compatibility only if no modern tasks exist
+    legacy_cfg = data.get('ai_autopilot_config')
+    if not tasks and legacy_cfg and isinstance(legacy_cfg, dict) and legacy_cfg.get('enabled'):
+        offset_hours = float(legacy_cfg.get('timezoneOffsetHours', 5.5))
+        target_tz = timezone(timedelta(hours=offset_hours))
+        now_local = datetime.now(target_tz)
+        today_str = now_local.strftime('%Y-%m-%d')
+        current_hhmm = now_local.strftime('%H:%M')
+        daily_time = legacy_cfg.get('dailyTime', '20:00')
+
+        if legacy_cfg.get('lastRunDate') != today_str and current_hhmm >= daily_time:
+            print(f"[AI_SCHEDULER_LEGACY] Triggering legacy autopilot for {today_str} at {current_hhmm}...", flush=True)
+            subject_name = legacy_cfg.get('subject', 'Accounting')
+            chapter_name = legacy_cfg.get('chapter', 'Daily Practice')
+            title_template = legacy_cfg.get('titleTemplate') or 'Auto-Pilot: {subject} - {chapter} Daily Practice'
+            job_title = title_template.replace('{subject}', subject_name).replace('{chapter}', chapter_name).replace('{date}', today_str)
+
+            params = {
+                'title': job_title,
+                'subject': subject_name,
+                'subjectId': legacy_cfg.get('subjectId', 'sub-1'),
+                'chapter': chapter_name,
+                'chapterId': legacy_cfg.get('chapterId', ''),
+                'topic': legacy_cfg.get('topic') or chapter_name,
+                'examLevel': legacy_cfg.get('examLevel', 'CA Foundation'),
+                'examLevelId': legacy_cfg.get('examLevelId', 'foundation'),
+                'difficulty': legacy_cfg.get('difficulty', 'ICAI Exam Standard'),
+                'count': int(legacy_cfg.get('questionCount', 5)),
+                'durationMinutes': int(legacy_cfg.get('durationMinutes', 15)),
+                'marksPerCorrect': float(legacy_cfg.get('marksPerCorrect', 2.0)),
+                'negativeMarksPerWrong': float(legacy_cfg.get('negativeMarksPerWrong', 0.5)),
+                'platformXp': float(legacy_cfg.get('platformXp', 10.0)),
+                'maxAttempts': int(legacy_cfg.get('maxAttempts', 3)),
+                'allowedPlans': legacy_cfg.get('allowedPlans', ['free', 'trial', 'core', 'plus', 'elite']),
+                'autoPublish': bool(legacy_cfg.get('autoPublish', True)),
+                'description': legacy_cfg.get('description', ''),
+                'instructions': legacy_cfg.get('instructions', '')
+            }
+
+            ok, err, res = ai_job_manager.run_generation_job_synchronous(
+                params=params,
+                data=data,
+                save_callback=save_callback,
+                firebase_sync_callback=firebase_sync_callback
+            )
+            if ok and res:
+                legacy_cfg['lastRunDate'] = today_str
+                test_info = res.get('test', {})
+                legacy_cfg['lastRunJobId'] = test_info.get('aiJobId')
+                if save_callback:
+                    save_callback(data)
+                if firebase_sync_callback:
+                    firebase_sync_callback('ai_autopilot_config', legacy_cfg, method='PUT', sync=True)
+                executed_results.append({
+                    'taskId': 'legacy_autopilot',
+                    'taskName': 'Legacy Auto-Pilot',
+                    'success': True,
+                    'error': None,
+                    'testId': test_info.get('id')
+                })
+
+    return {
+        'success': True,
+        'executedCount': len(executed_results),
+        'results': executed_results,
+        'serverTimeUtc': now_iso,
+        'serverTimeIst': now_utc.astimezone(IST_TZ).strftime('%Y-%m-%d %H:%M:%S IST')
+    }
+
+# ======================================================================
+# DAEMON WORKER (FOR LOCAL / PERSISTENT SERVER ENVIRONMENTS)
+# ======================================================================
+
 def start_autopilot_scheduler(load_data_fn, save_data_fn, firebase_sync_fn):
-    """Start background scheduler loop if not already running."""
+    """Start background scheduler thread for persistent server environments."""
     global _scheduler_running, _scheduler_thread
     if _scheduler_running:
         return
@@ -78,74 +514,14 @@ def start_autopilot_scheduler(load_data_fn, save_data_fn, firebase_sync_fn):
         daemon=True
     )
     _scheduler_thread.start()
-    print("[AI_SCHEDULER] Background Auto-Pilot worker thread started.", flush=True)
+    print("[AI_SCHEDULER] Persistent Auto-Pilot worker thread active.", flush=True)
 
 def _autopilot_worker_loop(load_data_fn, save_data_fn, firebase_sync_fn):
     while _scheduler_running:
         try:
             time.sleep(30) # Poll every 30 seconds
             data = load_data_fn()
-            cfg = get_autopilot_config(data)
-            
-            if not cfg.get('enabled'):
-                continue
-
-            # Calculate target time in configured timezone (default IST UTC+5:30)
-            offset_hours = float(cfg.get('timezoneOffsetHours', 5.5))
-            target_tz = timezone(timedelta(hours=offset_hours))
-            now_local = datetime.now(target_tz)
-            today_str = now_local.strftime('%Y-%m-%d')
-            current_hhmm = now_local.strftime('%H:%M')
-
-            daily_time = cfg.get('dailyTime', '20:00')
-
-            # If today's job hasn't run and current time >= dailyTime
-            if cfg.get('lastRunDate') != today_str and current_hhmm >= daily_time:
-                print(f"[AI_SCHEDULER] Triggering Auto-Pilot generation for {today_str} at {current_hhmm} (Target: {daily_time}).", flush=True)
-                
-                subject_name = cfg.get('subject', 'Accounting')
-                chapter_name = cfg.get('chapter', 'Daily Practice')
-                title_template = cfg.get('titleTemplate') or 'Auto-Pilot: {subject} - {chapter} Daily Practice'
-                job_title = title_template.replace('{subject}', subject_name).replace('{chapter}', chapter_name).replace('{date}', today_str)
-
-                params = {
-                    'title': job_title,
-                    'subject': subject_name,
-                    'subjectId': cfg.get('subjectId', 'sub-1'),
-                    'chapter': chapter_name,
-                    'chapterId': cfg.get('chapterId', ''),
-                    'topic': cfg.get('topic') or chapter_name,
-                    'examLevel': cfg.get('examLevel', 'CA Foundation'),
-                    'examLevelId': cfg.get('examLevelId', 'foundation'),
-                    'difficulty': cfg.get('difficulty', 'ICAI Exam Standard'),
-                    'count': int(cfg.get('questionCount', 5)),
-                    'durationMinutes': int(cfg.get('durationMinutes', 15)),
-                    'marksPerCorrect': float(cfg.get('marksPerCorrect', 2.0)),
-                    'negativeMarksPerWrong': float(cfg.get('negativeMarksPerWrong', 0.5)),
-                    'platformXp': float(cfg.get('platformXp', 10.0)),
-                    'maxAttempts': int(cfg.get('maxAttempts', 3)),
-                    'allowedPlans': cfg.get('allowedPlans', ['free', 'trial', 'core', 'plus', 'elite']),
-                    'autoPublish': bool(cfg.get('autoPublish', True)),
-                    'description': cfg.get('description', ''),
-                    'instructions': cfg.get('instructions', '')
-                }
-
-                ok, err, job_record = ai_job_manager.create_generation_job(
-                    params=params,
-                    data=data,
-                    save_callback=save_data_fn,
-                    firebase_sync_callback=firebase_sync_fn
-                )
-
-                if ok and job_record:
-                    cfg['lastRunDate'] = today_str
-                    cfg['lastRunJobId'] = job_record.get('id')
-                    save_data_fn(data)
-                    firebase_sync_fn('ai_autopilot_config', cfg, method='PUT')
-                    print(f"[AI_SCHEDULER] Dispatched Auto-Pilot job {job_record.get('id')}.", flush=True)
-                else:
-                    print(f"[AI_SCHEDULER_ERROR] Failed to start Auto-Pilot job: {err}", flush=True)
-
+            process_due_tasks(data, save_data_fn, firebase_sync_fn)
         except Exception as e:
-            print(f"[AI_SCHEDULER_EXCEPTION] Worker loop caught error: {e}", flush=True)
+            print(f"[AI_SCHEDULER_LOOP_ERROR] Worker encountered error: {e}", flush=True)
             time.sleep(10)

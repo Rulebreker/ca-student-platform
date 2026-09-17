@@ -6,6 +6,12 @@
       "destination": "/api/index.py"
     }
   ],
+  "crons": [
+    {
+      "path": "/api/admin/ai/scheduler/tick",
+      "schedule": "* * * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/api/(.*)",

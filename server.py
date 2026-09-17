@@ -1018,7 +1018,7 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
         return data
 
     now = time.time()
-    all_keys = ['users', 'revoked_users', 'revoked_tokens', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'assignments', 'papers', 'ai_source_documents', 'ai_generation_logs', 'ai_providers', 'ai_autopilot_config']
+    all_keys = ['users', 'revoked_users', 'revoked_tokens', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'assignments', 'papers', 'ai_source_documents', 'ai_generation_logs', 'ai_providers', 'ai_autopilot_config', 'ai_scheduled_tasks']
     target_keys = collections if collections else all_keys
 
     keys_to_fetch = [k for k in target_keys if (now - _collection_last_synced.get(k, 0)) >= min_interval]
@@ -1236,6 +1236,16 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
                             data['subjects'] = list(s_map.values())
                             _collection_last_synced[key] = now
                             updated = True
+                elif key == 'ai_scheduled_tasks':
+                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                    if items is not None:
+                        t_map = {t.get('id'): t for t in data.get('ai_scheduled_tasks', []) if isinstance(t, dict) and t.get('id')}
+                        for t in items:
+                            if isinstance(t, dict) and t.get('id'):
+                                t_map[t['id']] = t
+                        data['ai_scheduled_tasks'] = list(t_map.values())
+                        _collection_last_synced[key] = now
+                        updated = True
         except Exception:
             pass
 
@@ -1264,7 +1274,7 @@ def load_backend_data(refresh_collections=None):
                         cur_data = json.load(f)
                     
                     import urllib.request
-                    keys_to_fetch = ['revoked_users', 'revoked_tokens', 'users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'papers', 'assignments', 'ai_source_documents', 'ai_generation_logs', 'ai_providers', 'ai_autopilot_config', 'subjects']
+                    keys_to_fetch = ['revoked_users', 'revoked_tokens', 'users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'papers', 'assignments', 'ai_source_documents', 'ai_generation_logs', 'ai_providers', 'ai_autopilot_config', 'subjects', 'ai_scheduled_tasks']
                     
                     for key in keys_to_fetch:
                         try:
@@ -1421,6 +1431,14 @@ def load_backend_data(refresh_collections=None):
                                     if isinstance(cloud_data, (dict, list)):
                                         items = list(cloud_data.values()) if isinstance(cloud_data, dict) else cloud_data
                                         cur_data['subjects'] = items
+                                elif key == 'ai_scheduled_tasks':
+                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
+                                    if items is not None:
+                                        t_map = {t.get('id'): t for t in cur_data.get('ai_scheduled_tasks', []) if isinstance(t, dict) and t.get('id')}
+                                        for t in items:
+                                            if isinstance(t, dict) and t.get('id'):
+                                                t_map[t['id']] = t
+                                        cur_data['ai_scheduled_tasks'] = list(t_map.values())
                         except Exception as err:
                             print(f"[COLD_START] Failed to fetch {key} from Firebase: {err}", flush=True)
 
@@ -1441,7 +1459,7 @@ def load_backend_data(refresh_collections=None):
                     d = None
 
             if d is not None:
-                list_keys = ['tests', 'questions', 'test_attempts', 'submissions', 'papers', 'xp_transactions', 'notifications', 'bookmarks', 'subjects', 'referrals', 'payment_sessions', 'payment_channels', 'admin_audit_logs', 'xp_reset_history', 'ai_source_documents', 'ai_generation_logs']
+                list_keys = ['tests', 'questions', 'test_attempts', 'submissions', 'papers', 'xp_transactions', 'notifications', 'bookmarks', 'subjects', 'referrals', 'payment_sessions', 'payment_channels', 'admin_audit_logs', 'xp_reset_history', 'ai_source_documents', 'ai_generation_logs', 'ai_scheduled_tasks']
                 for lk in list_keys:
                     if lk not in d:
                         d[lk] = []
@@ -1856,6 +1874,27 @@ def parse_mcq_text_from_doc(raw_text, existing_questions=None):
         })
     return results
 
+_last_opportunistic_tick = 0
+
+def check_opportunistic_scheduler_tick():
+    global _last_opportunistic_tick
+    now = time.time()
+    if now - _last_opportunistic_tick > 60:
+        _last_opportunistic_tick = now
+        try:
+            d = load_backend_data(refresh_collections=['ai_scheduled_tasks'])
+            now_iso = ai_scheduler.format_iso_utc(ai_scheduler.get_now_utc())
+            tasks = d.get('ai_scheduled_tasks', [])
+            has_due = any(
+                isinstance(t, dict) and t.get('enabled', True) and t.get('status') == 'scheduled' and t.get('nextRunAt') and t.get('nextRunAt') <= now_iso
+                for t in tasks
+            )
+            if has_due:
+                sync_fn = lambda p, data_obj, **kw: sync_to_firebase(p, data_obj, **kw)
+                ai_scheduler.process_due_tasks(d, save_backend_data, sync_fn)
+        except Exception as e:
+            print(f"[SCHEDULER_OPPORTUNISTIC_WARN] {e}", flush=True)
+
 class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         if 'directory' not in kwargs:
@@ -1941,6 +1980,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         return None
 
     def do_GET(self):
+        check_opportunistic_scheduler_tick()
         print(f"[SERVER] Incoming GET: {self.path}", flush=True)
         raw_path = self._get_request_path()
         path = raw_path.rstrip('/') if raw_path != '/' else '/'
@@ -2989,9 +3029,36 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json(200, {'success': True, 'config': cfg})
             return
 
+        # 5.1 AI Multi-Task Scheduler Tasks
+        if path == '/api/admin/ai/scheduler/tasks':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            data = load_backend_data(refresh_collections=['ai_scheduled_tasks'])
+            tasks = ai_scheduler.get_scheduled_tasks(data)
+            now_utc = ai_scheduler.get_now_utc()
+            self.send_json(200, {
+                'success': True,
+                'tasks': tasks,
+                'serverTimeUtc': ai_scheduler.format_iso_utc(now_utc),
+                'serverTimeIst': now_utc.astimezone(ai_scheduler.IST_TZ).strftime('%Y-%m-%d %H:%M:%S IST')
+            })
+            return
+
+        # 5.2 AI Scheduler Tick Runner (Vercel Cron & Heartbeat)
+        if path == '/api/admin/ai/scheduler/tick':
+            data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests', 'questions', 'ai_generation_logs'])
+            sync_fn = lambda p, d, **kw: sync_to_firebase(p, d, **kw)
+            res = ai_scheduler.process_due_tasks(data, save_backend_data, sync_fn)
+            self.send_json(200, res)
+            return
+
         super().do_GET()
 
     def do_POST(self):
+        check_opportunistic_scheduler_tick()
         raw_path = self._get_request_path()
         path = raw_path.rstrip('/') if raw_path != '/' else '/'
         effective_full = self.headers.get('x-matched-path') or self.headers.get('x-forwarded-uri') or self.path
@@ -3271,6 +3338,128 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 self.send_json(500, {'error': f'Failed to update autopilot config: {str(e)}', 'code': 500})
                 return
+
+        # 6.1 Create or Update Scheduled Task
+        if path == '/api/admin/ai/scheduler/tasks':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                
+                data = load_backend_data(refresh_collections=['ai_scheduled_tasks'])
+                task = ai_scheduler.save_scheduled_task(req_data, data)
+                save_backend_data(data)
+                sync_to_firebase(f"ai_scheduled_tasks/{task['id']}", task, method='PUT', sync=True)
+                self.send_json(200, {'success': True, 'task': task})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Failed to save scheduled task: {str(e)}', 'code': 500})
+                return
+
+        # 6.2 Delete Scheduled Task
+        if path == '/api/admin/ai/scheduler/tasks/delete':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                task_id = req_data.get('id') or req_data.get('taskId')
+                if not task_id:
+                    self.send_json(400, {'error': 'Task ID is required.', 'code': 400})
+                    return
+                
+                data = load_backend_data(refresh_collections=['ai_scheduled_tasks'])
+                ok = ai_scheduler.delete_scheduled_task(task_id, data)
+                if ok:
+                    save_backend_data(data)
+                    sync_to_firebase(f"ai_scheduled_tasks/{task_id}", None, method='DELETE', sync=True)
+                    self.send_json(200, {'success': True, 'deletedId': task_id})
+                else:
+                    self.send_json(404, {'error': f"Task '{task_id}' not found.", 'code': 404})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Failed to delete task: {str(e)}', 'code': 500})
+                return
+
+        # 6.3 Toggle Scheduled Task (Pause / Resume)
+        if path == '/api/admin/ai/scheduler/tasks/toggle':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                task_id = req_data.get('id') or req_data.get('taskId')
+                enabled = bool(req_data.get('enabled', True))
+                if not task_id:
+                    self.send_json(400, {'error': 'Task ID is required.', 'code': 400})
+                    return
+                
+                data = load_backend_data(refresh_collections=['ai_scheduled_tasks'])
+                task = ai_scheduler.toggle_scheduled_task(task_id, enabled, data)
+                if task:
+                    save_backend_data(data)
+                    sync_to_firebase(f"ai_scheduled_tasks/{task_id}", task, method='PUT', sync=True)
+                    self.send_json(200, {'success': True, 'task': task})
+                else:
+                    self.send_json(404, {'error': f"Task '{task_id}' not found.", 'code': 404})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Failed to toggle task: {str(e)}', 'code': 500})
+                return
+
+        # 6.4 Execute Task Immediately ("Run Now")
+        if path == '/api/admin/ai/scheduler/tasks/run-now':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                task_id = req_data.get('id') or req_data.get('taskId')
+                if not task_id:
+                    self.send_json(400, {'error': 'Task ID is required.', 'code': 400})
+                    return
+
+                data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests', 'questions', 'ai_generation_logs'])
+                task = ai_scheduler.get_scheduled_task_by_id(task_id, data)
+                if not task:
+                    self.send_json(404, {'error': f"Task '{task_id}' not found.", 'code': 404})
+                    return
+
+                sync_fn = lambda p, d, **kw: sync_to_firebase(p, d, **kw)
+                ok, err, res = ai_scheduler.execute_scheduler_task_sync(task, data, save_backend_data, sync_fn)
+                if ok:
+                    self.send_json(200, {'success': True, 'task': task, 'result': res})
+                else:
+                    self.send_json(400, {'success': False, 'error': err, 'task': task})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Execution failed: {str(e)}', 'code': 500})
+                return
+
+        # 6.5 Trigger Tick via POST
+        if path == '/api/admin/ai/scheduler/tick':
+            data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests', 'questions', 'ai_generation_logs'])
+            sync_fn = lambda p, d, **kw: sync_to_firebase(p, d, **kw)
+            res = ai_scheduler.process_due_tasks(data, save_backend_data, sync_fn)
+            self.send_json(200, res)
+            return
 
         # ================================================================
         # SUBSCRIPTION & PAYMENT POST ENDPOINTS
@@ -5958,7 +6147,7 @@ def run_server(port=PORT):
         ai_scheduler.start_autopilot_scheduler(
             load_backend_data,
             save_backend_data,
-            lambda p, d, method='PUT': sync_to_firebase(p, d, method=method, sync=True)
+            lambda p, d, **kw: sync_to_firebase(p, d, **kw)
         )
         try:
             httpd.serve_forever()

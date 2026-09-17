@@ -8407,293 +8407,841 @@ class AdminDashboard {
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
     const token = currentUser ? (currentUser.token || currentUser.email) : '';
 
-    let config = {
-      enabled: false,
-      dailyTime: '20:00',
-      titleTemplate: '[Subject] Daily Conceptual Challenge',
-      subject: 'Business Economics',
-      subjectId: 'sub-3',
-      chapter: '',
-      chapterId: '',
-      topic: 'Daily Comprehensive Exam Practice',
-      examLevel: 'CA Foundation',
-      examLevelId: 'foundation',
-      difficulty: 'ICAI Exam Standard',
-      questionCount: 5,
-      durationMinutes: 15,
-      marksPerCorrect: 2.0,
-      negativeMarksPerWrong: 0.5,
-      platformXp: 10,
-      maxAttempts: 3,
-      autoPublish: true,
-      allowedPlans: ['free', 'trial', 'core', 'plus', 'elite']
+    const escapeHtml = (str) => {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
     };
 
+    const formatIstDateTime = (isoString) => {
+      if (!isoString) return 'Not scheduled';
+      try {
+        const d = new Date(isoString);
+        if (isNaN(d.getTime())) return isoString;
+        return d.toLocaleString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        }) + ' IST';
+      } catch (e) {
+        return isoString;
+      }
+    };
+
+    const getCountdownText = (nextRunAtIso) => {
+      if (!nextRunAtIso) return '';
+      const diffMs = new Date(nextRunAtIso).getTime() - Date.now();
+      if (diffMs <= 0) return '⚡ Due now / processing';
+      const diffMins = Math.round(diffMs / 60000);
+      if (diffMins < 60) return `in ${diffMins} min`;
+      const diffHours = Math.floor(diffMins / 60);
+      const remMins = diffMins % 60;
+      if (diffHours < 24) return `in ${diffHours}h ${remMins}m`;
+      const diffDays = Math.floor(diffHours / 24);
+      return `in ${diffDays}d ${diffHours % 24}h`;
+    };
+
+    let tasks = [];
+    let serverTimeIst = '';
     try {
-      const resp = await fetch(`/api/admin/ai/autopilot?_t=${Date.now()}`, {
+      const resp = await fetch(`/api/admin/ai/scheduler/tasks?_t=${Date.now()}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await resp.json();
-      if (data.config) config = { ...config, ...data.config };
+      if (data.tasks) tasks = data.tasks;
+      if (data.serverTimeIst) serverTimeIst = data.serverTimeIst;
     } catch (err) {
-      console.warn('[AUTOPILOT_FETCH_ERROR]', err);
+      console.warn('[AUTOPILOT_TASKS_FETCH_ERROR]', err);
     }
 
-    const plans = config.allowedPlans || ['free', 'trial', 'core', 'plus', 'elite'];
+    this._scheduledTasks = tasks;
+
+    const totalTasks = tasks.length;
+    const activeTasks = tasks.filter(t => t.enabled && t.status !== 'paused').length;
+    const totalRunsCompleted = tasks.reduce((sum, t) => sum + (t.executionCount || 0), 0);
 
     container.innerHTML = `
-      <div class="max-w-4xl space-y-6">
-        <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-6">
-          <div class="flex items-center justify-between pb-4 border-b border-slate-200">
-            <div>
-              <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <i data-lucide="clock" class="w-4 h-4 text-rose-600"></i>
-                Autonomous Server-Side Auto-Pilot Scheduler
-              </h3>
-              <p class="text-xs text-slate-500 mt-0.5">
-                Automatically generate, mathematically verify, and host daily practice tests directly into the ExcellenceCA database.
-              </p>
-            </div>
-
-            <!-- Master Toggle -->
-            <label class="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" id="ai-auto-enabled" ${config.enabled ? 'checked' : ''} class="sr-only peer">
-              <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-rose-600"></div>
-            </label>
+      <div class="space-y-6">
+        <!-- Header & Action Bar -->
+        <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h3 class="text-base font-bold text-slate-900 flex items-center gap-2">
+              <i data-lucide="clock" class="w-5 h-5 text-rose-600"></i>
+              Autonomous Auto-Pilot &amp; Scheduled MCQs
+            </h3>
+            <p class="text-xs text-slate-500 mt-1">
+              Create independent recurring daily schedules or one-off tests. Runs 100% server-side in Indian Standard Time (IST).
+            </p>
           </div>
 
-          <!-- Server-Side Independence Notice -->
-          <div class="p-3.5 bg-blue-50 border border-blue-200 rounded-xl flex items-start gap-3">
-            <i data-lucide="info" class="w-4 h-4 text-blue-700 mt-0.5 flex-shrink-0"></i>
-            <div class="text-xs text-blue-900">
-              <span class="font-bold block">100% Server-Side Continuous Execution</span>
-              The Auto-Pilot scheduler runs as an autonomous background daemon in Python. When scheduled, it triggers independently whether any admin is logged in or not, with automatic failover across AI providers.
-            </div>
-          </div>
-
-          <div class="space-y-4">
-            <!-- Cascading Hierarchy -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1">Exam Level <span class="text-rose-600">*</span></label>
-                <select id="ai-auto-level" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
-                  <option value="CA Foundation" data-id="foundation" ${config.examLevel === 'CA Foundation' ? 'selected' : ''}>CA Foundation</option>
-                  <option value="CA Intermediate" data-id="intermediate" ${config.examLevel === 'CA Intermediate' ? 'selected' : ''}>CA Intermediate</option>
-                  <option value="CA Final" data-id="final" ${config.examLevel === 'CA Final' ? 'selected' : ''}>CA Final</option>
-                </select>
-              </div>
-
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1">Subject <span class="text-rose-600">*</span></label>
-                <select id="ai-auto-subject" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
-                </select>
-              </div>
-
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1">Chapter Association</label>
-                <select id="ai-auto-chapter" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
-                  <option value="" data-id="">-- Rotate / Entire Subject --</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1">Test Title Template</label>
-                <input type="text" id="ai-auto-title-template" value="${config.titleTemplate || '[Subject] Daily Challenge'}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" placeholder="e.g. [Subject] Ch. [Chapter] Daily Quiz" />
-                <span class="text-[10px] text-slate-400 mt-0.5 block">Supports placeholders: [Subject], [Chapter], [Date]</span>
-              </div>
-
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1">Curriculum Topic / Focus</label>
-                <input type="text" id="ai-auto-topic" value="${config.topic || 'Daily Comprehensive Practice'}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-              </div>
-            </div>
-
-            <!-- Parameters Grid -->
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1">Daily Run Time (IST)</label>
-                <input type="time" id="ai-auto-time" value="${config.dailyTime || '20:00'}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-              </div>
-
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1">MCQ Count</label>
-                <input type="number" id="ai-auto-count" min="1" max="25" value="${config.questionCount || 5}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-              </div>
-
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1">Duration (Min)</label>
-                <input type="number" id="ai-auto-duration" min="5" max="120" value="${config.durationMinutes || 15}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-              </div>
-
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1">Difficulty</label>
-                <select id="ai-auto-difficulty" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
-                  <option value="ICAI Exam Standard" ${config.difficulty === 'ICAI Exam Standard' ? 'selected' : ''}>ICAI Standard</option>
-                  <option value="Easy" ${config.difficulty === 'Easy' ? 'selected' : ''}>Easy</option>
-                  <option value="Medium" ${config.difficulty === 'Medium' ? 'selected' : ''}>Medium</option>
-                  <option value="Hard" ${config.difficulty === 'Hard' ? 'selected' : ''}>Hard</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1">Marks per Correct</label>
-                <input type="number" id="ai-auto-marks" step="0.5" value="${config.marksPerCorrect ?? 2.0}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-              </div>
-
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1">Negative Marks</label>
-                <input type="number" id="ai-auto-neg-marks" step="0.25" value="${config.negativeMarksPerWrong ?? 0.5}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-              </div>
-
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1">Platform XP (+)</label>
-                <input type="number" id="ai-auto-xp" min="0" step="5" value="${config.platformXp ?? 10}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-              </div>
-
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1">Max Attempts</label>
-                <input type="number" id="ai-auto-attempts" min="1" max="10" value="${config.maxAttempts ?? 3}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-              </div>
-            </div>
-
-            <!-- Canonical Eligible Student Plans -->
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1.5">Eligible Student Plans</label>
-              <div class="flex flex-wrap items-center gap-4 text-xs font-semibold text-slate-700">
-                <label class="flex items-center gap-1.5 cursor-pointer">
-                  <input type="checkbox" id="ai-auto-plan-free" ${plans.includes('free') ? 'checked' : ''} class="rounded text-rose-600 focus:ring-rose-500" /> Free
-                </label>
-                <label class="flex items-center gap-1.5 cursor-pointer">
-                  <input type="checkbox" id="ai-auto-plan-trial" ${plans.includes('trial') ? 'checked' : ''} class="rounded text-rose-600 focus:ring-rose-500" /> ₹9 Trial
-                </label>
-                <label class="flex items-center gap-1.5 cursor-pointer">
-                  <input type="checkbox" id="ai-auto-plan-core" ${plans.includes('core') ? 'checked' : ''} class="rounded text-rose-600 focus:ring-rose-500" /> Core Pass
-                </label>
-                <label class="flex items-center gap-1.5 cursor-pointer">
-                  <input type="checkbox" id="ai-auto-plan-plus" ${plans.includes('plus') ? 'checked' : ''} class="rounded text-rose-600 focus:ring-rose-500" /> Plus Pass
-                </label>
-                <label class="flex items-center gap-1.5 cursor-pointer">
-                  <input type="checkbox" id="ai-auto-plan-elite" ${plans.includes('elite') ? 'checked' : ''} class="rounded text-rose-600 focus:ring-rose-500" /> Elite Pass
-                </label>
-              </div>
-            </div>
-
-            <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
-              <div>
-                <span class="text-xs font-bold text-slate-900 block">Auto-Publish Automatically</span>
-                <span class="text-[11px] text-slate-500 block">Publish test directly to students without manual draft approval</span>
-              </div>
-              <input type="checkbox" id="ai-auto-publish" ${config.autoPublish ? 'checked' : ''} class="w-4 h-4 text-rose-600 rounded focus:ring-rose-500 cursor-pointer" />
-            </div>
-
-            <!-- Last Run & Status Telemetry -->
-            <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs text-slate-600">
-              <div>
-                <span class="font-bold text-slate-800 block">Execution Tracker</span>
-                <span>Last Completed Run: <b>${config.lastRunDate || 'No runs yet today'}</b></span>
-              </div>
-              <span class="px-2.5 py-1 rounded text-[11px] font-bold ${config.enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}">
-                ${config.enabled ? 'Scheduler Active' : 'Disabled'}
-              </span>
-            </div>
+          <div class="flex items-center gap-3">
+            <button 
+              id="btn-trigger-tick"
+              onclick="window.adminDashboard.triggerSchedulerTick()" 
+              class="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 shadow-sm"
+              title="Manually trigger server-side tick to check and process any due tasks right now"
+            >
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+              Check Due Schedules
+            </button>
 
             <button 
-              onclick="window.adminDashboard.saveAiAutopilotSettings()"
-              class="px-6 py-2.5 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-2"
+              onclick="window.adminDashboard.openCreateScheduleModal()" 
+              class="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 shadow-sm"
             >
-              <i data-lucide="save" class="w-4 h-4"></i>
-              Save Auto-Pilot Schedule
+              <i data-lucide="plus-circle" class="w-4 h-4"></i>
+              + Create Scheduled Task
             </button>
+          </div>
+        </div>
+
+        <!-- KPI Telemetry Cards -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Total Schedules</span>
+            <span class="text-2xl font-black text-slate-900 mt-1 block">${totalTasks}</span>
+            <span class="text-[11px] text-slate-500 font-semibold mt-1 block">Configured in Database</span>
+          </div>
+
+          <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Active Schedulers</span>
+            <span class="text-2xl font-black text-emerald-600 mt-1 block">${activeTasks}</span>
+            <span class="text-[11px] text-emerald-700 font-semibold mt-1 block">Live &amp; Armed</span>
+          </div>
+
+          <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Tests Hosted</span>
+            <span class="text-2xl font-black text-rose-700 mt-1 block">${totalRunsCompleted}</span>
+            <span class="text-[11px] text-rose-600 font-semibold mt-1 block">Auto-Published to Platform</span>
+          </div>
+
+          <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Server Clock (IST)</span>
+            <span class="text-base font-bold text-slate-800 mt-2 block truncate" title="${escapeHtml(serverTimeIst || 'Asia/Kolkata')}">
+              ${escapeHtml(serverTimeIst ? serverTimeIst.replace('T', ' ').substring(0, 19) + ' IST' : 'Asia/Kolkata (UTC+5:30)')}
+            </span>
+            <span class="text-[11px] text-blue-600 font-semibold mt-1 block">Timezone Synchronized</span>
+          </div>
+        </div>
+
+        <!-- Server-Side Autonomous Guarantee Notice -->
+        <div class="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl flex items-start gap-3">
+          <i data-lucide="shield-check" class="w-5 h-5 text-blue-700 mt-0.5 flex-shrink-0"></i>
+          <div class="text-xs text-blue-950 space-y-1">
+            <span class="font-bold block">Autonomous Multi-Schedule Execution &amp; Guaranteed Hosting</span>
+            <p class="text-blue-900 leading-relaxed">
+              Every schedule functions as an independent, isolated task. Tests are generated, mathematically verified, and published directly into the production database via continuous server-side runners, Vercel Cron, and AI multi-provider fallback. Schedulers run reliably even when no admin is logged in.
+            </p>
+          </div>
+        </div>
+
+        <!-- Task List or Empty State -->
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-600">
+              Configured Schedules (${tasks.length})
+            </h4>
+          </div>
+
+          ${tasks.length === 0 ? `
+            <div class="bg-white border border-dashed border-slate-300 rounded-2xl p-12 text-center space-y-4">
+              <div class="w-14 h-14 mx-auto rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                <i data-lucide="calendar-plus" class="w-7 h-7"></i>
+              </div>
+              <div class="max-w-md mx-auto space-y-1">
+                <h4 class="text-sm font-bold text-slate-900">No Scheduled MCQ Tasks Yet</h4>
+                <p class="text-xs text-slate-500">
+                  Set up independent recurring schedules (e.g. 09:00 AM Accounts, 02:00 PM Law) or a one-time event. The server will autonomously generate, verify, and host tests into the student platform.
+                </p>
+              </div>
+              <button 
+                onclick="window.adminDashboard.openCreateScheduleModal()" 
+                class="inline-flex items-center gap-2 px-5 py-2.5 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-lg shadow-sm transition-all"
+              >
+                <i data-lucide="plus" class="w-4 h-4"></i>
+                Create Your First Schedule
+              </button>
+            </div>
+          ` : `
+            <div class="grid grid-cols-1 gap-4">
+              ${tasks.map(task => `
+                <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4 hover:border-slate-300 transition-all" id="task-card-${escapeHtml(task.id)}">
+                  <!-- Top: Header & Status -->
+                  <div class="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-slate-100">
+                    <div>
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <h4 class="text-sm font-bold text-slate-900">${escapeHtml(task.name)}</h4>
+                        <span class="px-2 py-0.5 text-[11px] font-bold rounded bg-rose-50 text-rose-700 border border-rose-100">${escapeHtml(task.examLevel || 'CA Foundation')}</span>
+                        <span class="px-2 py-0.5 text-[11px] font-bold rounded ${task.scheduleType === 'recurring' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-purple-50 text-purple-700 border border-purple-100'}">
+                          ${task.scheduleType === 'recurring' ? `🔁 Daily at ${escapeHtml(task.dailyTime || '20:00')} IST` : `🎯 One-Time: ${formatIstDateTime(task.scheduledDateTime || task.nextRunAt)}`}
+                        </span>
+                      </div>
+                      <p class="text-xs text-slate-500 mt-1">
+                        Title Template: <code class="text-[11px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 font-mono">${escapeHtml(task.titleTemplate || '[Subject] Daily Conceptual Sprint')}</code>
+                      </p>
+                    </div>
+
+                    <!-- Status Badge -->
+                    <div class="flex items-center gap-2">
+                      ${task.status === 'processing' 
+                        ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 animate-pulse">
+                             <i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Generating &amp; Hosting...
+                           </span>`
+                        : task.enabled && task.status === 'scheduled'
+                        ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                             <span class="w-2 h-2 rounded-full bg-emerald-500"></span> Active Schedule
+                           </span>`
+                        : task.status === 'completed'
+                        ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                             <i data-lucide="check-circle" class="w-3.5 h-3.5"></i> Completed
+                           </span>`
+                        : task.status === 'failed'
+                        ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                             <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i> Failed
+                           </span>`
+                        : `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                             <i data-lucide="pause-circle" class="w-3.5 h-3.5"></i> Paused
+                           </span>`
+                      }
+                    </div>
+                  </div>
+
+                  <!-- Specs Grid -->
+                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50 p-3 rounded-lg border border-slate-100">
+                    <div>
+                      <span class="text-slate-400 font-medium block text-[10px] uppercase">Subject &amp; Chapter</span>
+                      <span class="font-bold text-slate-800 block truncate" title="${escapeHtml(task.subject)}">${escapeHtml(task.subject)}</span>
+                      <span class="text-slate-500 text-[11px] block truncate" title="${escapeHtml(task.chapter || 'All Chapters')}">${escapeHtml(task.chapter || 'All Chapters / Auto-Rotate')}</span>
+                    </div>
+                    <div>
+                      <span class="text-slate-400 font-medium block text-[10px] uppercase">Curriculum Topic</span>
+                      <span class="font-bold text-slate-800 block truncate" title="${escapeHtml(task.topic || 'Comprehensive Practice')}">${escapeHtml(task.topic || 'Comprehensive Practice')}</span>
+                      <span class="text-slate-500 text-[11px] block">${escapeHtml(task.difficulty || 'ICAI Standard')}</span>
+                    </div>
+                    <div>
+                      <span class="text-slate-400 font-medium block text-[10px] uppercase">Test Configuration</span>
+                      <span class="font-bold text-slate-800 block">${task.questionCount || 5} MCQs • ${task.durationMinutes || 15} Mins</span>
+                      <span class="text-slate-500 text-[11px] block">+${task.marksPerCorrect ?? 2}/-${task.negativeMarksPerWrong ?? 0.5} Marks • ${task.platformXp ?? 10} XP</span>
+                    </div>
+                    <div>
+                      <span class="text-slate-400 font-medium block text-[10px] uppercase">Next Scheduled Run</span>
+                      <span class="font-bold text-slate-800 block">${formatIstDateTime(task.nextRunAt)}</span>
+                      <span class="text-rose-600 text-[11px] font-semibold block">${task.enabled ? getCountdownText(task.nextRunAt) : 'Schedule Paused'}</span>
+                    </div>
+                  </div>
+
+                  <!-- Telemetry / Last Run State -->
+                  <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 bg-white px-1">
+                    <div class="flex items-center gap-4 flex-wrap">
+                      <span>Runs Completed: <b class="text-slate-800">${task.executionCount || 0}</b></span>
+                      ${task.lastRunAt ? `<span>Last Run: <b class="text-slate-700">${formatIstDateTime(task.lastRunAt)}</b></span>` : ''}
+                      ${task.lastTestTitle ? `<span>Last Hosted: <b class="text-emerald-700">${escapeHtml(task.lastTestTitle)}</b> <span class="text-slate-400 text-[10px]">(${escapeHtml(task.lastTestId || '')})</span></span>` : ''}
+                      ${task.lastError ? `<span class="text-rose-600 font-semibold truncate max-w-xs" title="${escapeHtml(task.lastError)}">Error: ${escapeHtml(task.lastError)}</span>` : ''}
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                      ${(task.allowedPlans || ['free', 'trial', 'core', 'plus', 'elite']).map(p => `<span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">${escapeHtml(p)}</span>`).join('')}
+                      <span class="text-[10px] font-bold px-1.5 py-0.5 rounded ${task.autoPublish ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}">
+                        ${task.autoPublish ? 'Auto-Published' : 'Draft'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- Action Bar -->
+                  <div class="flex items-center justify-between pt-3 border-t border-slate-100 gap-2">
+                    <div class="flex items-center gap-2">
+                      <!-- Run Now Button -->
+                      <button 
+                        id="btn-run-task-${escapeHtml(task.id)}"
+                        onclick="window.adminDashboard.runScheduledTaskNow('${escapeHtml(task.id)}')"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition-colors shadow-sm"
+                        title="Immediately generate MCQs, mathematically verify, and host test directly to database right now"
+                      >
+                        <i data-lucide="zap" class="w-3.5 h-3.5"></i>
+                        <span>Run &amp; Host Now</span>
+                      </button>
+
+                      <!-- Pause / Resume Button -->
+                      <button 
+                        onclick="window.adminDashboard.toggleScheduledTask('${escapeHtml(task.id)}', ${!task.enabled})"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg ${task.enabled ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'} transition-colors"
+                      >
+                        <i data-lucide="${task.enabled ? 'pause' : 'play'}" class="w-3.5 h-3.5"></i>
+                        <span>${task.enabled ? 'Pause' : 'Resume'}</span>
+                      </button>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                      <!-- Edit Button -->
+                      <button 
+                        onclick="window.adminDashboard.openEditScheduleModal('${escapeHtml(task.id)}')"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+                      >
+                        <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
+                        <span>Edit</span>
+                      </button>
+
+                      <!-- Delete Button -->
+                      <button 
+                        onclick="window.adminDashboard.deleteScheduledTask('${escapeHtml(task.id)}')"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg text-rose-600 hover:text-rose-700 hover:bg-rose-50 transition-colors"
+                      >
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                        <span>Delete</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          `}
+        </div>
+
+        <!-- Modal: Create / Edit Scheduled Task -->
+        <div id="ai-schedule-modal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 hidden overflow-y-auto">
+          <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200">
+            <div class="flex items-center justify-between p-5 border-b border-slate-200 sticky top-0 bg-white z-10">
+              <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
+                  <i data-lucide="calendar" class="w-4 h-4"></i>
+                </div>
+                <div>
+                  <h3 id="ai-sched-modal-title" class="text-sm font-bold text-slate-900">Create Scheduled MCQ Task</h3>
+                  <p class="text-xs text-slate-500">Autonomous server-side MCQ test generation and hosting</p>
+                </div>
+              </div>
+              <button onclick="window.adminDashboard.closeScheduleModal()" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100">
+                <i data-lucide="x" class="w-5 h-5"></i>
+              </button>
+            </div>
+
+            <form onsubmit="event.preventDefault(); window.adminDashboard.saveScheduledTask();" class="p-6 space-y-4">
+              <input type="hidden" id="ai-sched-id" value="" />
+
+              <!-- Task Name -->
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Task Name <span class="text-rose-600">*</span></label>
+                <input type="text" id="ai-sched-name" required placeholder="e.g. CA Foundation Morning Accounts Sprint" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+              </div>
+
+              <!-- Schedule Cadence & Time Selection -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1.5">Schedule Cadence <span class="text-rose-600">*</span></label>
+                  <div class="flex items-center gap-4 text-xs">
+                    <label class="flex items-center gap-1.5 cursor-pointer font-semibold text-slate-700">
+                      <input type="radio" name="ai-sched-type-radio" value="recurring" checked onchange="window.adminDashboard.handleScheduleTypeChange('recurring')" class="text-rose-600 focus:ring-rose-500" />
+                      Daily Recurring
+                    </label>
+                    <label class="flex items-center gap-1.5 cursor-pointer font-semibold text-slate-700">
+                      <input type="radio" name="ai-sched-type-radio" value="one_time" onchange="window.adminDashboard.handleScheduleTypeChange('one_time')" class="text-rose-600 focus:ring-rose-500" />
+                      One-Time Event
+                    </label>
+                  </div>
+                </div>
+
+                <!-- Recurring Daily Time (IST) -->
+                <div id="ai-sched-daily-time-container">
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Daily Time (IST) <span class="text-rose-600">*</span></label>
+                  <input type="time" id="ai-sched-daily-time" value="09:00" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+                  <span class="text-[10px] text-slate-400 mt-0.5 block">Indian Standard Time (UTC+05:30)</span>
+                </div>
+
+                <!-- One-Time Date & Time (IST) -->
+                <div id="ai-sched-datetime-container" class="hidden">
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Scheduled Date &amp; Time (IST) <span class="text-rose-600">*</span></label>
+                  <input type="datetime-local" id="ai-sched-datetime" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+                  <span class="text-[10px] text-slate-400 mt-0.5 block">Executes once at scheduled IST timestamp</span>
+                </div>
+              </div>
+
+              <!-- Cascading Syllabus -->
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Exam Level <span class="text-rose-600">*</span></label>
+                  <select id="ai-sched-level" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                    <option value="CA Foundation" data-id="foundation" selected>CA Foundation</option>
+                    <option value="CA Intermediate" data-id="intermediate">CA Intermediate</option>
+                    <option value="CA Final" data-id="final">CA Final</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Subject <span class="text-rose-600">*</span></label>
+                  <select id="ai-sched-subject" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                  </select>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Chapter Focus</label>
+                  <select id="ai-sched-chapter" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                    <option value="" data-id="">-- Auto-Rotate / All Chapters --</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Test Title Template <span class="text-rose-600">*</span></label>
+                  <input type="text" id="ai-sched-title-template" value="[Subject] Daily Conceptual Sprint" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+                  <span class="text-[10px] text-slate-400 mt-0.5 block">Placeholders: [Subject], [Chapter], [Date]</span>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Topic / Syllabus Coverage</label>
+                  <input type="text" id="ai-sched-topic" value="Daily Comprehensive Exam Practice" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+                </div>
+              </div>
+
+              <!-- Test Parameters -->
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">MCQ Count</label>
+                  <input type="number" id="ai-sched-count" min="1" max="25" value="5" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Duration (Min)</label>
+                  <input type="number" id="ai-sched-duration" min="5" max="180" value="15" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Difficulty</label>
+                  <select id="ai-sched-difficulty" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                    <option value="ICAI Exam Standard" selected>ICAI Standard</option>
+                    <option value="Easy">Easy</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Hard">Hard</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Marks per Correct</label>
+                  <input type="number" id="ai-sched-marks" step="0.5" value="2.0" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-3 gap-3">
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Negative Marks</label>
+                  <input type="number" id="ai-sched-neg-marks" step="0.25" value="0.5" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Platform XP (+)</label>
+                  <input type="number" id="ai-sched-xp" min="0" step="5" value="10" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Max Attempts</label>
+                  <input type="number" id="ai-sched-attempts" min="1" max="10" value="3" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+                </div>
+              </div>
+
+              <!-- Eligible Student Plans -->
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5">Eligible Student Plans</label>
+                <div class="flex flex-wrap items-center gap-4 text-xs font-semibold text-slate-700">
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" id="ai-sched-plan-free" checked class="rounded text-rose-600 focus:ring-rose-500" /> Free
+                  </label>
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" id="ai-sched-plan-trial" checked class="rounded text-rose-600 focus:ring-rose-500" /> ₹9 Trial
+                  </label>
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" id="ai-sched-plan-core" checked class="rounded text-rose-600 focus:ring-rose-500" /> Core Pass
+                  </label>
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" id="ai-sched-plan-plus" checked class="rounded text-rose-600 focus:ring-rose-500" /> Plus Pass
+                  </label>
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" id="ai-sched-plan-elite" checked class="rounded text-rose-600 focus:ring-rose-500" /> Elite Pass
+                  </label>
+                </div>
+              </div>
+
+              <!-- Auto-Publish Toggle -->
+              <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                <div>
+                  <span class="text-xs font-bold text-slate-900 block">Auto-Publish Directly to Students</span>
+                  <span class="text-[11px] text-slate-500 block">Immediately make test live upon generation without draft review</span>
+                </div>
+                <input type="checkbox" id="ai-sched-autopublish" checked class="w-4 h-4 text-rose-600 rounded focus:ring-rose-500 cursor-pointer" />
+              </div>
+
+              <!-- Modal Actions -->
+              <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+                <button type="button" onclick="window.adminDashboard.closeScheduleModal()" class="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors">
+                  Cancel
+                </button>
+                <button type="submit" id="btn-save-schedule" class="px-5 py-2 text-xs font-bold bg-rose-700 hover:bg-rose-800 text-white rounded-lg shadow-sm transition-all flex items-center gap-2">
+                  <i data-lucide="save" class="w-4 h-4"></i>
+                  <span>Save Scheduled Task</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       </div>
     `;
 
-    this.setupCascadingSyllabus('ai-auto-level', 'ai-auto-subject', 'ai-auto-chapter', config.examLevelId || config.examLevel, config.subjectId || config.subject, config.chapterId || config.chapter);
     if (window.lucide) window.lucide.createIcons();
   }
 
-  async saveAiAutopilotSettings() {
-    const enabled = document.getElementById('ai-auto-enabled')?.checked ?? false;
-    const dailyTime = document.getElementById('ai-auto-time')?.value || '20:00';
-    const titleTemplate = document.getElementById('ai-auto-title-template')?.value.trim() || '[Subject] Daily Conceptual Challenge';
+  handleScheduleTypeChange(type) {
+    const dailyContainer = document.getElementById('ai-sched-daily-time-container');
+    const datetimeContainer = document.getElementById('ai-sched-datetime-container');
+    if (type === 'recurring') {
+      if (dailyContainer) dailyContainer.classList.remove('hidden');
+      if (datetimeContainer) datetimeContainer.classList.add('hidden');
+    } else {
+      if (dailyContainer) dailyContainer.classList.add('hidden');
+      if (datetimeContainer) datetimeContainer.classList.remove('hidden');
+    }
+  }
 
-    const levelSelect = document.getElementById('ai-auto-level');
+  openCreateScheduleModal() {
+    const modal = document.getElementById('ai-schedule-modal');
+    if (!modal) return;
+
+    document.getElementById('ai-sched-id').value = '';
+    document.getElementById('ai-sched-modal-title').innerText = 'Create Scheduled MCQ Task';
+    document.getElementById('ai-sched-name').value = '';
+    document.getElementById('ai-sched-daily-time').value = '09:00';
+    document.getElementById('ai-sched-datetime').value = '';
+    document.getElementById('ai-sched-title-template').value = '[Subject] Daily Conceptual Sprint';
+    document.getElementById('ai-sched-topic').value = 'Daily Comprehensive Exam Practice';
+    document.getElementById('ai-sched-count').value = '5';
+    document.getElementById('ai-sched-duration').value = '15';
+    document.getElementById('ai-sched-difficulty').value = 'ICAI Exam Standard';
+    document.getElementById('ai-sched-marks').value = '2.0';
+    document.getElementById('ai-sched-neg-marks').value = '0.5';
+    document.getElementById('ai-sched-xp').value = '10';
+    document.getElementById('ai-sched-attempts').value = '3';
+    document.getElementById('ai-sched-plan-free').checked = true;
+    document.getElementById('ai-sched-plan-trial').checked = true;
+    document.getElementById('ai-sched-plan-core').checked = true;
+    document.getElementById('ai-sched-plan-plus').checked = true;
+    document.getElementById('ai-sched-plan-elite').checked = true;
+    document.getElementById('ai-sched-autopublish').checked = true;
+
+    const recurringRadio = document.querySelector('input[name="ai-sched-type-radio"][value="recurring"]');
+    if (recurringRadio) recurringRadio.checked = true;
+    this.handleScheduleTypeChange('recurring');
+
+    this.setupCascadingSyllabus('ai-sched-level', 'ai-sched-subject', 'ai-sched-chapter', 'foundation', 'sub-1', '');
+
+    modal.classList.remove('hidden');
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  openEditScheduleModal(taskId) {
+    const task = (this._scheduledTasks || []).find(t => t.id === taskId);
+    if (!task) {
+      window.app.showToast('Schedule task not found', 'error');
+      return;
+    }
+
+    const modal = document.getElementById('ai-schedule-modal');
+    if (!modal) return;
+
+    document.getElementById('ai-sched-id').value = task.id;
+    document.getElementById('ai-sched-modal-title').innerText = `Edit Schedule: ${task.name || 'Task'}`;
+    document.getElementById('ai-sched-name').value = task.name || '';
+    document.getElementById('ai-sched-daily-time').value = task.dailyTime || '09:00';
+    document.getElementById('ai-sched-datetime').value = task.scheduledDateTime || '';
+    document.getElementById('ai-sched-title-template').value = task.titleTemplate || '[Subject] Daily Conceptual Sprint';
+    document.getElementById('ai-sched-topic').value = task.topic || 'Daily Comprehensive Exam Practice';
+    document.getElementById('ai-sched-count').value = task.questionCount || 5;
+    document.getElementById('ai-sched-duration').value = task.durationMinutes || 15;
+    document.getElementById('ai-sched-difficulty').value = task.difficulty || 'ICAI Exam Standard';
+    document.getElementById('ai-sched-marks').value = task.marksPerCorrect ?? 2.0;
+    document.getElementById('ai-sched-neg-marks').value = task.negativeMarksPerWrong ?? 0.5;
+    document.getElementById('ai-sched-xp').value = task.platformXp ?? 10;
+    document.getElementById('ai-sched-attempts').value = task.maxAttempts ?? 3;
+
+    const plans = task.allowedPlans || ['free', 'trial', 'core', 'plus', 'elite'];
+    document.getElementById('ai-sched-plan-free').checked = plans.includes('free');
+    document.getElementById('ai-sched-plan-trial').checked = plans.includes('trial');
+    document.getElementById('ai-sched-plan-core').checked = plans.includes('core');
+    document.getElementById('ai-sched-plan-plus').checked = plans.includes('plus');
+    document.getElementById('ai-sched-plan-elite').checked = plans.includes('elite');
+    document.getElementById('ai-sched-autopublish').checked = task.autoPublish !== false;
+
+    const isOneTime = task.scheduleType === 'one_time';
+    const radio = document.querySelector(`input[name="ai-sched-type-radio"][value="${isOneTime ? 'one_time' : 'recurring'}"]`);
+    if (radio) radio.checked = true;
+    this.handleScheduleTypeChange(isOneTime ? 'one_time' : 'recurring');
+
+    this.setupCascadingSyllabus(
+      'ai-sched-level',
+      'ai-sched-subject',
+      'ai-sched-chapter',
+      task.examLevelId || task.examLevel || 'foundation',
+      task.subjectId || task.subject || 'sub-1',
+      task.chapterId || task.chapter || ''
+    );
+
+    modal.classList.remove('hidden');
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  closeScheduleModal() {
+    const modal = document.getElementById('ai-schedule-modal');
+    if (modal) modal.classList.add('hidden');
+  }
+
+  async saveScheduledTask() {
+    const id = document.getElementById('ai-sched-id')?.value.trim();
+    const name = document.getElementById('ai-sched-name')?.value.trim();
+    if (!name) {
+      window.app.showToast('Please enter a task name.', 'error');
+      return;
+    }
+
+    const scheduleTypeRadio = document.querySelector('input[name="ai-sched-type-radio"]:checked');
+    const scheduleType = scheduleTypeRadio ? scheduleTypeRadio.value : 'recurring';
+    const dailyTime = document.getElementById('ai-sched-daily-time')?.value || '09:00';
+    const scheduledDateTime = document.getElementById('ai-sched-datetime')?.value || null;
+
+    const levelSelect = document.getElementById('ai-sched-level');
     const examLevel = levelSelect?.value || 'CA Foundation';
     const examLevelId = levelSelect?.selectedOptions[0]?.dataset.id || 'foundation';
 
-    const subjectSelect = document.getElementById('ai-auto-subject');
+    const subjectSelect = document.getElementById('ai-sched-subject');
     const subject = subjectSelect?.value || 'Accounting';
     const subjectId = subjectSelect?.selectedOptions[0]?.dataset.id || 'sub-1';
 
-    const chapterSelect = document.getElementById('ai-auto-chapter');
+    const chapterSelect = document.getElementById('ai-sched-chapter');
     const chapter = chapterSelect?.value || '';
     const chapterId = chapterSelect?.selectedOptions[0]?.dataset.id || '';
 
-    const topic = document.getElementById('ai-auto-topic')?.value.trim() || 'Comprehensive Practice';
-    const difficulty = document.getElementById('ai-auto-difficulty')?.value || 'ICAI Exam Standard';
-    const questionCount = parseInt(document.getElementById('ai-auto-count')?.value || '5', 10);
-    const durationMinutes = parseInt(document.getElementById('ai-auto-duration')?.value || '15', 10);
-    const marksPerCorrect = parseFloat(document.getElementById('ai-auto-marks')?.value || '2.0');
-    const negativeMarksPerWrong = parseFloat(document.getElementById('ai-auto-neg-marks')?.value || '0.5');
-    const platformXp = parseFloat(document.getElementById('ai-auto-xp')?.value || '10');
-    const maxAttempts = parseInt(document.getElementById('ai-auto-attempts')?.value || '3', 10);
-    const autoPublish = document.getElementById('ai-auto-publish')?.checked ?? true;
+    const titleTemplate = document.getElementById('ai-sched-title-template')?.value.trim() || '[Subject] Daily Conceptual Sprint';
+    const topic = document.getElementById('ai-sched-topic')?.value.trim() || 'Daily Comprehensive Exam Practice';
+    const difficulty = document.getElementById('ai-sched-difficulty')?.value || 'ICAI Exam Standard';
+    const questionCount = parseInt(document.getElementById('ai-sched-count')?.value || '5', 10);
+    const durationMinutes = parseInt(document.getElementById('ai-sched-duration')?.value || '15', 10);
+    const marksPerCorrect = parseFloat(document.getElementById('ai-sched-marks')?.value || '2.0');
+    const negativeMarksPerWrong = parseFloat(document.getElementById('ai-sched-neg-marks')?.value || '0.5');
+    const platformXp = parseFloat(document.getElementById('ai-sched-xp')?.value || '10');
+    const maxAttempts = parseInt(document.getElementById('ai-sched-attempts')?.value || '3', 10);
+    const autoPublish = document.getElementById('ai-sched-autopublish')?.checked ?? true;
 
     const plans = [];
-    if (document.getElementById('ai-auto-plan-free')?.checked) plans.push('free');
-    if (document.getElementById('ai-auto-plan-trial')?.checked) plans.push('trial');
-    if (document.getElementById('ai-auto-plan-core')?.checked) plans.push('core');
-    if (document.getElementById('ai-auto-plan-plus')?.checked) plans.push('plus');
-    if (document.getElementById('ai-auto-plan-elite')?.checked) plans.push('elite');
+    if (document.getElementById('ai-sched-plan-free')?.checked) plans.push('free');
+    if (document.getElementById('ai-sched-plan-trial')?.checked) plans.push('trial');
+    if (document.getElementById('ai-sched-plan-core')?.checked) plans.push('core');
+    if (document.getElementById('ai-sched-plan-plus')?.checked) plans.push('plus');
+    if (document.getElementById('ai-sched-plan-elite')?.checked) plans.push('elite');
+
+    const payload = {
+      id: id || undefined,
+      name,
+      scheduleType,
+      dailyTime,
+      scheduledDateTime,
+      examLevel,
+      examLevelId,
+      subject,
+      subjectId,
+      chapter,
+      chapterId,
+      titleTemplate,
+      topic,
+      difficulty,
+      questionCount,
+      durationMinutes,
+      marksPerCorrect,
+      negativeMarksPerWrong,
+      platformXp,
+      maxAttempts,
+      allowedPlans: plans,
+      autoPublish,
+      enabled: true
+    };
+
+    const btn = document.getElementById('btn-save-schedule');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Saving...`;
+      if (window.lucide) window.lucide.createIcons();
+    }
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
     const token = currentUser ? (currentUser.token || currentUser.email) : '';
 
     try {
-      const resp = await fetch('/api/admin/ai/autopilot', {
+      const resp = await fetch('/api/admin/ai/scheduler/tasks', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          enabled: enabled,
-          dailyTime: dailyTime,
-          titleTemplate: titleTemplate,
-          subject: subject,
-          subjectId: subjectId,
-          chapter: chapter,
-          chapterId: chapterId,
-          topic: topic,
-          examLevel: examLevel,
-          examLevelId: examLevelId,
-          difficulty: difficulty,
-          questionCount: questionCount,
-          durationMinutes: durationMinutes,
-          marksPerCorrect: marksPerCorrect,
-          negativeMarksPerWrong: negativeMarksPerWrong,
-          platformXp: platformXp,
-          maxAttempts: maxAttempts,
-          allowedPlans: plans,
-          autoPublish: autoPublish
-        })
+        body: JSON.stringify(payload)
       });
 
       const res = await resp.json();
       if (!resp.ok || !res.success) {
-        throw new Error(res.error || 'Failed to save');
+        throw new Error(res.error || 'Failed to save scheduled task');
       }
 
-      window.app.showToast('Auto-Pilot schedule configuration updated successfully!', 'success');
-      this.renderAiAutopilotSubTab(document.getElementById('ai-subtab-container'));
+      window.app.showToast('Scheduled task saved successfully!', 'success');
+      this.closeScheduleModal();
+      await this.renderAiAutopilotSubTab(document.getElementById('ai-subtab-container'));
     } catch (err) {
-      window.app.showToast(`Failed saving autopilot: ${err.message}`, 'error');
+      window.app.showToast(`Save failed: ${err.message}`, 'error');
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="save" class="w-4 h-4"></i> Save Scheduled Task`;
+        if (window.lucide) window.lucide.createIcons();
+      }
     }
+  }
+
+  async deleteScheduledTask(taskId) {
+    if (!confirm('Are you sure you want to delete this scheduled task? This schedule will be removed permanently.')) return;
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    try {
+      const resp = await fetch('/api/admin/ai/scheduler/tasks/delete', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ taskId })
+      });
+
+      const res = await resp.json();
+      if (!resp.ok || !res.success) {
+        throw new Error(res.error || 'Failed to delete task');
+      }
+
+      window.app.showToast('Scheduled task removed successfully.', 'info');
+      await this.renderAiAutopilotSubTab(document.getElementById('ai-subtab-container'));
+    } catch (err) {
+      window.app.showToast(`Delete failed: ${err.message}`, 'error');
+    }
+  }
+
+  async toggleScheduledTask(taskId, enabled) {
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    try {
+      const resp = await fetch('/api/admin/ai/scheduler/tasks/toggle', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ taskId, enabled })
+      });
+
+      const res = await resp.json();
+      if (!resp.ok || !res.success) {
+        throw new Error(res.error || 'Failed to toggle task');
+      }
+
+      window.app.showToast(`Scheduled task ${enabled ? 'resumed' : 'paused'}.`, 'info');
+      await this.renderAiAutopilotSubTab(document.getElementById('ai-subtab-container'));
+    } catch (err) {
+      window.app.showToast(`Toggle failed: ${err.message}`, 'error');
+    }
+  }
+
+  async runScheduledTaskNow(taskId) {
+    const btn = document.getElementById(`btn-run-task-${taskId}`);
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Hosting...`;
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    try {
+      const resp = await fetch('/api/admin/ai/scheduler/tasks/run-now', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ taskId })
+      });
+
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'Failed to execute scheduled task');
+      }
+
+      window.app.showToast(`Success! Test "${data.testTitle || data.testId}" generated and hosted into ExcellenceCA database (${data.questionCount || 0} MCQs).`, 'success');
+      await this.renderAiAutopilotSubTab(document.getElementById('ai-subtab-container'));
+    } catch (err) {
+      window.app.showToast(`Execution failed: ${err.message}`, 'error');
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="zap" class="w-3.5 h-3.5"></i> Run &amp; Host Now`;
+        if (window.lucide) window.lucide.createIcons();
+      }
+    }
+  }
+
+  async triggerSchedulerTick() {
+    const btn = document.getElementById('btn-trigger-tick');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Checking Due...`;
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    try {
+      const resp = await fetch('/api/admin/ai/scheduler/tick', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const res = await resp.json();
+      if (!resp.ok || !res.success) {
+        throw new Error(res.error || 'Failed to trigger tick');
+      }
+
+      const count = res.executedCount || 0;
+      if (count > 0) {
+        window.app.showToast(`Executed and hosted ${count} due test(s) successfully!`, 'success');
+      } else {
+        window.app.showToast('Scheduler check complete: No tasks were currently due.', 'info');
+      }
+
+      await this.renderAiAutopilotSubTab(document.getElementById('ai-subtab-container'));
+    } catch (err) {
+      window.app.showToast(`Tick failed: ${err.message}`, 'error');
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="refresh-cw" class="w-4 h-4"></i> Check Due Schedules`;
+        if (window.lucide) window.lucide.createIcons();
+      }
+    }
+  }
+
+  async saveAiAutopilotSettings() {
+    return this.saveScheduledTask();
   }
 
   // --- SUB-TAB 4: AI GENERATION LOGS & TELEMETRY ---

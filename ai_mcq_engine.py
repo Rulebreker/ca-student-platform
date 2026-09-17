@@ -16,7 +16,8 @@ def _tokenize_for_similarity(text: str, subject_topic: Optional[str] = None) -> 
         'the', 'and', 'for', 'that', 'with', 'from', 'this', 'which', 'what',
         'when', 'where', 'under', 'following', 'statement', 'correct', 'incorrect',
         'true', 'false', 'respect', 'regard', 'case', 'given', 'below', 'does',
-        'about', 'each', 'both', 'between', 'would', 'could', 'should'
+        'about', 'each', 'both', 'between', 'would', 'could', 'should',
+        'concept', 'concepts', 'principle', 'principles', 'according', 'state', 'states'
     }
     if subject_topic:
         st_words = set(re.findall(r'\b[a-zA-Z0-9]{3,}\b', subject_topic.lower()))
@@ -37,7 +38,7 @@ def is_duplicate_question(
     candidate_text: str,
     existing_questions: List[Dict[str, Any]],
     current_batch_questions: List[Dict[str, Any]],
-    threshold: float = 0.50,
+    threshold: float = 0.75,
     subject_topic: Optional[str] = None
 ) -> Tuple[bool, Optional[str]]:
     """
@@ -369,7 +370,7 @@ def generate_exact_mcqs_pipeline(
             candidate_text=q_candidate['text'],
             existing_questions=existing_questions,
             current_batch_questions=generated_questions,
-            threshold=0.50,
+            threshold=0.75,
             subject_topic=f"{subject} {topic}"
         )
         if is_dup:

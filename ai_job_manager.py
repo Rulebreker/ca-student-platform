@@ -100,6 +100,78 @@ def create_generation_job(
 
     return True, None, job_record
 
+def run_generation_job_synchronous(
+    params: Dict[str, Any],
+    data: Dict[str, Any],
+    save_callback: Any,
+    firebase_sync_callback: Any
+) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Validate parameters and execute an MCQ generation and hosting job synchronously.
+    Guarantees completion and database persistence before returning.
+    """
+    title = str(params.get('title', '')).strip()
+    subject = str(params.get('subject', '')).strip()
+    topic = str(params.get('topic', '')).strip()
+    count = int(params.get('count', 5))
+    
+    if not title or not subject or not topic:
+        return False, "Title, Subject, and Topic are mandatory.", None
+    if count < 1 or count > 50:
+        return False, "Question count must be between 1 and 50.", None
+
+    now_ts = time.time()
+    job_id = f"job-ai-sync-{int(now_ts * 1000)}-{uuid.uuid4().hex[:6]}"
+    chapter = params.get('chapter', '') or params.get('chapterName', '')
+    chapter_id = params.get('chapterId', '')
+    exam_level_id = params.get('examLevelId', 'foundation')
+    platform_xp = float(params.get('platformXp', 10))
+    allowed_plans = params.get('allowedPlans', ['free', 'trial', 'core', 'plus', 'elite'])
+
+    job_record = {
+        'id': job_id,
+        'title': title,
+        'subject': subject,
+        'subjectId': params.get('subjectId', 'sub-1'),
+        'chapter': chapter,
+        'chapterId': chapter_id,
+        'topic': topic,
+        'examLevel': params.get('examLevel', 'CA Foundation'),
+        'examLevelId': exam_level_id,
+        'difficulty': params.get('difficulty', 'ICAI Exam Standard'),
+        'durationMinutes': int(params.get('durationMinutes', 15)),
+        'count': count,
+        'marksPerCorrect': float(params.get('marksPerCorrect', 2.0)),
+        'negativeMarksPerWrong': float(params.get('negativeMarksPerWrong', 0.5)),
+        'platformXp': platform_xp,
+        'maxAttempts': int(params.get('maxAttempts', 3)),
+        'allowedPlans': allowed_plans,
+        'autoPublish': bool(params.get('autoPublish', True)),
+        'status': 'QUEUED',
+        'progressPct': 5,
+        'currentStage': 'Initializing Generation Pipeline (Synchronous)...',
+        'currentQuestionIndex': 0,
+        'totalQuestions': count,
+        'generatedQuestions': [],
+        'createdTs': now_ts,
+        'createdAt': datetime.now(timezone.utc).isoformat(),
+        'error': None,
+        'result': None
+    }
+    with _jobs_lock:
+        _active_jobs[job_id] = job_record
+
+    # Run directly on current thread
+    _run_generation_job_worker(job_id, params, data, save_callback, firebase_sync_callback)
+
+    with _jobs_lock:
+        final_job = _active_jobs.get(job_id, {})
+        if final_job.get('status') == 'COMPLETED':
+            return True, None, final_job.get('result')
+        else:
+            err = final_job.get('error') or "Generation job failed to complete."
+            return False, err, None
+
 def _run_generation_job_worker(
     job_id: str,
     params: Dict[str, Any],
