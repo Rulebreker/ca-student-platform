@@ -3379,6 +3379,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 
                 data = load_backend_data(refresh_collections=['ai_scheduled_tasks'])
                 ok = ai_scheduler.delete_scheduled_task(task_id, data)
+                if not ok:
+                    sync_collections_from_firebase(data, collections=['ai_scheduled_tasks'], min_interval=0.0)
+                    ok = ai_scheduler.delete_scheduled_task(task_id, data)
                 if ok:
                     save_backend_data(data)
                     sync_to_firebase(f"ai_scheduled_tasks/{task_id}", None, method='DELETE', sync=True)
@@ -3409,6 +3412,10 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 
                 data = load_backend_data(refresh_collections=['ai_scheduled_tasks'])
                 task = ai_scheduler.toggle_scheduled_task(task_id, enabled, data)
+                if not task:
+                    sync_collections_from_firebase(data, collections=['ai_scheduled_tasks'], min_interval=0.0)
+                    task = ai_scheduler.toggle_scheduled_task(task_id, enabled, data)
+
                 if task:
                     save_backend_data(data)
                     sync_to_firebase(f"ai_scheduled_tasks/{task_id}", task, method='PUT', sync=True)
@@ -3438,6 +3445,10 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests', 'questions', 'ai_generation_logs'])
                 task = ai_scheduler.get_scheduled_task_by_id(task_id, data)
+                if not task:
+                    sync_collections_from_firebase(data, collections=['ai_scheduled_tasks'], min_interval=0.0)
+                    task = ai_scheduler.get_scheduled_task_by_id(task_id, data)
+
                 if not task:
                     self.send_json(404, {'error': f"Task '{task_id}' not found.", 'code': 404})
                     return

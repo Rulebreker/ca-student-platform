@@ -135,10 +135,14 @@ def calculate_next_run(task: Dict[str, Any], from_time_utc: Optional[datetime] =
 
 def get_scheduled_tasks(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Retrieve all scheduled tasks from the data store, ensuring list format."""
-    if 'ai_scheduled_tasks' not in data or not isinstance(data.get('ai_scheduled_tasks'), list):
+    raw = data.get('ai_scheduled_tasks')
+    if isinstance(raw, dict):
+        data['ai_scheduled_tasks'] = list(raw.values())
+    elif not isinstance(raw, list):
         data['ai_scheduled_tasks'] = []
     
-    tasks = data['ai_scheduled_tasks']
+    tasks = [t for t in data['ai_scheduled_tasks'] if isinstance(t, dict) and t.get('id')]
+    data['ai_scheduled_tasks'] = tasks
     # Sort: scheduled/processing first, then by nextRunAt or createdAt
     def _sort_key(t):
         st = t.get('status', 'scheduled')
