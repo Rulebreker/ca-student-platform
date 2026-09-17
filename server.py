@@ -4,6 +4,7 @@ import ai_document_indexer
 import ai_mcq_engine
 import ai_job_manager
 import ai_scheduler
+import syllabus_hierarchy
 import http.server
 import socketserver
 import os
@@ -1224,6 +1225,17 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
                         data['ai_autopilot_config'] = cloud_data
                         _collection_last_synced[key] = now
                         updated = True
+                elif key == 'subjects':
+                    if isinstance(cloud_data, (dict, list)):
+                        items = list(cloud_data.values()) if isinstance(cloud_data, dict) else cloud_data
+                        if items:
+                            s_map = {s.get('id'): s for s in data.get('subjects', []) if isinstance(s, dict) and s.get('id')}
+                            for s in items:
+                                if isinstance(s, dict) and s.get('id'):
+                                    s_map[s['id']] = s
+                            data['subjects'] = list(s_map.values())
+                            _collection_last_synced[key] = now
+                            updated = True
         except Exception:
             pass
 
@@ -1252,7 +1264,7 @@ def load_backend_data(refresh_collections=None):
                         cur_data = json.load(f)
                     
                     import urllib.request
-                    keys_to_fetch = ['revoked_users', 'revoked_tokens', 'users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'papers', 'assignments', 'ai_source_documents', 'ai_generation_logs', 'ai_providers', 'ai_autopilot_config']
+                    keys_to_fetch = ['revoked_users', 'revoked_tokens', 'users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'papers', 'assignments', 'ai_source_documents', 'ai_generation_logs', 'ai_providers', 'ai_autopilot_config', 'subjects']
                     
                     for key in keys_to_fetch:
                         try:
@@ -1405,6 +1417,10 @@ def load_backend_data(refresh_collections=None):
                                 elif key == 'ai_autopilot_config':
                                     if isinstance(cloud_data, dict):
                                         cur_data['ai_autopilot_config'] = cloud_data
+                                elif key == 'subjects':
+                                    if isinstance(cloud_data, (dict, list)):
+                                        items = list(cloud_data.values()) if isinstance(cloud_data, dict) else cloud_data
+                                        cur_data['subjects'] = items
                         except Exception as err:
                             print(f"[COLD_START] Failed to fetch {key} from Firebase: {err}", flush=True)
 
@@ -1435,6 +1451,13 @@ def load_backend_data(refresh_collections=None):
                     d['ai_autopilot_config'] = dict(ai_scheduler.DEFAULT_AUTOPILOT_CONFIG)
                 if 'ai_providers' not in d or not isinstance(d['ai_providers'], list):
                     d['ai_providers'] = [dict(p) for p in ai_provider_manager.DEFAULT_PROVIDERS]
+                if not d.get('subjects'):
+                    d['subjects'] = syllabus_hierarchy.get_all_subjects_flat()
+                else:
+                    existing_sub_ids = {s.get('id') for s in d['subjects'] if isinstance(s, dict)}
+                    for s in syllabus_hierarchy.get_all_subjects_flat():
+                        if s['id'] not in existing_sub_ids:
+                            d['subjects'].append(s)
                 if 'referral_settings' not in d: d['referral_settings'] = {'referrerReward': 100, 'newStudentReward': 100}
                 if 'xp_reset_settings' not in d: d['xp_reset_settings'] = {'enabled': False, 'nextReset': None, 'intervalDays': 90, 'customSeconds': None, 'lastReset': None}
                 # Sync seed users and hashed passwords (skipping any permanently revoked accounts)
@@ -2884,6 +2907,18 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(500, {'error': f'Failed to read file: {str(e)}', 'code': 500})
                 return
 
+        # Syllabus Hierarchy (Public & Authenticated)
+        if path == '/api/syllabus/hierarchy':
+            exam_level = query.get('examLevel', [''])[0]
+            if exam_level:
+                lvl = syllabus_hierarchy.normalize_exam_level(exam_level)
+                if lvl:
+                    subs = syllabus_hierarchy.get_subjects_for_level(lvl['id'])
+                    self.send_json(200, {'success': True, 'level': lvl, 'subjects': subs})
+                    return
+            self.send_json(200, {'success': True, 'hierarchy': syllabus_hierarchy.get_full_hierarchy()})
+            return
+
         # ================================================================
         # AI MCQ STUDIO & AUTOMATION GET ENDPOINTS
         # ================================================================
@@ -2980,7 +3015,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         # AI MCQ STUDIO & AUTOMATION POST ENDPOINTS
         # ================================================================
 
-        # 1. Update AI Providers Configuration
+        # 1. Update AI Providers Configuration & CRUD
         if path == '/api/admin/ai/providers':
             token = self.get_auth_token()
             user = authenticate_token(token)
@@ -2991,22 +3026,61 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 content_length = int(self.headers.get('Content-Length', 0))
                 body = self.rfile.read(content_length) if content_length > 0 else b'{}'
                 req_data = json.loads(body.decode('utf-8'))
-                providers_update = req_data.get('providers', [])
                 
+                action = req_data.get('action')
                 data = load_backend_data(refresh_collections=['ai_providers'])
-                current_providers = ai_provider_manager.get_registered_providers(data)
-                update_map = {p.get('id'): p for p in providers_update if isinstance(p, dict) and p.get('id')}
                 
-                for p in current_providers:
-                    pid = p['id']
-                    if pid in update_map:
-                        for field in ['priority', 'enabled', 'model', 'fallback_model']:
-                            if field in update_map[pid]:
-                                p[field] = update_map[pid][field]
-                                
-                data['ai_providers'] = current_providers
+                if action == 'add':
+                    provider_payload = req_data.get('provider', {})
+                    api_key = provider_payload.pop('apiKey', None) or req_data.get('apiKey')
+                    new_p = ai_provider_manager.add_provider(data, provider_payload, api_key=api_key)
+                elif action == 'edit':
+                    provider_id = req_data.get('providerId')
+                    updates = req_data.get('updates', {})
+                    api_key = updates.pop('apiKey', None) or req_data.get('apiKey')
+                    upd_p = ai_provider_manager.update_provider(data, provider_id, updates, api_key=api_key)
+                    if not upd_p:
+                        self.send_json(404, {'success': False, 'error': f'Provider {provider_id} not found', 'code': 404})
+                        return
+                elif action == 'delete':
+                    provider_id = req_data.get('providerId')
+                    ok = ai_provider_manager.delete_provider(data, provider_id)
+                    if not ok:
+                        self.send_json(404, {'success': False, 'error': f'Provider {provider_id} not found', 'code': 404})
+                        return
+                elif action == 'toggle':
+                    provider_id = req_data.get('providerId')
+                    enabled = bool(req_data.get('enabled', True))
+                    upd_p = ai_provider_manager.update_provider(data, provider_id, {'enabled': enabled})
+                    if not upd_p:
+                        self.send_json(404, {'success': False, 'error': f'Provider {provider_id} not found', 'code': 404})
+                        return
+                elif action == 'reorder':
+                    order = req_data.get('order', [])
+                    if order:
+                        prov_map = {p['id']: p for p in data.get('ai_providers', []) if isinstance(p, dict) and p.get('id')}
+                        for idx, pid in enumerate(order, start=1):
+                            if pid in prov_map:
+                                prov_map[pid]['priority'] = idx
+                else:
+                    # Batch update format
+                    providers_update = req_data.get('providers', [])
+                    current_providers = ai_provider_manager.get_registered_providers(data)
+                    update_map = {p.get('id'): p for p in providers_update if isinstance(p, dict) and p.get('id')}
+                    
+                    for p in current_providers:
+                        pid = p['id']
+                        if pid in update_map:
+                            upd = update_map[pid]
+                            for field in ['priority', 'enabled', 'model', 'fallback_model', 'name', 'endpoint', 'rate_limit']:
+                                if field in upd:
+                                    p[field] = upd[field]
+                            if 'apiKey' in upd and upd['apiKey']:
+                                ai_provider_manager.save_provider_credential(pid, upd['apiKey'])
+                    data['ai_providers'] = current_providers
+
                 save_backend_data(data)
-                sync_to_firebase('ai_providers', current_providers, method='PUT', sync=True)
+                sync_to_firebase('ai_providers', data['ai_providers'], method='PUT', sync=True)
                 sanitized = ai_provider_manager.get_sanitized_providers(data)
                 self.send_json(200, {'success': True, 'providers': sanitized})
                 return
@@ -3046,6 +3120,27 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             try:
                 content_length = int(self.headers.get('Content-Length', 0))
+                # Protect against 4.5MB Vercel serverless request body limits
+                if content_length > 4.5 * 1024 * 1024:
+                    try:
+                        remaining = content_length
+                        while remaining > 0:
+                            chunk = self.rfile.read(min(remaining, 65536))
+                            if not chunk:
+                                break
+                            remaining -= len(chunk)
+                    except Exception:
+                        pass
+                    self.send_json(413, {
+                        'success': False,
+                        'error': {
+                            'code': 'PAYLOAD_TOO_LARGE',
+                            'message': 'PDF payload exceeds maximum allowable size of 4.5MB for serverless execution. Please optimize or compress the PDF.'
+                        },
+                        'code': 413
+                    })
+                    return
+
                 body = self.rfile.read(content_length) if content_length > 0 else b'{}'
                 req_data = json.loads(body.decode('utf-8'))
                 
@@ -3053,9 +3148,15 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 filename = req_data.get('filename') or 'syllabus_material.pdf'
                 subject = req_data.get('subject') or 'General CA Studies'
                 exam_level = req_data.get('examLevel') or 'CA Foundation'
+                exam_level_id = req_data.get('examLevelId')
+                subject_id = req_data.get('subjectId')
+                chapter = req_data.get('chapter')
+                chapter_id = req_data.get('chapterId')
+                topic = req_data.get('topic')
+                topic_id = req_data.get('topicId')
                 
                 if not file_data:
-                    self.send_json(400, {'error': 'fileData (base64) is required.', 'code': 400})
+                    self.send_json(400, {'success': False, 'error': {'code': 'MISSING_FILE', 'message': 'fileData (base64) is required.'}, 'code': 400})
                     return
                     
                 data = load_backend_data(refresh_collections=['ai_source_documents'])
@@ -3064,11 +3165,18 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     filename=filename,
                     subject=subject,
                     exam_level=exam_level,
-                    data=data
+                    data=data,
+                    exam_level_id=exam_level_id,
+                    subject_id=subject_id,
+                    chapter=chapter,
+                    chapter_id=chapter_id,
+                    topic=topic,
+                    topic_id=topic_id
                 )
                 
                 if not ok or not doc_record:
-                    self.send_json(400, {'error': err, 'code': 400})
+                    err_payload = err if isinstance(err, dict) else {'code': 'INDEXING_FAILED', 'message': str(err)}
+                    self.send_json(400, {'success': False, 'error': err_payload, 'code': 400})
                     return
                     
                 save_backend_data(data)
@@ -3076,7 +3184,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(200, {'success': True, 'document': doc_record})
                 return
             except Exception as e:
-                self.send_json(500, {'error': f'Failed to index document: {str(e)}', 'code': 500})
+                self.send_json(500, {'success': False, 'error': {'code': 'SERVER_ERROR', 'message': f'Failed to index document: {str(e)}'}, 'code': 500})
                 return
 
         # 4. Delete Source Document

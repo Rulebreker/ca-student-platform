@@ -7487,29 +7487,82 @@ class AdminDashboard {
     `;
 
     const subContainer = document.getElementById('ai-subtab-container');
-    if (this.aiActiveSubTab === 'generate') this.renderAiGenerateSubTab(subContainer);
-    else if (this.aiActiveSubTab === 'library') this.renderAiLibrarySubTab(subContainer);
-    else if (this.aiActiveSubTab === 'autopilot') this.renderAiAutopilotSubTab(subContainer);
-    else if (this.aiActiveSubTab === 'logs') this.renderAiLogsSubTab(subContainer);
-    else if (this.aiActiveSubTab === 'providers') this.renderAiProvidersSubTab(subContainer);
+    if (this.aiActiveSubTab === 'generate') await this.renderAiGenerateSubTab(subContainer);
+    else if (this.aiActiveSubTab === 'library') await this.renderAiLibrarySubTab(subContainer);
+    else if (this.aiActiveSubTab === 'autopilot') await this.renderAiAutopilotSubTab(subContainer);
+    else if (this.aiActiveSubTab === 'logs') await this.renderAiLogsSubTab(subContainer);
+    else if (this.aiActiveSubTab === 'providers') await this.renderAiProvidersSubTab(subContainer);
 
     if (window.lucide) window.lucide.createIcons();
   }
 
-  switchAiSubTab(subTab) {
+  async switchAiSubTab(subTab) {
     this.aiActiveSubTab = subTab;
-    this.renderAiAutomation();
+    await this.renderAiAutomation();
+  }
+
+  async getSyllabusHierarchy() {
+    if (this._syllabusHierarchy && this._syllabusHierarchy.length > 0) {
+      return this._syllabusHierarchy;
+    }
+    try {
+      const resp = await fetch('/api/syllabus/hierarchy');
+      const res = await resp.json();
+      if (res.success && res.hierarchy && res.hierarchy.levels) {
+        this._syllabusHierarchy = res.hierarchy.levels;
+        return this._syllabusHierarchy;
+      }
+    } catch (e) {
+      console.warn('[SYLLABUS_HIERARCHY_FETCH_ERROR]', e);
+    }
+    return [];
+  }
+
+  setupCascadingSyllabus(levelElId, subjectElId, chapterElId, initialLevelId, initialSubjectId, initialChapterId) {
+    const levelEl = document.getElementById(levelElId);
+    const subjectEl = document.getElementById(subjectElId);
+    const chapterEl = document.getElementById(chapterElId);
+    if (!levelEl || !subjectEl) return;
+
+    const levels = this._syllabusHierarchy || [];
+
+    const populateSubjects = (lvlVal, preselectedSubId) => {
+      const foundLvl = levels.find(l => l.id === lvlVal || l.name === lvlVal) || levels[0];
+      const subs = foundLvl ? (foundLvl.subjects || []) : [];
+      subjectEl.innerHTML = subs.map(s => `<option value="${s.name}" data-id="${s.id}" data-level-id="${foundLvl ? foundLvl.id : ''}">${s.code ? `[${s.code}] ` : ''}${s.name}</option>`).join('');
+      if (preselectedSubId) {
+        const opt = Array.from(subjectEl.options).find(o => o.dataset.id === preselectedSubId || o.value === preselectedSubId);
+        if (opt) opt.selected = true;
+      }
+      populateChapters(subjectEl.value, initialChapterId);
+    };
+
+    const populateChapters = (subVal, preselectedChId) => {
+      if (!chapterEl) return;
+      let foundSub = null;
+      for (const lvl of levels) {
+        foundSub = (lvl.subjects || []).find(s => s.name === subVal || s.id === subVal);
+        if (foundSub) break;
+      }
+      const chs = foundSub ? (foundSub.chapters || []) : [];
+      chapterEl.innerHTML = '<option value="" data-id="">-- All Chapters / General Focus --</option>' + 
+        chs.map(ch => `<option value="${ch.name}" data-id="${ch.id}">Ch ${ch.number}: ${ch.name}</option>`).join('');
+      if (preselectedChId) {
+        const opt = Array.from(chapterEl.options).find(o => o.dataset.id === preselectedChId || o.value === preselectedChId);
+        if (opt) opt.selected = true;
+      }
+    };
+
+    levelEl.onchange = () => populateSubjects(levelEl.value);
+    subjectEl.onchange = () => populateChapters(subjectEl.value);
+
+    populateSubjects(levelEl.value, initialSubjectId);
   }
 
   // --- SUB-TAB 1: GENERATE & HOST NOW ---
-  renderAiGenerateSubTab(container) {
+  async renderAiGenerateSubTab(container) {
     if (!container) return;
-
-    const subjects = window.store.getSubjects ? window.store.getSubjects() : [];
-    const defaultSubjectOptions = [
-      'Accounting', 'Business Law', 'Business Economics', 'Quantitative Aptitude'
-    ];
-    const allSubjects = Array.from(new Set([...defaultSubjectOptions, ...subjects.map(s => s.name || s)]));
+    await this.getSyllabusHierarchy();
 
     container.innerHTML = `
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -7533,20 +7586,27 @@ class AdminDashboard {
                 />
               </div>
 
-              <div class="grid grid-cols-2 gap-4">
+              <!-- Cascading Hierarchy: Level -> Subject -> Chapter -->
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
-                  <label class="block text-xs font-bold text-slate-700 mb-1">Subject <span class="text-rose-600">*</span></label>
-                  <select id="ai-gen-subject" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
-                    ${allSubjects.map(s => `<option value="${s}" ${s === 'Business Economics' ? 'selected' : ''}>${s}</option>`).join('')}
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Exam Level <span class="text-rose-600">*</span></label>
+                  <select id="ai-gen-level" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                    <option value="CA Foundation" data-id="foundation" selected>CA Foundation</option>
+                    <option value="CA Intermediate" data-id="intermediate">CA Intermediate</option>
+                    <option value="CA Final" data-id="final">CA Final</option>
                   </select>
                 </div>
 
                 <div>
-                  <label class="block text-xs font-bold text-slate-700 mb-1">Exam Level</label>
-                  <select id="ai-gen-level" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
-                    <option value="CA Foundation" selected>CA Foundation</option>
-                    <option value="CA Intermediate">CA Intermediate</option>
-                    <option value="CA Final">CA Final</option>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Subject <span class="text-rose-600">*</span></label>
+                  <select id="ai-gen-subject" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                  </select>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Chapter Filter</label>
+                  <select id="ai-gen-chapter" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                    <option value="" data-id="">-- All Chapters / General Focus --</option>
                   </select>
                 </div>
               </div>
@@ -7556,9 +7616,9 @@ class AdminDashboard {
                 <input 
                   type="text" 
                   id="ai-gen-topic" 
-                  value="Nature and Scope of Business Economics" 
+                  value="Theory of Demand and Supply" 
                   class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none"
-                  placeholder="e.g. Theory of Demand, Elasticity, Ind AS 115"
+                  placeholder="e.g. Price Elasticity of Demand, Consumer Equilibrium"
                 />
               </div>
 
@@ -7582,7 +7642,7 @@ class AdminDashboard {
                 </div>
               </div>
 
-              <div class="grid grid-cols-2 gap-4">
+              <div class="grid grid-cols-4 gap-3">
                 <div>
                   <label class="block text-xs font-bold text-slate-700 mb-1">Marks per Correct</label>
                   <input type="number" id="ai-gen-marks" step="0.5" value="2.0" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
@@ -7591,23 +7651,34 @@ class AdminDashboard {
                   <label class="block text-xs font-bold text-slate-700 mb-1">Negative Marks</label>
                   <input type="number" id="ai-gen-neg-marks" step="0.25" value="0.5" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
                 </div>
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Platform XP (+)</label>
+                  <input type="number" id="ai-gen-xp" min="0" step="5" value="10" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Max Attempts</label>
+                  <input type="number" id="ai-gen-attempts" min="1" max="10" value="3" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+                </div>
               </div>
 
-              <!-- Allowed Plans -->
+              <!-- Canonical Eligible Plans: Free, Trial, Core, Plus, Elite -->
               <div>
                 <label class="block text-xs font-bold text-slate-700 mb-1.5">Eligible Student Plans</label>
-                <div class="flex items-center gap-4 text-xs font-semibold text-slate-700">
+                <div class="flex flex-wrap items-center gap-4 text-xs font-semibold text-slate-700">
                   <label class="flex items-center gap-1.5 cursor-pointer">
                     <input type="checkbox" id="ai-plan-free" checked class="rounded text-rose-600 focus:ring-rose-500" /> Free
                   </label>
                   <label class="flex items-center gap-1.5 cursor-pointer">
-                    <input type="checkbox" id="ai-plan-trial" checked class="rounded text-rose-600 focus:ring-rose-500" /> Trial
+                    <input type="checkbox" id="ai-plan-trial" checked class="rounded text-rose-600 focus:ring-rose-500" /> ₹9 Trial
                   </label>
                   <label class="flex items-center gap-1.5 cursor-pointer">
-                    <input type="checkbox" id="ai-plan-pro" checked class="rounded text-rose-600 focus:ring-rose-500" /> Pro
+                    <input type="checkbox" id="ai-plan-core" checked class="rounded text-rose-600 focus:ring-rose-500" /> Core Pass
                   </label>
                   <label class="flex items-center gap-1.5 cursor-pointer">
-                    <input type="checkbox" id="ai-plan-elite" checked class="rounded text-rose-600 focus:ring-rose-500" /> Elite
+                    <input type="checkbox" id="ai-plan-plus" checked class="rounded text-rose-600 focus:ring-rose-500" /> Plus Pass
+                  </label>
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" id="ai-plan-elite" checked class="rounded text-rose-600 focus:ring-rose-500" /> Elite Pass
                   </label>
                 </div>
               </div>
@@ -7625,7 +7696,7 @@ class AdminDashboard {
               <div class="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center hover:border-rose-400 transition-colors">
                 <i data-lucide="file-up" class="w-6 h-6 text-slate-400 mx-auto mb-1"></i>
                 <span class="text-xs font-bold text-slate-700 block">Attach Syllabus PDF Context (Optional)</span>
-                <span class="text-[11px] text-slate-500 block mb-2">Upload study material to ground questions in specific textbook sections</span>
+                <span class="text-[11px] text-slate-500 block mb-2">Upload study material to ground questions in specific textbook sections (Max 4MB)</span>
                 <input type="file" id="ai-gen-pdf-input" accept=".pdf" multiple class="hidden" onchange="window.adminDashboard.handleAiPdfFilesSelected(this.files)" />
                 <button type="button" onclick="document.getElementById('ai-gen-pdf-input').click()" class="px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-all">
                   Browse PDF Files
@@ -7698,32 +7769,35 @@ class AdminDashboard {
                 </div>
               </div>
 
-              <!-- Post-Generation Success Card (Hidden while generating) -->
-              <div id="ai-completion-card" class="hidden p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
-                <div class="flex items-center gap-3">
-                  <div class="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center flex-shrink-0">
-                    <i data-lucide="check-circle" class="w-6 h-6"></i>
-                  </div>
-                  <div>
-                    <h5 class="text-xs font-black text-emerald-900">Test Successfully Hosted & Published!</h5>
-                    <p id="ai-completion-subtitle" class="text-[11px] text-emerald-700 mt-0.5">All questions passed ICAI structural & mathematical verification.</p>
-                  </div>
-                </div>
-                <div class="mt-3 flex items-center gap-3 pt-3 border-t border-emerald-200">
-                  <button onclick="window.adminDashboard.switchTab('mcq-tests')" class="px-3 py-1.5 text-xs font-bold bg-white text-emerald-900 border border-emerald-300 rounded-lg hover:bg-emerald-100 transition-all">
-                    View in MCQ Tests Builder →
-                  </button>
-                  <button onclick="window.adminDashboard.switchAiSubTab('logs')" class="px-3 py-1.5 text-xs font-bold text-emerald-800 hover:underline">
-                    Inspect Telemetry Logs
-                  </button>
-                </div>
+              <!-- Live Stream of Formulated MCQs -->
+              <div class="space-y-3">
+                <span class="text-xs font-bold text-slate-700 block">Streamed MCQ Pipeline Output</span>
+                <div id="ai-stream-questions-list" class="space-y-3 max-h-[350px] overflow-y-auto pr-1"></div>
               </div>
 
-              <!-- Live Stream Questions Cards -->
-              <div>
-                <h5 class="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">Live Validated Questions Feed</h5>
-                <div id="ai-stream-questions-list" class="space-y-3 max-h-[400px] overflow-y-auto pr-1">
-                  <!-- Streamed cards appear here -->
+              <!-- Final Completion Card (Hidden until complete) -->
+              <div id="ai-completion-card" class="hidden p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-3">
+                <div class="flex items-center gap-2 text-emerald-800 font-bold text-sm">
+                  <i data-lucide="check-circle" class="w-5 h-5 text-emerald-600"></i>
+                  Test Generated & Hosted Successfully!
+                </div>
+                <div class="text-xs text-emerald-700">
+                  <span id="ai-complete-test-title" class="font-bold block"></span>
+                  <span>Test ID: <code id="ai-complete-test-id" class="font-mono bg-emerald-100 px-1 py-0.5 rounded"></code></span>
+                </div>
+                <div class="flex items-center gap-3 pt-2">
+                  <button 
+                    onclick="window.adminDashboard.switchTab('tests')"
+                    class="px-3.5 py-2 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg shadow-sm transition-all"
+                  >
+                    View in Test Management
+                  </button>
+                  <button 
+                    onclick="window.adminDashboard.resetAiGenerateView()"
+                    class="px-3.5 py-2 text-xs font-bold text-emerald-800 bg-white border border-emerald-300 hover:bg-emerald-100 rounded-lg transition-all"
+                  >
+                    Generate Another
+                  </button>
                 </div>
               </div>
             </div>
@@ -7732,6 +7806,7 @@ class AdminDashboard {
       </div>
     `;
 
+    this.setupCascadingSyllabus('ai-gen-level', 'ai-gen-subject', 'ai-gen-chapter');
     if (window.lucide) window.lucide.createIcons();
   }
 
@@ -7752,14 +7827,27 @@ class AdminDashboard {
 
   async startAiGenerationJob() {
     const title = document.getElementById('ai-gen-title')?.value.trim();
-    const subject = document.getElementById('ai-gen-subject')?.value;
     const topic = document.getElementById('ai-gen-topic')?.value.trim();
-    const examLevel = document.getElementById('ai-gen-level')?.value;
-    const difficulty = document.getElementById('ai-gen-difficulty')?.value;
+
+    const levelSelect = document.getElementById('ai-gen-level');
+    const examLevel = levelSelect?.value || 'CA Foundation';
+    const examLevelId = levelSelect?.selectedOptions[0]?.dataset.id || 'foundation';
+
+    const subjectSelect = document.getElementById('ai-gen-subject');
+    const subject = subjectSelect?.value || 'Business Economics';
+    const subjectId = subjectSelect?.selectedOptions[0]?.dataset.id || 'sub-3';
+
+    const chapterSelect = document.getElementById('ai-gen-chapter');
+    const chapter = chapterSelect?.value || '';
+    const chapterId = chapterSelect?.selectedOptions[0]?.dataset.id || '';
+
+    const difficulty = document.getElementById('ai-gen-difficulty')?.value || 'ICAI Exam Standard';
     const count = parseInt(document.getElementById('ai-gen-count')?.value || '5', 10);
     const duration = parseInt(document.getElementById('ai-gen-duration')?.value || '15', 10);
     const marks = parseFloat(document.getElementById('ai-gen-marks')?.value || '2.0');
     const negMarks = parseFloat(document.getElementById('ai-gen-neg-marks')?.value || '0.5');
+    const xp = parseFloat(document.getElementById('ai-gen-xp')?.value || '10');
+    const maxAttempts = parseInt(document.getElementById('ai-gen-attempts')?.value || '3', 10);
     const autoPublish = document.getElementById('ai-gen-publish')?.checked ?? true;
 
     if (!title || !topic) {
@@ -7770,7 +7858,8 @@ class AdminDashboard {
     const plans = [];
     if (document.getElementById('ai-plan-free')?.checked) plans.push('free');
     if (document.getElementById('ai-plan-trial')?.checked) plans.push('trial');
-    if (document.getElementById('ai-plan-pro')?.checked) plans.push('pro');
+    if (document.getElementById('ai-plan-core')?.checked) plans.push('core');
+    if (document.getElementById('ai-plan-plus')?.checked) plans.push('plus');
     if (document.getElementById('ai-plan-elite')?.checked) plans.push('elite');
 
     const btn = document.getElementById('ai-btn-generate');
@@ -7805,6 +7894,10 @@ class AdminDashboard {
     // If inline PDFs were selected, upload them first
     if (this.aiSelectedPdfFiles && this.aiSelectedPdfFiles.length > 0) {
       for (const pdfFile of this.aiSelectedPdfFiles) {
+        if (pdfFile.size > 4 * 1024 * 1024) {
+          window.app.showToast(`Skipping ${pdfFile.name}: Exceeds 4MB limit`, 'warning');
+          continue;
+        }
         try {
           if (stageText) stageText.innerText = `Running Mistral OCR on ${pdfFile.name}...`;
           const base64Data = await this._readFileAsBase64(pdfFile);
@@ -7814,11 +7907,15 @@ class AdminDashboard {
               'Authorization': `Bearer ${token}`,
               'Content-Type': 'application/json'
             },
-            body: json.stringify({
+            body: JSON.stringify({
               filename: pdfFile.name,
               fileData: base64Data,
               subject: subject,
-              examLevel: examLevel
+              subjectId: subjectId,
+              examLevel: examLevel,
+              examLevelId: examLevelId,
+              chapter: chapter,
+              chapterId: chapterId
             })
           });
         } catch (uploadErr) {
@@ -7839,21 +7936,36 @@ class AdminDashboard {
         body: JSON.stringify({
           title: title,
           subject: subject,
+          subjectId: subjectId,
+          chapter: chapter,
+          chapterId: chapterId,
           topic: topic,
           examLevel: examLevel,
+          examLevelId: examLevelId,
           difficulty: difficulty,
           count: count,
           durationMinutes: duration,
           marksPerCorrect: marks,
           negativeMarksPerWrong: negMarks,
+          platformXp: xp,
+          maxAttempts: maxAttempts,
           autoPublish: autoPublish,
           allowedPlans: plans
         })
       });
 
-      const resData = await response.json();
+      const contentType = response.headers.get('content-type') || '';
+      let resData = null;
+      if (contentType.includes('application/json')) {
+        resData = await response.json();
+      } else {
+        const rawText = await response.text();
+        throw new Error(rawText || `Server returned HTTP ${response.status}`);
+      }
+
       if (!response.ok || !resData.success) {
-        throw new Error(resData.error || 'Failed to queue generation job.');
+        const errMsg = (resData && (resData.error?.message || resData.error)) || 'Failed to queue generation job.';
+        throw new Error(errMsg);
       }
 
       const jobId = resData.job.id;
@@ -7986,6 +8098,7 @@ class AdminDashboard {
   // --- SUB-TAB 2: PDF / SOURCE LIBRARY ---
   async renderAiLibrarySubTab(container) {
     if (!container) return;
+    await this.getSyllabusHierarchy();
 
     container.innerHTML = `
       <div class="space-y-6">
@@ -7993,28 +8106,42 @@ class AdminDashboard {
         <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
           <div class="flex items-center gap-2 mb-4">
             <i data-lucide="file-up" class="w-5 h-5 text-rose-600"></i>
-            <h3 class="text-sm font-bold text-slate-900">Upload & Index Syllabus Documents</h3>
+            <div>
+              <h3 class="text-sm font-bold text-slate-900">Upload & Index Syllabus Documents</h3>
+              <p class="text-[11px] text-slate-500">Attach ICAI syllabus material to ground AI MCQ formulations in official curriculum texts.</p>
+            </div>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">Subject Tag</label>
-              <input type="text" id="ai-lib-subject" value="Business Economics" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" placeholder="e.g. Accounting, Law" />
-            </div>
-
-            <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">Exam Level</label>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Exam Level <span class="text-rose-600">*</span></label>
               <select id="ai-lib-level" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
-                <option value="CA Foundation" selected>CA Foundation</option>
-                <option value="CA Intermediate">CA Intermediate</option>
-                <option value="CA Final">CA Final</option>
+                <option value="CA Foundation" data-id="foundation" selected>CA Foundation</option>
+                <option value="CA Intermediate" data-id="intermediate">CA Intermediate</option>
+                <option value="CA Final" data-id="final">CA Final</option>
               </select>
             </div>
 
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">Select PDF File</label>
-              <input type="file" id="ai-lib-file" accept=".pdf" class="w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer" />
+              <label class="block text-xs font-bold text-slate-700 mb-1">Subject <span class="text-rose-600">*</span></label>
+              <select id="ai-lib-subject" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+              </select>
             </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Chapter Association</label>
+              <select id="ai-lib-chapter" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                <option value="" data-id="">-- General / Entire Subject --</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="mb-4">
+            <label class="block text-xs font-bold text-slate-700 mb-1">Select PDF File <span class="text-rose-600">*</span></label>
+            <input type="file" id="ai-lib-file" accept=".pdf" class="w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer" />
+            <p class="text-[11px] text-slate-500 mt-1">
+              <span class="font-semibold text-rose-600">Max file size: 4MB.</span> For large textbooks, please upload individual chapter PDFs to maximize OCR clarity and ensure strict chapter-wise MCQ retrieval isolation.
+            </p>
           </div>
 
           <button 
@@ -8046,6 +8173,7 @@ class AdminDashboard {
       </div>
     `;
 
+    this.setupCascadingSyllabus('ai-lib-level', 'ai-lib-subject', 'ai-lib-chapter');
     if (window.lucide) window.lucide.createIcons();
 
     // Fetch documents from backend
@@ -8082,6 +8210,7 @@ class AdminDashboard {
             <tr class="border-b border-slate-200 text-slate-500 font-bold bg-slate-50">
               <th class="py-3 px-4">Document / Filename</th>
               <th class="py-3 px-4">Subject & Level</th>
+              <th class="py-3 px-4">Chapter Tag</th>
               <th class="py-3 px-4">Pages / Chunks</th>
               <th class="py-3 px-4">OCR Engine</th>
               <th class="py-3 px-4">Uploaded</th>
@@ -8103,6 +8232,9 @@ class AdminDashboard {
                 <td class="py-3 px-4">
                   <span class="font-semibold text-slate-800 block">${d.subject}</span>
                   <span class="text-[10px] text-slate-500 block">${d.examLevel || 'CA Foundation'}</span>
+                </td>
+                <td class="py-3 px-4">
+                  ${d.chapter ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200">${d.chapter}</span>` : '<span class="text-slate-400 text-[11px]">—</span>'}
                 </td>
                 <td class="py-3 px-4 font-semibold text-slate-700">
                   ${d.pageCount} Pages • ${d.chunkCount} Chunks
@@ -8138,8 +8270,17 @@ class AdminDashboard {
 
   async uploadAiLibraryPdf() {
     const fileInput = document.getElementById('ai-lib-file');
-    const subject = document.getElementById('ai-lib-subject')?.value.trim() || 'General CA Studies';
-    const examLevel = document.getElementById('ai-lib-level')?.value || 'CA Foundation';
+    const levelSelect = document.getElementById('ai-lib-level');
+    const examLevel = levelSelect?.value || 'CA Foundation';
+    const examLevelId = levelSelect?.selectedOptions[0]?.dataset.id || 'foundation';
+
+    const subjectSelect = document.getElementById('ai-lib-subject');
+    const subject = subjectSelect?.value || 'General CA Studies';
+    const subjectId = subjectSelect?.selectedOptions[0]?.dataset.id || '';
+
+    const chapterSelect = document.getElementById('ai-lib-chapter');
+    const chapter = chapterSelect?.value || '';
+    const chapterId = chapterSelect?.selectedOptions[0]?.dataset.id || '';
 
     if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
       window.app.showToast('Please select a PDF file to upload.', 'error');
@@ -8147,6 +8288,13 @@ class AdminDashboard {
     }
 
     const file = fileInput.files[0];
+
+    // Client-side 4MB Pre-Validation to avoid Vercel 413 plain-text crashes
+    if (file.size > 4 * 1024 * 1024) {
+      window.app.showToast(`File size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds maximum allowable 4MB limit for serverless upload. Please compress or split the PDF by chapter.`, 'error');
+      return;
+    }
+
     const btn = document.getElementById('ai-btn-lib-upload');
     if (btn) {
       btn.disabled = true;
@@ -8168,13 +8316,26 @@ class AdminDashboard {
           filename: file.name,
           fileData: base64Data,
           subject: subject,
-          examLevel: examLevel
+          subjectId: subjectId,
+          examLevel: examLevel,
+          examLevelId: examLevelId,
+          chapter: chapter,
+          chapterId: chapterId
         })
       });
 
-      const res = await resp.json();
+      const contentType = resp.headers.get('content-type') || '';
+      let res = null;
+      if (contentType.includes('application/json')) {
+        res = await resp.json();
+      } else {
+        const rawText = await resp.text();
+        throw new Error(rawText || `Server returned HTTP ${resp.status}`);
+      }
+
       if (!resp.ok || !res.success) {
-        throw new Error(res.error || 'Failed to upload document');
+        const errMsg = (res.error && (res.error.message || res.error)) || 'Failed to upload document';
+        throw new Error(errMsg);
       }
 
       window.app.showToast(`Document "${file.name}" indexed successfully with Mistral OCR!`, 'success');
@@ -8221,6 +8382,7 @@ class AdminDashboard {
   // --- SUB-TAB 3: AUTO-PILOT / SCHEDULED MCQS ---
   async renderAiAutopilotSubTab(container) {
     if (!container) return;
+    await this.getSyllabusHierarchy();
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
     const token = currentUser ? (currentUser.token || currentUser.email) : '';
@@ -8228,14 +8390,23 @@ class AdminDashboard {
     let config = {
       enabled: false,
       dailyTime: '20:00',
-      subject: 'Accounting',
+      titleTemplate: '[Subject] Daily Conceptual Challenge',
+      subject: 'Business Economics',
+      subjectId: 'sub-3',
+      chapter: '',
+      chapterId: '',
       topic: 'Daily Comprehensive Exam Practice',
       examLevel: 'CA Foundation',
+      examLevelId: 'foundation',
       difficulty: 'ICAI Exam Standard',
       questionCount: 5,
       durationMinutes: 15,
+      marksPerCorrect: 2.0,
+      negativeMarksPerWrong: 0.5,
+      platformXp: 10,
+      maxAttempts: 3,
       autoPublish: true,
-      allowedPlans: ['free', 'trial', 'pro', 'elite']
+      allowedPlans: ['free', 'trial', 'core', 'plus', 'elite']
     };
 
     try {
@@ -8243,22 +8414,24 @@ class AdminDashboard {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await resp.json();
-      if (data.config) config = data.config;
+      if (data.config) config = { ...config, ...data.config };
     } catch (err) {
       console.warn('[AUTOPILOT_FETCH_ERROR]', err);
     }
 
+    const plans = config.allowedPlans || ['free', 'trial', 'core', 'plus', 'elite'];
+
     container.innerHTML = `
-      <div class="max-w-3xl space-y-6">
+      <div class="max-w-4xl space-y-6">
         <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-6">
           <div class="flex items-center justify-between pb-4 border-b border-slate-200">
             <div>
               <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <i data-lucide="clock" class="w-4 h-4 text-rose-600"></i>
-                Daily Recurring Auto-Pilot MCQ Hosting
+                Autonomous Server-Side Auto-Pilot Scheduler
               </h3>
               <p class="text-xs text-slate-500 mt-0.5">
-                Automatically generate, validate, and host new daily practice tests server-side.
+                Automatically generate, mathematically verify, and host daily practice tests directly into the ExcellenceCA database.
               </p>
             </div>
 
@@ -8273,48 +8446,120 @@ class AdminDashboard {
           <div class="p-3.5 bg-blue-50 border border-blue-200 rounded-xl flex items-start gap-3">
             <i data-lucide="info" class="w-4 h-4 text-blue-700 mt-0.5 flex-shrink-0"></i>
             <div class="text-xs text-blue-900">
-              <span class="font-bold block">100% Server-Side Execution</span>
-              The Auto-Pilot scheduler runs as a continuous daemon thread inside the backend server. It executes on schedule whether any admin or student is logged into the platform or not.
+              <span class="font-bold block">100% Server-Side Continuous Execution</span>
+              The Auto-Pilot scheduler runs as an autonomous background daemon in Python. When scheduled, it triggers independently whether any admin is logged in or not, with automatic failover across AI providers.
             </div>
           </div>
 
           <div class="space-y-4">
-            <div class="grid grid-cols-2 gap-4">
+            <!-- Cascading Hierarchy -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Exam Level <span class="text-rose-600">*</span></label>
+                <select id="ai-auto-level" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                  <option value="CA Foundation" data-id="foundation" ${config.examLevel === 'CA Foundation' ? 'selected' : ''}>CA Foundation</option>
+                  <option value="CA Intermediate" data-id="intermediate" ${config.examLevel === 'CA Intermediate' ? 'selected' : ''}>CA Intermediate</option>
+                  <option value="CA Final" data-id="final" ${config.examLevel === 'CA Final' ? 'selected' : ''}>CA Final</option>
+                </select>
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Subject <span class="text-rose-600">*</span></label>
+                <select id="ai-auto-subject" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                </select>
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Chapter Association</label>
+                <select id="ai-auto-chapter" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                  <option value="" data-id="">-- Rotate / Entire Subject --</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Test Title Template</label>
+                <input type="text" id="ai-auto-title-template" value="${config.titleTemplate || '[Subject] Daily Challenge'}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" placeholder="e.g. [Subject] Ch. [Chapter] Daily Quiz" />
+                <span class="text-[10px] text-slate-400 mt-0.5 block">Supports placeholders: [Subject], [Chapter], [Date]</span>
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Curriculum Topic / Focus</label>
+                <input type="text" id="ai-auto-topic" value="${config.topic || 'Daily Comprehensive Practice'}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+              </div>
+            </div>
+
+            <!-- Parameters Grid -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div>
                 <label class="block text-xs font-bold text-slate-700 mb-1">Daily Run Time (IST)</label>
                 <input type="time" id="ai-auto-time" value="${config.dailyTime || '20:00'}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
               </div>
 
               <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1">Daily Question Count</label>
+                <label class="block text-xs font-bold text-slate-700 mb-1">MCQ Count</label>
                 <input type="number" id="ai-auto-count" min="1" max="25" value="${config.questionCount || 5}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
               </div>
-            </div>
 
-            <div class="grid grid-cols-2 gap-4">
               <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1">Subject</label>
-                <select id="ai-auto-subject" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
-                  <option value="Accounting" ${config.subject === 'Accounting' ? 'selected' : ''}>Accounting</option>
-                  <option value="Business Law" ${config.subject === 'Business Law' ? 'selected' : ''}>Business Law</option>
-                  <option value="Business Economics" ${config.subject === 'Business Economics' ? 'selected' : ''}>Business Economics</option>
-                  <option value="Quantitative Aptitude" ${config.subject === 'Quantitative Aptitude' ? 'selected' : ''}>Quantitative Aptitude</option>
-                </select>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Duration (Min)</label>
+                <input type="number" id="ai-auto-duration" min="5" max="120" value="${config.durationMinutes || 15}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
               </div>
 
               <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1">Exam Level</label>
-                <select id="ai-auto-level" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
-                  <option value="CA Foundation" ${config.examLevel === 'CA Foundation' ? 'selected' : ''}>CA Foundation</option>
-                  <option value="CA Intermediate" ${config.examLevel === 'CA Intermediate' ? 'selected' : ''}>CA Intermediate</option>
-                  <option value="CA Final" ${config.examLevel === 'CA Final' ? 'selected' : ''}>CA Final</option>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Difficulty</label>
+                <select id="ai-auto-difficulty" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                  <option value="ICAI Exam Standard" ${config.difficulty === 'ICAI Exam Standard' ? 'selected' : ''}>ICAI Standard</option>
+                  <option value="Easy" ${config.difficulty === 'Easy' ? 'selected' : ''}>Easy</option>
+                  <option value="Medium" ${config.difficulty === 'Medium' ? 'selected' : ''}>Medium</option>
+                  <option value="Hard" ${config.difficulty === 'Hard' ? 'selected' : ''}>Hard</option>
                 </select>
               </div>
             </div>
 
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Marks per Correct</label>
+                <input type="number" id="ai-auto-marks" step="0.5" value="${config.marksPerCorrect ?? 2.0}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Negative Marks</label>
+                <input type="number" id="ai-auto-neg-marks" step="0.25" value="${config.negativeMarksPerWrong ?? 0.5}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Platform XP (+)</label>
+                <input type="number" id="ai-auto-xp" min="0" step="5" value="${config.platformXp ?? 10}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Max Attempts</label>
+                <input type="number" id="ai-auto-attempts" min="1" max="10" value="${config.maxAttempts ?? 3}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+              </div>
+            </div>
+
+            <!-- Canonical Eligible Student Plans -->
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">Curriculum / Topic Theme</label>
-              <input type="text" id="ai-auto-topic" value="${config.topic || 'Daily Comprehensive Exam Practice'}" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+              <label class="block text-xs font-bold text-slate-700 mb-1.5">Eligible Student Plans</label>
+              <div class="flex flex-wrap items-center gap-4 text-xs font-semibold text-slate-700">
+                <label class="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" id="ai-auto-plan-free" ${plans.includes('free') ? 'checked' : ''} class="rounded text-rose-600 focus:ring-rose-500" /> Free
+                </label>
+                <label class="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" id="ai-auto-plan-trial" ${plans.includes('trial') ? 'checked' : ''} class="rounded text-rose-600 focus:ring-rose-500" /> ₹9 Trial
+                </label>
+                <label class="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" id="ai-auto-plan-core" ${plans.includes('core') ? 'checked' : ''} class="rounded text-rose-600 focus:ring-rose-500" /> Core Pass
+                </label>
+                <label class="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" id="ai-auto-plan-plus" ${plans.includes('plus') ? 'checked' : ''} class="rounded text-rose-600 focus:ring-rose-500" /> Plus Pass
+                </label>
+                <label class="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" id="ai-auto-plan-elite" ${plans.includes('elite') ? 'checked' : ''} class="rounded text-rose-600 focus:ring-rose-500" /> Elite Pass
+                </label>
+              </div>
             </div>
 
             <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
@@ -8348,17 +8593,43 @@ class AdminDashboard {
       </div>
     `;
 
+    this.setupCascadingSyllabus('ai-auto-level', 'ai-auto-subject', 'ai-auto-chapter', config.examLevelId || config.examLevel, config.subjectId || config.subject, config.chapterId || config.chapter);
     if (window.lucide) window.lucide.createIcons();
   }
 
   async saveAiAutopilotSettings() {
     const enabled = document.getElementById('ai-auto-enabled')?.checked ?? false;
     const dailyTime = document.getElementById('ai-auto-time')?.value || '20:00';
-    const questionCount = parseInt(document.getElementById('ai-auto-count')?.value || '5', 10);
-    const subject = document.getElementById('ai-auto-subject')?.value || 'Accounting';
-    const examLevel = document.getElementById('ai-auto-level')?.value || 'CA Foundation';
+    const titleTemplate = document.getElementById('ai-auto-title-template')?.value.trim() || '[Subject] Daily Conceptual Challenge';
+
+    const levelSelect = document.getElementById('ai-auto-level');
+    const examLevel = levelSelect?.value || 'CA Foundation';
+    const examLevelId = levelSelect?.selectedOptions[0]?.dataset.id || 'foundation';
+
+    const subjectSelect = document.getElementById('ai-auto-subject');
+    const subject = subjectSelect?.value || 'Accounting';
+    const subjectId = subjectSelect?.selectedOptions[0]?.dataset.id || 'sub-1';
+
+    const chapterSelect = document.getElementById('ai-auto-chapter');
+    const chapter = chapterSelect?.value || '';
+    const chapterId = chapterSelect?.selectedOptions[0]?.dataset.id || '';
+
     const topic = document.getElementById('ai-auto-topic')?.value.trim() || 'Comprehensive Practice';
+    const difficulty = document.getElementById('ai-auto-difficulty')?.value || 'ICAI Exam Standard';
+    const questionCount = parseInt(document.getElementById('ai-auto-count')?.value || '5', 10);
+    const durationMinutes = parseInt(document.getElementById('ai-auto-duration')?.value || '15', 10);
+    const marksPerCorrect = parseFloat(document.getElementById('ai-auto-marks')?.value || '2.0');
+    const negativeMarksPerWrong = parseFloat(document.getElementById('ai-auto-neg-marks')?.value || '0.5');
+    const platformXp = parseFloat(document.getElementById('ai-auto-xp')?.value || '10');
+    const maxAttempts = parseInt(document.getElementById('ai-auto-attempts')?.value || '3', 10);
     const autoPublish = document.getElementById('ai-auto-publish')?.checked ?? true;
+
+    const plans = [];
+    if (document.getElementById('ai-auto-plan-free')?.checked) plans.push('free');
+    if (document.getElementById('ai-auto-plan-trial')?.checked) plans.push('trial');
+    if (document.getElementById('ai-auto-plan-core')?.checked) plans.push('core');
+    if (document.getElementById('ai-auto-plan-plus')?.checked) plans.push('plus');
+    if (document.getElementById('ai-auto-plan-elite')?.checked) plans.push('elite');
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
     const token = currentUser ? (currentUser.token || currentUser.email) : '';
@@ -8373,10 +8644,22 @@ class AdminDashboard {
         body: JSON.stringify({
           enabled: enabled,
           dailyTime: dailyTime,
-          questionCount: questionCount,
+          titleTemplate: titleTemplate,
           subject: subject,
-          examLevel: examLevel,
+          subjectId: subjectId,
+          chapter: chapter,
+          chapterId: chapterId,
           topic: topic,
+          examLevel: examLevel,
+          examLevelId: examLevelId,
+          difficulty: difficulty,
+          questionCount: questionCount,
+          durationMinutes: durationMinutes,
+          marksPerCorrect: marksPerCorrect,
+          negativeMarksPerWrong: negativeMarksPerWrong,
+          platformXp: platformXp,
+          maxAttempts: maxAttempts,
+          allowedPlans: plans,
           autoPublish: autoPublish
         })
       });
@@ -8389,7 +8672,7 @@ class AdminDashboard {
       window.app.showToast('Auto-Pilot schedule configuration updated successfully!', 'success');
       this.renderAiAutopilotSubTab(document.getElementById('ai-subtab-container'));
     } catch (err) {
-      window.app.showToast(`Error saving autopilot settings: ${err.message}`, 'error');
+      window.app.showToast(`Failed saving autopilot: ${err.message}`, 'error');
     }
   }
 
@@ -8539,7 +8822,7 @@ class AdminDashboard {
     }
   }
 
-  // --- SUB-TAB 5: AI PROVIDER MANAGEMENT ---
+  // --- SUB-TAB 5: AI PROVIDER MANAGEMENT & FULL CRUD ---
   async renderAiProvidersSubTab(container) {
     if (!container) return;
 
@@ -8548,32 +8831,37 @@ class AdminDashboard {
 
     container.innerHTML = `
       <div class="space-y-6 max-w-4xl">
-        <!-- Security Banner -->
+        <!-- Security & Architecture Banner -->
         <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3">
           <i data-lucide="shield-check" class="w-5 h-5 text-emerald-700 mt-0.5 flex-shrink-0"></i>
           <div class="text-xs text-emerald-950 space-y-1">
-            <span class="font-black text-sm block">Strict Credential Isolation & Masking Active</span>
+            <span class="font-black text-sm block">Authenticated Encrypted Vault & Strict Credential Isolation</span>
             <p class="text-emerald-800">
-              API credentials are permanently kept server-side in secure isolated storage and are never transmitted to frontend clients. All API keys in the dashboard are securely masked (e.g. <code>AQ••••••••8qvA</code>) with zero raw secret exposure.
+              Provider credentials are encrypted server-side using PBKDF2-HMAC-SHA256 authenticated encryption, persisted in isolated vault storage, and synced securely across serverless cold starts. Plaintext keys are never sent to the browser or stored in Git.
             </p>
           </div>
         </div>
 
-        <!-- Providers Grid -->
+        <!-- Providers Management Grid -->
         <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5">
-          <div class="flex items-center justify-between pb-4 border-b border-slate-200">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200">
             <div>
               <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <i data-lucide="cpu" class="w-4 h-4 text-rose-600"></i>
                 Configured AI Models & Gateways
               </h3>
               <p class="text-xs text-slate-500 mt-0.5">
-                Adjust execution priority and run on-demand latency tests.
+                Manage provider hierarchy, execution priorities, failover chains, and verify live connectivity.
               </p>
             </div>
-            <button onclick="window.adminDashboard.saveAiProvidersSettings()" class="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5">
-              <i data-lucide="save" class="w-3.5 h-3.5"></i> Save Settings
-            </button>
+            <div class="flex items-center gap-2">
+              <button onclick="window.adminDashboard.openAddProviderModal()" class="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5">
+                <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add Provider
+              </button>
+              <button onclick="window.adminDashboard.saveAiProvidersSettings()" class="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5">
+                <i data-lucide="save" class="w-3.5 h-3.5"></i> Save Settings
+              </button>
+            </div>
           </div>
 
           <div id="ai-providers-grid" class="space-y-4">
@@ -8591,63 +8879,113 @@ class AdminDashboard {
       });
       const data = await resp.json();
       const providers = data.providers || [];
+      this._cachedAiProviders = providers;
 
       const grid = document.getElementById('ai-providers-grid');
       if (!grid) return;
 
-      grid.innerHTML = providers.map(p => `
-        <div class="p-4 border border-slate-200 rounded-xl bg-slate-50 hover:bg-white transition-all space-y-3" id="provider-card-${p.id}">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div class="flex items-center gap-3">
-              <div class="w-9 h-9 rounded-lg bg-slate-200 text-slate-700 flex items-center justify-center font-black text-xs uppercase flex-shrink-0">
-                ${p.provider.substring(0, 3)}
+      if (providers.length === 0) {
+        grid.innerHTML = `
+          <div class="py-12 text-center text-slate-400 text-xs">
+            <i data-lucide="cpu" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
+            No AI providers configured. Click <b>Add Provider</b> to register an AI gateway.
+          </div>
+        `;
+        if (window.lucide) window.lucide.createIcons();
+        return;
+      }
+
+      grid.innerHTML = providers.map(p => {
+        let badgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
+        let badgeText = p.status || 'Unknown';
+        if (badgeText === 'Configured — Healthy' || badgeText === 'healthy') {
+          badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+          badgeText = 'Configured — Healthy';
+        } else if (badgeText === 'Configured — Connection Failed' || badgeText === 'error') {
+          badgeClass = 'bg-rose-100 text-rose-800 border-rose-200';
+          badgeText = 'Connection Failed';
+        } else if (badgeText === 'Not Configured') {
+          badgeClass = 'bg-amber-100 text-amber-800 border-amber-200';
+          badgeText = 'Not Configured';
+        } else if (badgeText === 'Disabled') {
+          badgeClass = 'bg-slate-100 text-slate-600 border-slate-200';
+          badgeText = 'Disabled';
+        }
+
+        const typeBadge = (p.provider || 'ai').substring(0, 3).toUpperCase();
+
+        return `
+          <div class="p-4 border border-slate-200 rounded-xl bg-slate-50 hover:bg-white transition-all space-y-3" id="provider-card-${p.id}">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-lg bg-rose-100 text-rose-800 flex items-center justify-center font-black text-xs uppercase flex-shrink-0">
+                  ${typeBadge}
+                </div>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-slate-900 text-xs block">${p.name}</span>
+                    <span class="text-[10px] text-slate-400 font-mono">(${p.id})</span>
+                  </div>
+                  <span class="text-[10px] text-slate-500 font-mono block">Model: <b>${p.model}</b> ${p.fallback_model ? `• Fallback: ${p.fallback_model}` : ''}</span>
+                </div>
               </div>
+
+              <div class="flex items-center gap-2">
+                <span id="prov-status-${p.id}" class="px-2.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider border ${badgeClass}">
+                  ${badgeText}
+                </span>
+
+                <button 
+                  id="btn-test-prov-${p.id}"
+                  onclick="window.adminDashboard.testAiProvider('${p.id}', this)"
+                  class="px-2.5 py-1 text-xs font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition-all flex items-center gap-1 shadow-sm"
+                  title="Ping provider endpoint and measure live round-trip latency"
+                >
+                  <i data-lucide="activity" class="w-3.5 h-3.5 text-rose-600"></i>
+                  Test Connection
+                </button>
+
+                <button 
+                  onclick="window.adminDashboard.openEditProviderModal('${p.id}')"
+                  class="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all border border-slate-200"
+                  title="Edit Provider Settings & Key"
+                >
+                  <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                </button>
+
+                <button 
+                  onclick="window.adminDashboard.deleteAiProvider('${p.id}')"
+                  class="p-1.5 text-rose-600 hover:text-rose-900 hover:bg-rose-50 rounded-lg transition-all border border-rose-200"
+                  title="Delete Provider"
+                >
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-200 text-xs">
               <div>
-                <span class="font-bold text-slate-900 text-xs block">${p.name}</span>
-                <span class="text-[10px] text-slate-500 font-mono block">Model: ${p.model}</span>
+                <span class="text-[10px] font-bold text-slate-500 uppercase block">Masked Vault Credential</span>
+                <span class="font-mono text-slate-800 font-bold">${p.maskedKey || '••••••••••••'}</span>
+              </div>
+
+              <div>
+                <span class="text-[10px] font-bold text-slate-500 uppercase block">Execution Priority (1 = Top)</span>
+                <input type="number" id="prov-priority-${p.id}" data-id="${p.id}" min="1" max="20" value="${p.priority || 1}" class="prov-priority-input w-20 px-2 py-0.5 text-xs font-bold border border-slate-300 rounded focus:ring-1 focus:ring-rose-500 focus:outline-none" />
+              </div>
+
+              <div class="flex items-center sm:justify-end gap-2">
+                <label class="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                  <input type="checkbox" id="prov-enabled-${p.id}" data-id="${p.id}" ${p.enabled !== false ? 'checked' : ''} class="prov-enabled-input rounded text-rose-600 focus:ring-rose-500" />
+                  Active in Failover Chain
+                </label>
               </div>
             </div>
 
-            <div class="flex items-center gap-2">
-              <span id="prov-status-${p.id}" class="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
-                p.status.startsWith('healthy') ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-amber-100 text-amber-800 border border-amber-200'
-              }">
-                ${p.status}
-              </span>
-
-              <button 
-                id="btn-test-prov-${p.id}"
-                onclick="window.adminDashboard.testAiProvider('${p.id}', this)"
-                class="px-2.5 py-1 text-xs font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition-all flex items-center gap-1 shadow-sm"
-              >
-                <i data-lucide="activity" class="w-3.5 h-3.5 text-rose-600"></i>
-                Test Connection
-              </button>
-            </div>
+            <div id="prov-test-feedback-${p.id}" class="hidden text-[11px] pt-2 border-t border-slate-100"></div>
           </div>
-
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-200 text-xs">
-            <div>
-              <span class="text-[10px] font-bold text-slate-500 uppercase block">Masked Credential</span>
-              <span class="font-mono text-slate-700 font-bold">${p.maskedKey}</span>
-            </div>
-
-            <div>
-              <span class="text-[10px] font-bold text-slate-500 uppercase block">Execution Priority (1 = Top)</span>
-              <input type="number" id="prov-priority-${p.id}" min="1" max="10" value="${p.priority || 1}" class="w-20 px-2 py-0.5 text-xs font-bold border border-slate-300 rounded focus:ring-1 focus:ring-rose-500 focus:outline-none" />
-            </div>
-
-            <div class="flex items-center sm:justify-end gap-2">
-              <label class="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
-                <input type="checkbox" id="prov-enabled-${p.id}" ${p.enabled !== false ? 'checked' : ''} class="rounded text-rose-600 focus:ring-rose-500" />
-                Enabled in Failover Chain
-              </label>
-            </div>
-          </div>
-
-          <div id="prov-test-feedback-${p.id}" class="hidden text-[11px] pt-2 border-t border-slate-100"></div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
 
       if (window.lucide) window.lucide.createIcons();
     } catch (err) {
@@ -8682,24 +9020,24 @@ class AdminDashboard {
 
       if (res.success) {
         if (statusEl) {
-          statusEl.innerText = 'healthy';
-          statusEl.className = 'px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200';
+          statusEl.innerText = 'Configured — Healthy';
+          statusEl.className = 'px-2.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider border bg-emerald-100 text-emerald-800 border-emerald-200';
         }
         if (feedbackEl) {
           feedbackEl.classList.remove('hidden');
           feedbackEl.className = 'text-[11px] pt-2 border-t border-emerald-100 text-emerald-800 font-bold';
-          feedbackEl.innerText = `✓ Verified Active (${res.latency_ms}ms round-trip). Model: ${res.model}`;
+          feedbackEl.innerText = `✓ Verified Active (${res.latency_ms}ms round-trip). Live Model Response: "${res.response_snippet || res.model}"`;
         }
-        window.app.showToast(`Provider "${providerId}" connection successful (${res.latency_ms}ms)!`, 'success');
+        window.app.showToast(`Provider "${providerId}" healthy! (${res.latency_ms}ms)`, 'success');
       } else {
         if (statusEl) {
-          statusEl.innerText = 'error';
-          statusEl.className = 'px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-800 border border-rose-200';
+          statusEl.innerText = 'Connection Failed';
+          statusEl.className = 'px-2.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider border bg-rose-100 text-rose-800 border-rose-200';
         }
         if (feedbackEl) {
           feedbackEl.classList.remove('hidden');
           feedbackEl.className = 'text-[11px] pt-2 border-t border-rose-100 text-rose-800 font-bold';
-          feedbackEl.innerText = `✗ Connection failed: ${res.error}`;
+          feedbackEl.innerText = `✗ Live test failed: ${res.error}`;
         }
         window.app.showToast(`Test failed: ${res.error}`, 'error');
       }
@@ -8713,20 +9051,21 @@ class AdminDashboard {
   }
 
   async saveAiProvidersSettings() {
-    const providerIds = ['gemini_1', 'gemini_2', 'openrouter', 'groq', 'mistral_ocr'];
+    const priorityInputs = document.querySelectorAll('.prov-priority-input');
+    const enabledInputs = document.querySelectorAll('.prov-enabled-input');
     const updates = [];
 
-    for (const pid of providerIds) {
-      const priorityEl = document.getElementById(`prov-priority-${pid}`);
-      const enabledEl = document.getElementById(`prov-enabled-${pid}`);
-      if (priorityEl && enabledEl) {
+    priorityInputs.forEach(pInput => {
+      const pid = pInput.dataset.id;
+      const enabledInput = document.querySelector(`.prov-enabled-input[data-id="${pid}"]`);
+      if (pid) {
         updates.push({
           id: pid,
-          priority: parseInt(priorityEl.value, 10) || 1,
-          enabled: enabledEl.checked
+          priority: parseInt(pInput.value, 10) || 1,
+          enabled: enabledInput ? enabledInput.checked : true
         });
       }
-    }
+    });
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
     const token = currentUser ? (currentUser.token || currentUser.email) : '';
@@ -8750,6 +9089,299 @@ class AdminDashboard {
       this.renderAiProvidersSubTab(document.getElementById('ai-subtab-container'));
     } catch (err) {
       window.app.showToast(`Failed saving providers: ${err.message}`, 'error');
+    }
+  }
+
+  openAddProviderModal() {
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    modalContent.innerHTML = `
+      <div class="space-y-4">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-200">
+          <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+            <i data-lucide="plus-circle" class="w-4 h-4 text-rose-600"></i>
+            Add New AI Provider
+          </h3>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <form id="add-provider-form" onsubmit="event.preventDefault(); window.adminDashboard.submitAddProvider();" class="space-y-3 text-xs">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Provider ID <span class="text-rose-600">*</span></label>
+              <input type="text" id="add-prov-id" placeholder="e.g. gemini_3, custom_vllm" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Display Name <span class="text-rose-600">*</span></label>
+              <input type="text" id="add-prov-name" placeholder="e.g. Gemini Account 3" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Provider Type <span class="text-rose-600">*</span></label>
+              <select id="add-prov-type" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
+                <option value="gemini">Google Gemini</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="groq">Groq</option>
+                <option value="mistral">Mistral OCR</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Primary Model <span class="text-rose-600">*</span></label>
+              <input type="text" id="add-prov-model" placeholder="e.g. gemini-2.5-flash" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Fallback Model</label>
+              <input type="text" id="add-prov-fallback" placeholder="e.g. gemini-1.5-flash" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Priority (1 = Highest)</label>
+              <input type="number" id="add-prov-priority" value="6" min="1" max="20" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">API Key / Secret Token <span class="text-rose-600">*</span></label>
+            <input type="password" id="add-prov-key" placeholder="Enter provider API key (will be encrypted server-side)" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none font-mono" />
+            <span class="text-[10px] text-slate-400 block mt-0.5">Encrypted with PBKDF2-HMAC-SHA256 vault storage. Never exposed to browser clients.</span>
+          </div>
+
+          <div class="flex items-center justify-between pt-2">
+            <label class="flex items-center gap-2 font-bold text-slate-700 cursor-pointer">
+              <input type="checkbox" id="add-prov-enabled" checked class="rounded text-rose-600 focus:ring-rose-500" />
+              Enable Immediately in Failover Chain
+            </label>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-4 border-t border-slate-200">
+            <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">
+              Cancel
+            </button>
+            <button type="submit" class="px-5 py-2 bg-rose-700 hover:bg-rose-800 text-white font-bold rounded-lg shadow-sm">
+              Register Provider
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    window.app.openModal('admin-generic-modal');
+  }
+
+  async submitAddProvider() {
+    const id = document.getElementById('add-prov-id')?.value.trim();
+    const name = document.getElementById('add-prov-name')?.value.trim();
+    const provider = document.getElementById('add-prov-type')?.value;
+    const model = document.getElementById('add-prov-model')?.value.trim();
+    const fallbackModel = document.getElementById('add-prov-fallback')?.value.trim();
+    const priority = parseInt(document.getElementById('add-prov-priority')?.value || '1', 10);
+    const apiKey = document.getElementById('add-prov-key')?.value.trim();
+    const enabled = document.getElementById('add-prov-enabled')?.checked ?? true;
+
+    if (!id || !name || !model || !apiKey) {
+      window.app.showToast('Please fill all required fields.', 'error');
+      return;
+    }
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    try {
+      const resp = await fetch('/api/admin/ai/providers', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          action: 'add',
+          provider: {
+            id: id,
+            name: name,
+            provider: provider,
+            model: model,
+            fallback_model: fallbackModel,
+            priority: priority,
+            enabled: enabled,
+            apiKey: apiKey
+          }
+        })
+      });
+
+      const res = await resp.json();
+      if (!resp.ok || !res.success) {
+        throw new Error(res.error || 'Failed to add provider');
+      }
+
+      window.app.closeModal('admin-generic-modal');
+      window.app.showToast(`Provider "${name}" registered successfully!`, 'success');
+      this.renderAiProvidersSubTab(document.getElementById('ai-subtab-container'));
+    } catch (err) {
+      window.app.showToast(`Error: ${err.message}`, 'error');
+    }
+  }
+
+  openEditProviderModal(providerId) {
+    const prov = (this._cachedAiProviders || []).find(p => p.id === providerId);
+    if (!prov) {
+      window.app.showToast('Provider not found', 'error');
+      return;
+    }
+
+    const modalContent = document.getElementById('admin-generic-modal-content');
+    if (!modalContent) return;
+
+    modalContent.innerHTML = `
+      <div class="space-y-4">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-200">
+          <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+            <i data-lucide="edit-3" class="w-4 h-4 text-rose-600"></i>
+            Edit AI Provider: ${prov.name}
+          </h3>
+          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <form onsubmit="event.preventDefault(); window.adminDashboard.submitEditProvider('${prov.id}');" class="space-y-3 text-xs">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Display Name</label>
+              <input type="text" id="edit-prov-name" value="${prov.name || ''}" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Primary Model</label>
+              <input type="text" id="edit-prov-model" value="${prov.model || ''}" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Fallback Model</label>
+              <input type="text" id="edit-prov-fallback" value="${prov.fallback_model || ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">Execution Priority</label>
+              <input type="number" id="edit-prov-priority" value="${prov.priority || 1}" min="1" max="20" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Update API Key (Optional)</label>
+            <input type="password" id="edit-prov-key" placeholder="Leave empty to retain existing encrypted vault key" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none font-mono" />
+            <span class="text-[10px] text-slate-400 block mt-0.5">Current Vault Key: <code class="font-bold">${prov.maskedKey || 'Not Configured'}</code></span>
+          </div>
+
+          <div class="flex items-center justify-between pt-2">
+            <label class="flex items-center gap-2 font-bold text-slate-700 cursor-pointer">
+              <input type="checkbox" id="edit-prov-enabled" ${prov.enabled !== false ? 'checked' : ''} class="rounded text-rose-600 focus:ring-rose-500" />
+              Enabled in Failover Chain
+            </label>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-4 border-t border-slate-200">
+            <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">
+              Cancel
+            </button>
+            <button type="submit" class="px-5 py-2 bg-rose-700 hover:bg-rose-800 text-white font-bold rounded-lg shadow-sm">
+              Save Changes
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    if (window.lucide) window.lucide.createIcons();
+    window.app.openModal('admin-generic-modal');
+  }
+
+  async submitEditProvider(providerId) {
+    const name = document.getElementById('edit-prov-name')?.value.trim();
+    const model = document.getElementById('edit-prov-model')?.value.trim();
+    const fallbackModel = document.getElementById('edit-prov-fallback')?.value.trim();
+    const priority = parseInt(document.getElementById('edit-prov-priority')?.value || '1', 10);
+    const newApiKey = document.getElementById('edit-prov-key')?.value.trim();
+    const enabled = document.getElementById('edit-prov-enabled')?.checked ?? true;
+
+    const updates = {
+      name: name,
+      model: model,
+      fallback_model: fallbackModel,
+      priority: priority,
+      enabled: enabled
+    };
+    if (newApiKey) {
+      updates.apiKey = newApiKey;
+    }
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    try {
+      const resp = await fetch('/api/admin/ai/providers', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          action: 'edit',
+          providerId: providerId,
+          updates: updates
+        })
+      });
+
+      const res = await resp.json();
+      if (!resp.ok || !res.success) {
+        throw new Error(res.error || 'Failed to update provider');
+      }
+
+      window.app.closeModal('admin-generic-modal');
+      window.app.showToast(`Provider "${providerId}" updated successfully!`, 'success');
+      this.renderAiProvidersSubTab(document.getElementById('ai-subtab-container'));
+    } catch (err) {
+      window.app.showToast(`Error: ${err.message}`, 'error');
+    }
+  }
+
+  async deleteAiProvider(providerId) {
+    if (!confirm(`Are you sure you want to delete AI provider "${providerId}"? This will remove it from the failover chain.`)) {
+      return;
+    }
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    try {
+      const resp = await fetch('/api/admin/ai/providers', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          action: 'delete',
+          providerId: providerId
+        })
+      });
+
+      const res = await resp.json();
+      if (!resp.ok || !res.success) {
+        throw new Error(res.error || 'Failed to delete provider');
+      }
+
+      window.app.showToast(`Provider "${providerId}" deleted.`, 'info');
+      this.renderAiProvidersSubTab(document.getElementById('ai-subtab-container'));
+    } catch (err) {
+      window.app.showToast(`Delete failed: ${err.message}`, 'error');
     }
   }
 

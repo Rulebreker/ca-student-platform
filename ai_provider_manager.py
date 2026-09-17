@@ -5,6 +5,10 @@ import re
 import urllib.request
 import urllib.error
 import base64
+import hashlib
+import hmac
+import secrets
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -13,6 +17,8 @@ STORAGE_BASE = '/tmp' if IS_SERVERLESS else BASE_DIR
 PRIVATE_STORAGE_DIR = os.path.join(STORAGE_BASE, 'private_storage')
 SECRETS_FILE = os.path.join(PRIVATE_STORAGE_DIR, 'ai_secrets.json')
 
+FIREBASE_RTDB_URL = "https://excellenceca-45a9d-default-rtdb.firebaseio.com"
+
 # Standard browser User-Agent for providers that enforce Cloudflare browser checks (e.g. Groq)
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
@@ -20,6 +26,11 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 _provider_cooldowns: Dict[str, float] = {}
 _provider_failures: Dict[str, int] = {}
 _provider_latencies: Dict[str, float] = {}
+_memory_secrets_cache: Dict[str, str] = {}
+
+# Vault encryption constants (PBKDF2-HMAC-SHA256 authenticated cipher)
+VAULT_SALT = b"ExcellenceCA_AI_Secrets_Vault_Master_Salt_2026"
+VAULT_PASSPHRASE = b"ExcellenceCA_AI_Production_HMAC_Secret_Token_v2"
 
 DEFAULT_PROVIDERS = [
     {
@@ -30,6 +41,7 @@ DEFAULT_PROVIDERS = [
         'fallback_model': 'gemini-flash-latest',
         'priority': 1,
         'enabled': True,
+        'purpose': 'generation_validation',
         'roles': ['generation', 'validation'],
         'status': 'healthy'
     },
@@ -41,6 +53,7 @@ DEFAULT_PROVIDERS = [
         'fallback_model': 'gemini-flash-latest',
         'priority': 2,
         'enabled': True,
+        'purpose': 'generation_validation',
         'roles': ['generation', 'validation'],
         'status': 'healthy'
     },
@@ -52,6 +65,7 @@ DEFAULT_PROVIDERS = [
         'fallback_model': 'google/gemini-2.0-flash-exp:free',
         'priority': 3,
         'enabled': True,
+        'purpose': 'generation_validation',
         'roles': ['generation', 'validation'],
         'status': 'healthy'
     },
@@ -63,6 +77,7 @@ DEFAULT_PROVIDERS = [
         'fallback_model': 'llama-3.3-70b-versatile',
         'priority': 4,
         'enabled': True,
+        'purpose': 'generation_validation',
         'roles': ['generation', 'validation'],
         'status': 'healthy'
     },
@@ -71,16 +86,74 @@ DEFAULT_PROVIDERS = [
         'name': 'Mistral OCR (Document Intelligence)',
         'provider': 'mistral',
         'model': 'mistral-ocr-latest',
-        'fallback_model': 'mistral-ocr-latest',
-        'priority': 1,
+        'fallback_model': 'local-fallback',
+        'priority': 5,
         'enabled': True,
+        'purpose': 'ocr',
         'roles': ['ocr'],
         'status': 'healthy'
     }
 ]
 
+# ----------------------------------------------------------------------
+# SECURE SERVER-SIDE VAULT ENCRYPTION & CREDENTIAL STORE
+# ----------------------------------------------------------------------
+
+def _derive_vault_keys() -> Tuple[bytes, bytes]:
+    """Derive 32-byte encryption key and 32-byte MAC key using PBKDF2-HMAC-SHA256."""
+    derived = hashlib.pbkdf2_hmac('sha256', VAULT_PASSPHRASE, VAULT_SALT, 10000, dklen=64)
+    return derived[:32], derived[32:]
+
+def _encrypt_vault_payload(data_dict: Dict[str, Any]) -> str:
+    """Encrypt a dictionary into an authenticated ciphertext string."""
+    enc_key, mac_key = _derive_vault_keys()
+    plaintext = json.dumps(data_dict).encode('utf-8')
+    iv = secrets.token_bytes(16)
+    
+    # Counter-based stream cipher using SHA-256
+    blocks = []
+    for counter in range((len(plaintext) + 31) // 32):
+        block_key = hashlib.sha256(enc_key + iv + counter.to_bytes(4, 'big')).digest()
+        blocks.append(block_key)
+    keystream = b"".join(blocks)[:len(plaintext)]
+    ciphertext = bytes(p ^ k for p, k in zip(plaintext, keystream))
+    
+    # Compute HMAC-SHA256 over iv + ciphertext
+    tag = hmac.new(mac_key, iv + ciphertext, hashlib.sha256).digest()
+    packed = iv + tag + ciphertext
+    return base64.b64encode(packed).decode('ascii')
+
+def _decrypt_vault_payload(b64_payload: str) -> Dict[str, Any]:
+    """Decrypt an authenticated ciphertext string back into a dictionary."""
+    enc_key, mac_key = _derive_vault_keys()
+    raw = base64.b64decode(b64_payload.strip())
+    if len(raw) < 48:
+        raise ValueError("Invalid vault payload length.")
+    
+    iv = raw[:16]
+    tag = raw[16:48]
+    ciphertext = raw[48:]
+    
+    expected_tag = hmac.new(mac_key, iv + ciphertext, hashlib.sha256).digest()
+    if not hmac.compare_digest(tag, expected_tag):
+        raise ValueError("Vault payload HMAC verification failed.")
+        
+    blocks = []
+    for counter in range((len(ciphertext) + 31) // 32):
+        block_key = hashlib.sha256(enc_key + iv + counter.to_bytes(4, 'big')).digest()
+        blocks.append(block_key)
+    keystream = b"".join(blocks)[:len(ciphertext)]
+    plaintext = bytes(c ^ k for c, k in zip(ciphertext, keystream))
+    return json.loads(plaintext.decode('utf-8'))
+
 def load_secrets() -> Dict[str, str]:
-    """Load API secrets from environment variables or secure private storage."""
+    """
+    Load API secrets with priority:
+    1. Environment variables
+    2. Local file-based storage
+    3. In-memory cache
+    4. Decrypted Firebase RTDB vault (_server_vault/ai_credentials)
+    """
     raw = {}
     
     # 1. Environment variables
@@ -90,7 +163,7 @@ def load_secrets() -> Dict[str, str]:
         if val:
             raw[env_k] = val.strip()
 
-    # 2. File-based private storage
+    # 2. File-based storage
     if os.path.exists(SECRETS_FILE):
         try:
             with open(SECRETS_FILE, 'r', encoding='utf-8') as f:
@@ -99,23 +172,33 @@ def load_secrets() -> Dict[str, str]:
                     if k not in raw and v:
                         raw[k] = str(v).strip()
         except Exception as e:
-            print(f"[AI_PROVIDER_SECRETS_WARNING] Error reading {SECRETS_FILE}: {e}", flush=True)
+            print(f"[AI_SECRETS_WARN] Error reading {SECRETS_FILE}: {e}", flush=True)
 
-    # 3. Check bundled storage if in serverless / fallback
-    bundled_secrets = os.path.join(BASE_DIR, 'private_storage', 'ai_secrets.json')
-    if os.path.exists(bundled_secrets) and bundled_secrets != SECRETS_FILE:
+    # 3. Check memory cache
+    global _memory_secrets_cache
+    for k, v in _memory_secrets_cache.items():
+        if k not in raw and v:
+            raw[k] = str(v).strip()
+
+    # 4. Check encrypted Firebase vault if any primary key is missing
+    missing_primary = not (raw.get('GEMINI_API_KEY_1') or raw.get('gemini_1'))
+    if missing_primary or not (raw.get('MISTRAL_API_KEY') or raw.get('mistral_ocr')):
         try:
-            with open(bundled_secrets, 'r', encoding='utf-8') as f:
-                f_secrets = json.load(f)
-                for k, v in f_secrets.items():
-                    if k not in raw and v:
-                        raw[k] = str(v).strip()
+            vault_url = f"{FIREBASE_RTDB_URL}/_server_vault/ai_credentials.json"
+            req = urllib.request.Request(vault_url, headers={'User-Agent': USER_AGENT})
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                if isinstance(data, dict) and 'payload' in data:
+                    decrypted = _decrypt_vault_payload(data['payload'])
+                    _memory_secrets_cache.update(decrypted)
+                    for k, v in decrypted.items():
+                        if k not in raw and v:
+                            raw[k] = str(v).strip()
         except Exception:
             pass
 
     # Map aliases and canonical provider IDs
-    secrets = dict(raw)
-    
+    secrets_map = dict(raw)
     mapping = {
         'gemini_1': ['GEMINI_API_KEY_1', 'gemini_1', 'gemini1'],
         'gemini_2': ['GEMINI_API_KEY_2', 'gemini_2', 'gemini2'],
@@ -126,58 +209,136 @@ def load_secrets() -> Dict[str, str]:
     }
     
     for canon_id, candidates in mapping.items():
-        if canon_id not in secrets:
+        if canon_id not in secrets_map:
             for cand in candidates:
                 if raw.get(cand):
-                    secrets[canon_id] = raw[cand]
+                    secrets_map[canon_id] = raw[cand]
                     break
 
-    return secrets
+    return secrets_map
+
+def save_provider_credential(provider_id: str, api_key: str, sync_firebase: bool = True):
+    """
+    Save provider credential securely:
+    - Update local private storage
+    - Update in-memory cache
+    - Sync encrypted payload to Firebase RTDB server vault
+    """
+    clean_key = str(api_key).strip() if api_key else ''
+    if not clean_key:
+        return
+
+    secrets_dict = load_secrets()
+    secrets_dict[provider_id] = clean_key
+
+    mapping = {
+        'gemini_1': ['GEMINI_API_KEY_1'],
+        'gemini_2': ['GEMINI_API_KEY_2'],
+        'mistral_ocr': ['MISTRAL_API_KEY'],
+        'mistral': ['MISTRAL_API_KEY'],
+        'openrouter': ['OPENROUTER_API_KEY'],
+        'groq': ['GROQ_API_KEY']
+    }
+    for canon, candidates in mapping.items():
+        if provider_id == canon or provider_id in candidates:
+            secrets_dict[canon] = clean_key
+            for c in candidates:
+                secrets_dict[c] = clean_key
+
+    # Update in-memory cache
+    global _memory_secrets_cache
+    _memory_secrets_cache.update(secrets_dict)
+
+    # Save to local file
+    try:
+        os.makedirs(os.path.dirname(SECRETS_FILE), exist_ok=True)
+        with open(SECRETS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(secrets_dict, f, indent=2)
+    except Exception as e:
+        print(f"[AI_SECRETS_SAVE_WARN] Could not write to {SECRETS_FILE}: {e}")
+
+    # Sync encrypted to Firebase RTDB
+    if sync_firebase:
+        try:
+            encrypted_b64 = _encrypt_vault_payload(secrets_dict)
+            vault_url = f"{FIREBASE_RTDB_URL}/_server_vault/ai_credentials.json"
+            payload = {
+                'payload': encrypted_b64,
+                'updatedAt': datetime.now(timezone.utc).isoformat()
+            }
+            body = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(vault_url, data=body, method='PUT')
+            req.add_header('Content-Type', 'application/json')
+            with urllib.request.urlopen(req, timeout=4.0) as resp:
+                pass
+            print(f"[AI_VAULT_SYNC] Successfully persisted encrypted credentials to Firebase vault.", flush=True)
+        except Exception as e:
+            print(f"[AI_VAULT_SYNC_WARN] Failed to sync encrypted vault to Firebase: {e}", flush=True)
 
 def mask_key(key: Optional[str]) -> str:
-    """Mask key securely (e.g. AQ••••••••8qvA). Never expose full secret."""
+    """Mask key securely according to specification: ••••••••••••8F3A. Never expose full secret."""
     if not key:
         return 'Not Configured'
     clean = str(key).strip()
-    if len(clean) <= 8:
+    if len(clean) < 4:
         return '••••••••'
-    return f"{clean[:2]}••••••••{clean[-4:]}"
+    return f"••••••••••••{clean[-4:]}"
+
+# ----------------------------------------------------------------------
+# PROVIDER CONFIGURATION & CRUD
+# ----------------------------------------------------------------------
+
+def _map_purpose_to_roles(purpose: str) -> List[str]:
+    p = str(purpose or '').strip().lower()
+    if p in ('ocr', 'pdf/ocr', 'pdf_ocr'):
+        return ['ocr']
+    elif p in ('validation', 'mcq_validation', 'mcq validation'):
+        return ['validation']
+    elif p in ('generation', 'mcq_generation', 'mcq generation'):
+        return ['generation']
+    else:
+        return ['generation', 'validation']
 
 def get_registered_providers(data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Get providers list merged with user configurations stored in database."""
     base = [dict(p) for p in DEFAULT_PROVIDERS]
     if data and isinstance(data.get('ai_providers'), list):
-        overrides = {p['id']: p for p in data['ai_providers'] if isinstance(p, dict) and 'id' in p}
-        for bp in base:
-            pid = bp['id']
-            if pid in overrides:
-                for field in ['priority', 'enabled', 'model', 'fallback_model', 'name']:
-                    if field in overrides[pid]:
-                        bp[field] = overrides[pid][field]
+        custom_or_modified = data['ai_providers']
+        merged_map = {bp['id']: dict(bp) for bp in base}
+        
+        for p in custom_or_modified:
+            if isinstance(p, dict) and p.get('id'):
+                pid = p['id']
+                if pid in merged_map:
+                    merged_map[pid].update(p)
+                else:
+                    merged_map[pid] = dict(p)
+                    
+        return sorted(list(merged_map.values()), key=lambda x: x.get('priority', 99))
     return sorted(base, key=lambda x: x.get('priority', 99))
 
 def get_sanitized_providers(data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-    """Return provider configurations safe for frontend display (masked keys, live health)."""
+    """Return provider configurations safe for frontend display (masked keys, real health)."""
     providers = get_registered_providers(data)
-    secrets = load_secrets()
+    secrets_map = load_secrets()
     now = time.time()
     
     result = []
     for p in providers:
         pid = p['id']
-        key = secrets.get(pid, '')
+        key = secrets_map.get(pid, '')
         has_key = bool(key and len(key) > 5)
         
-        status = 'healthy'
+        status = 'Configured — Healthy'
         if not has_key:
-            status = 'missing_key'
+            status = 'Not Configured'
         elif not p.get('enabled', True):
-            status = 'disabled'
+            status = 'Disabled'
         elif pid in _provider_cooldowns and _provider_cooldowns[pid] > now:
             remaining = int(_provider_cooldowns[pid] - now)
-            status = f'cooling_down ({remaining}s)'
+            status = f'Configured — Cooling Down ({remaining}s)'
         elif _provider_failures.get(pid, 0) > 0:
-            status = 'degraded'
+            status = 'Configured — Connection Failed'
 
         p_copy = dict(p)
         p_copy['maskedKey'] = mask_key(key)
@@ -186,6 +347,70 @@ def get_sanitized_providers(data: Optional[Dict[str, Any]] = None) -> List[Dict[
         p_copy['lastLatencyMs'] = _provider_latencies.get(pid, None)
         result.append(p_copy)
     return result
+
+def add_provider(data: Dict[str, Any], provider_payload: Dict[str, Any], api_key: Optional[str] = None) -> Dict[str, Any]:
+    providers = get_registered_providers(data)
+    pid = provider_payload.get('id') or f"custom_{int(time.time()*1000)}"
+    name = provider_payload.get('name') or 'Custom AI Provider'
+    prov_type = provider_payload.get('provider') or 'openrouter'
+    model = provider_payload.get('model') or 'custom-model'
+    purpose = provider_payload.get('purpose') or 'generation_validation'
+    priority = int(provider_payload.get('priority', len(providers) + 1))
+    enabled = bool(provider_payload.get('enabled', True))
+
+    new_prov = {
+        'id': pid,
+        'name': name,
+        'provider': prov_type,
+        'model': model,
+        'fallback_model': provider_payload.get('fallback_model', ''),
+        'priority': priority,
+        'enabled': enabled,
+        'purpose': purpose,
+        'roles': _map_purpose_to_roles(purpose),
+        'status': 'healthy'
+    }
+
+    # Filter out duplicate ID if exists
+    updated = [p for p in providers if p['id'] != pid]
+    updated.append(new_prov)
+    data['ai_providers'] = sorted(updated, key=lambda x: x.get('priority', 99))
+
+    if api_key and api_key.strip():
+        save_provider_credential(pid, api_key.strip())
+
+    return new_prov
+
+def update_provider(data: Dict[str, Any], provider_id: str, updates: Dict[str, Any], api_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    providers = get_registered_providers(data)
+    target = next((p for p in providers if p['id'] == provider_id), None)
+    if not target:
+        return None
+
+    for f in ['name', 'model', 'fallback_model', 'priority', 'enabled', 'purpose', 'provider']:
+        if f in updates:
+            target[f] = updates[f]
+
+    if 'purpose' in updates:
+        target['roles'] = _map_purpose_to_roles(updates['purpose'])
+
+    if 'priority' in target:
+        target['priority'] = int(target['priority'])
+
+    data['ai_providers'] = sorted(providers, key=lambda x: x.get('priority', 99))
+
+    if api_key and api_key.strip() and not api_key.strip().startswith('••••'):
+        save_provider_credential(provider_id, api_key.strip())
+
+    return target
+
+def delete_provider(data: Dict[str, Any], provider_id: str) -> bool:
+    providers = get_registered_providers(data)
+    filtered = [p for p in providers if p['id'] != provider_id]
+    if len(filtered) < len(providers):
+        data['ai_providers'] = filtered
+        return True
+    return False
 
 def mark_provider_failure(provider_id: str, error_msg: str, status_code: Optional[int] = None):
     """Mark a provider failure and apply exponential/circuit cooldown."""
@@ -204,6 +429,10 @@ def mark_provider_success(provider_id: str, latency_ms: float):
     _provider_latencies[provider_id] = round(latency_ms, 1)
     if provider_id in _provider_cooldowns:
         del _provider_cooldowns[provider_id]
+
+# ----------------------------------------------------------------------
+# DIRECT HTTP PROVIDER CLIENTS
+# ----------------------------------------------------------------------
 
 def _call_gemini_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 35.0) -> Tuple[str, float]:
     start = time.time()
@@ -270,16 +499,16 @@ def _call_openrouter_api(api_key: str, model: str, prompt: str, system_instructi
     req = urllib.request.Request(url, data=req_body, method='POST')
     req.add_header('Content-Type', 'application/json')
     req.add_header('Authorization', f"Bearer {api_key}")
-    req.add_header('HTTP-Referer', 'https://excellenceca.vercel.app')
-    req.add_header('X-Title', 'ExcellenceCA')
+    req.add_header('HTTP-Referer', "https://excellenceca.vercel.app")
+    req.add_header('X-Title', "ExcellenceCA Automated AI MCQ Studio")
     req.add_header('User-Agent', USER_AGENT)
 
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         resp_bytes = resp.read()
         resp_json = json.loads(resp_bytes.decode('utf-8'))
-
+        
     latency = (time.time() - start) * 1000.0
-
+    
     try:
         text = resp_json['choices'][0]['message']['content']
         return text, latency
@@ -313,9 +542,9 @@ def _call_groq_api(api_key: str, model: str, prompt: str, system_instruction: Op
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         resp_bytes = resp.read()
         resp_json = json.loads(resp_bytes.decode('utf-8'))
-
+        
     latency = (time.time() - start) * 1000.0
-
+    
     try:
         text = resp_json['choices'][0]['message']['content']
         return text, latency
@@ -323,8 +552,8 @@ def _call_groq_api(api_key: str, model: str, prompt: str, system_instruction: Op
         raise ValueError(f"Malformed Groq response: {resp_json}")
 
 def call_mistral_ocr(pdf_bytes: bytes, filename: str = 'document.pdf', timeout: float = 60.0) -> Dict[str, Any]:
-    secrets = load_secrets()
-    api_key = secrets.get('mistral_ocr') or secrets.get('mistral')
+    secrets_map = load_secrets()
+    api_key = secrets_map.get('mistral_ocr') or secrets_map.get('mistral')
     if not api_key:
         raise ValueError("Mistral OCR API key not configured.")
 
@@ -413,6 +642,10 @@ def _extract_local_pdf_text(pdf_bytes: bytes) -> str:
     except Exception:
         return ""
 
+# ----------------------------------------------------------------------
+# FAILOVER GATEWAY
+# ----------------------------------------------------------------------
+
 def call_llm_with_failover(
     purpose: str = 'generation',
     prompt: str = '',
@@ -423,7 +656,7 @@ def call_llm_with_failover(
     timeout: float = 35.0
 ) -> Tuple[str, str, str]:
     providers = get_registered_providers(data)
-    secrets = load_secrets()
+    secrets_map = load_secrets()
     now = time.time()
     
     candidates = []
@@ -433,7 +666,7 @@ def call_llm_with_failover(
             continue
         if purpose not in p.get('roles', []):
             continue
-        key = secrets.get(pid)
+        key = secrets_map.get(pid)
         if not key:
             continue
         candidates.append(p)
@@ -450,7 +683,7 @@ def call_llm_with_failover(
     
     for prov in candidates:
         pid = prov['id']
-        key = secrets.get(pid, '')
+        key = secrets_map.get(pid, '')
         model = prov.get('model', '')
         fallback_model = prov.get('fallback_model', '')
         
@@ -475,17 +708,6 @@ def call_llm_with_failover(
                 else:
                     raise ValueError(f"Unknown provider engine: {prov['provider']}")
 
-                if not text or not text.strip():
-                    raise ValueError("Empty response received from model.")
-                    
-                if json_mode:
-                    clean_text = text.strip()
-                    if clean_text.startswith("```"):
-                        clean_text = re.sub(r"^```(?:json)?\s*", "", clean_text)
-                        clean_text = re.sub(r"\s*```$", "", clean_text)
-                    json.loads(clean_text)
-                    text = clean_text
-
                 mark_provider_success(pid, latency)
                 print(f"[AI_GATEWAY_SUCCESS] Provider '{pid}' (model: {current_model}) responded in {latency:.1f}ms.", flush=True)
                 return text, pid, current_model
@@ -493,23 +715,34 @@ def call_llm_with_failover(
             except Exception as e:
                 err_str = str(e)
                 status_code = getattr(e, 'code', None)
-                print(f"[AI_GATEWAY_ERR] Provider '{pid}' with model '{current_model}' failed: {err_str}", flush=True)
-                errors.append(f"{pid}({current_model}): {err_str}")
                 mark_provider_failure(pid, err_str, status_code)
-                continue
+                errors.append(f"[{pid}/{current_model}]: {err_str}")
+                print(f"[AI_GATEWAY_RETRY] Failed {pid}/{current_model}: {err_str}. Cascading to fallback...", flush=True)
                 
     raise RuntimeError(f"All AI providers failed for '{purpose}'. Errors: " + " | ".join(errors))
 
+# ----------------------------------------------------------------------
+# TEST PROVIDER LIVE CONNECTION
+# ----------------------------------------------------------------------
+
 def test_provider_connection(provider_id: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Test live provider connection by sending a real minimal test request.
+    Never claims 'Healthy' unless an actual provider request succeeds.
+    """
     providers = get_registered_providers(data)
     prov = next((p for p in providers if p['id'] == provider_id), None)
     if not prov:
-        return {'success': False, 'error': f"Provider '{provider_id}' not found."}
+        return {'success': False, 'error': f"Provider '{provider_id}' not found in registry."}
         
-    secrets = load_secrets()
-    key = secrets.get(provider_id)
+    secrets_map = load_secrets()
+    key = secrets_map.get(provider_id)
     if not key:
-        return {'success': False, 'error': f"API Key for '{provider_id}' is not set."}
+        return {
+            'success': False, 
+            'error': f"API Key for '{prov.get('name')}' is not configured. Please add an API key in Provider Settings.",
+            'status': 'Not Configured'
+        }
 
     model = prov.get('model', '')
     prompt = "Ping test. Respond with valid JSON: {\"status\": \"ok\", \"message\": \"pong\"}"
@@ -518,21 +751,22 @@ def test_provider_connection(provider_id: str, data: Optional[Dict[str, Any]] = 
     try:
         start = time.time()
         if prov['provider'] == 'gemini':
-            text, latency = _call_gemini_api(key, model, prompt, system_instruction, json_mode=True, timeout=12.0)
+            text, latency = _call_gemini_api(key, model, prompt, system_instruction, json_mode=True, timeout=15.0)
         elif prov['provider'] == 'openrouter':
-            text, latency = _call_openrouter_api(key, model, prompt, system_instruction, json_mode=True, timeout=12.0)
+            text, latency = _call_openrouter_api(key, model, prompt, system_instruction, json_mode=True, timeout=15.0)
         elif prov['provider'] == 'groq':
-            text, latency = _call_groq_api(key, model, prompt, system_instruction, json_mode=True, timeout=12.0)
+            text, latency = _call_groq_api(key, model, prompt, system_instruction, json_mode=True, timeout=15.0)
         elif prov['provider'] == 'mistral':
-            sample_pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length 44 >>\nstream\nBT /F1 24 Tf 100 700 Td (ExcellenceCA OCR Test) Tj ET\nendstream\nendobj\nxref\n0 5\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\n0000000216 00000 n\ntrailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n310\n%%EOF\n"
-            ocr_res = call_mistral_ocr(sample_pdf, filename='ping_test.pdf', timeout=15.0)
+            sample_pdf = b"%PDF-1.4\n1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>endobj\n4 0 obj<< /Length 36 >>stream\nBT /F1 12 Tf 50 700 Td (Ping) Tj ET\nendstream\nendobj\nxref\n0 5\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\n0000000216 00000 n\ntrailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n302\n%%EOF\n"
+            ocr_res = call_mistral_ocr(sample_pdf, filename='ping_test.pdf', timeout=20.0)
             latency = ocr_res.get('latency_ms', (time.time() - start) * 1000.0)
             mark_provider_success(provider_id, latency)
             return {
                 'success': True,
                 'latency_ms': round(latency, 1),
                 'model': model,
-                'message': f"OCR successfully verified ({ocr_res.get('engine')})."
+                'status': 'Configured — Healthy',
+                'message': f"OCR verified successfully ({ocr_res.get('engine')})."
             }
         else:
             return {'success': False, 'error': f"Unknown provider type: {prov['provider']}"}
@@ -542,6 +776,7 @@ def test_provider_connection(provider_id: str, data: Optional[Dict[str, Any]] = 
             'success': True,
             'latency_ms': round(latency, 1),
             'model': model,
+            'status': 'Configured — Healthy',
             'raw_response': text[:100]
         }
     except Exception as e:
@@ -550,5 +785,6 @@ def test_provider_connection(provider_id: str, data: Optional[Dict[str, Any]] = 
             'success': False,
             'latency_ms': None,
             'model': model,
+            'status': 'Configured — Connection Failed',
             'error': str(e)
         }

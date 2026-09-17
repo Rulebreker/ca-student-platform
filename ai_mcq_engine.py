@@ -277,7 +277,11 @@ def generate_exact_mcqs_pipeline(
     marks_per_correct: float = 2.0,
     negative_marks: float = 0.5,
     progress_callback: Optional[Any] = None,
-    data: Optional[Dict[str, Any]] = None
+    data: Optional[Dict[str, Any]] = None,
+    exam_level_id: str = '',
+    subject_id: str = '',
+    chapter: str = '',
+    chapter_id: str = ''
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Main resilient generation pipeline guaranteeing EXACT count of validated MCQs.
@@ -291,8 +295,13 @@ def generate_exact_mcqs_pipeline(
     # Retrieve relevant source chunks for targeted context
     relevant_chunks = ai_document_indexer.retrieve_relevant_chunks(
         documents=source_documents,
-        query_topic=topic,
+        query_topic=topic or chapter,
         subject=subject,
+        subject_id=subject_id,
+        exam_level=exam_level,
+        exam_level_id=exam_level_id,
+        chapter=chapter,
+        chapter_id=chapter_id,
         max_chunks=8
     )
 

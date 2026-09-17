@@ -52,19 +52,30 @@ def create_generation_job(
                 return True, None, j
 
         job_id = f"job-ai-{int(now_ts * 1000)}-{uuid.uuid4().hex[:6]}"
+        chapter = params.get('chapter', '') or params.get('chapterName', '')
+        chapter_id = params.get('chapterId', '')
+        exam_level_id = params.get('examLevelId', 'foundation')
+        platform_xp = float(params.get('platformXp', 10))
+        allowed_plans = params.get('allowedPlans', ['free', 'trial', 'core', 'plus', 'elite'])
+
         job_record = {
             'id': job_id,
             'title': title,
             'subject': subject,
             'subjectId': params.get('subjectId', 'sub-1'),
+            'chapter': chapter,
+            'chapterId': chapter_id,
             'topic': topic,
             'examLevel': params.get('examLevel', 'CA Foundation'),
+            'examLevelId': exam_level_id,
             'difficulty': params.get('difficulty', 'ICAI Exam Standard'),
             'durationMinutes': int(params.get('durationMinutes', 15)),
             'count': count,
             'marksPerCorrect': float(params.get('marksPerCorrect', 2.0)),
             'negativeMarksPerWrong': float(params.get('negativeMarksPerWrong', 0.5)),
-            'allowedPlans': params.get('allowedPlans', ['free', 'trial', 'pro', 'elite']),
+            'platformXp': platform_xp,
+            'maxAttempts': int(params.get('maxAttempts', 3)),
+            'allowedPlans': allowed_plans,
             'autoPublish': bool(params.get('autoPublish', True)),
             'status': 'QUEUED',
             'progressPct': 5,
@@ -121,6 +132,24 @@ def _run_generation_job_worker(
         count = int(params.get('count', 5))
         test_id = f"tst-ai-{int(time.time() * 1000)}"
         
+        chapter = params.get('chapter', '') or params.get('chapterName', '')
+        chapter_id = params.get('chapterId', '')
+        exam_level_id = params.get('examLevelId', 'foundation')
+        platform_xp = float(params.get('platformXp', 10))
+        allowed_plans = params.get('allowedPlans', ['free', 'trial', 'core', 'plus', 'elite'])
+        max_attempts = int(params.get('maxAttempts', 3))
+
+        # Map subjectId if needed
+        sub_id = params.get('subjectId')
+        if not sub_id:
+            sub_map = {
+                'Accounting': 'sub-1',
+                'Business Law': 'sub-2',
+                'Business Economics': 'sub-3',
+                'Quantitative Aptitude': 'sub-4'
+            }
+            sub_id = sub_map.get(params.get('subject'), 'sub-1')
+
         questions, metrics = ai_mcq_engine.generate_exact_mcqs_pipeline(
             subject=params.get('subject', 'Accounting'),
             topic=params.get('topic', 'General'),
@@ -134,7 +163,11 @@ def _run_generation_job_worker(
             marks_per_correct=float(params.get('marksPerCorrect', 2.0)),
             negative_marks=float(params.get('negativeMarksPerWrong', 0.5)),
             progress_callback=_on_progress,
-            data=data
+            data=data,
+            exam_level_id=exam_level_id,
+            subject_id=sub_id,
+            chapter=chapter,
+            chapter_id=chapter_id
         )
 
         with _jobs_lock:
@@ -151,37 +184,30 @@ def _run_generation_job_worker(
         marks_per_correct = float(params.get('marksPerCorrect', 2.0))
         max_marks = float(len(questions) * marks_per_correct)
 
-        # Map subjectId if needed
-        sub_id = params.get('subjectId')
-        if not sub_id:
-            sub_map = {
-                'Accounting': 'sub-1',
-                'Business Law': 'sub-2',
-                'Business Economics': 'sub-3',
-                'Quantitative Aptitude': 'sub-4'
-            }
-            sub_id = sub_map.get(params.get('subject'), 'sub-1')
-
         test_record = {
             'id': test_id,
             'title': params.get('title'),
-            'description': params.get('description') or f"AI-Generated {params.get('difficulty')} Practice Test for {params.get('topic')}.",
+            'description': params.get('description') or f"AI-Generated {params.get('difficulty')} Practice Test for {chapter or params.get('topic')}.",
             'subject': params.get('subject'),
             'subjectId': sub_id,
+            'chapter': chapter,
+            'chapterId': chapter_id,
             'topic': params.get('topic'),
             'examLevel': params.get('examLevel', 'CA Foundation'),
+            'examLevelId': exam_level_id,
             'durationMinutes': int(params.get('durationMinutes', 15)),
             'totalQuestions': len(questions),
             'marksPerCorrect': marks_per_correct,
             'negativeMarksPerWrong': float(params.get('negativeMarksPerWrong', 0.5)),
             'maximumMarks': max_marks,
-            'allowedPlans': params.get('allowedPlans', ['free', 'trial', 'pro', 'elite']),
+            'allowedPlans': allowed_plans,
             'hideFromNonEligible': False,
             'isPublished': auto_publish,
             'status': 'Published' if auto_publish else 'Draft',
-            'pointsPerCorrect': marks_per_correct,
+            'pointsPerCorrect': platform_xp,
+            'platformXp': platform_xp,
             'unattemptedMarks': 0.0,
-            'maxAttempts': 3,
+            'maxAttempts': max_attempts,
             'aiGenerated': True,
             'aiJobId': job_id,
             'createdAt': now_iso,
@@ -197,6 +223,11 @@ def _run_generation_job_worker(
         data['tests'].insert(0, test_record)
         for q in questions:
             q['testId'] = test_id
+            q['points'] = platform_xp
+            q['xp'] = platform_xp
+            q['chapter'] = chapter
+            q['chapterId'] = chapter_id
+            q['examLevel'] = params.get('examLevel', 'CA Foundation')
             data['questions'].append(q)
 
         # 5. Create Telemetry Log
