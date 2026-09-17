@@ -14067,6 +14067,16 @@
   },
   "admin_audit_logs": [
     {
+      "id": "log_4372e68c74ec",
+      "action": "ADMIN_RESET_PASSWORD",
+      "adminId": "usr-admin-1",
+      "adminEmail": "adminrulebreker@rulebrekerdothunter.com",
+      "targetUserId": "usr-student-1789652773097",
+      "targetUserEmail": "regtest_1789652773@castudent.in",
+      "targetUserName": "Regression Test Student",
+      "timestamp": "2026-09-17T13:46:16.284043+00:00"
+    },
+    {
       "id": "log_0bf108f066f2",
       "action": "ADMIN_RESET_PASSWORD",
       "adminId": "usr-admin-1",
@@ -19864,7 +19874,9 @@
     "token_student_82bee0d96a544e1e",
     "token_student_c8a55af216c54be8",
     "token_student_9633fbbdef87429b",
-    "token_student_6b6913f70abe4c24"
+    "token_student_6b6913f70abe4c24",
+    "token_student_68fa644dd80a4f81",
+    "token_student_35ad4f28eb6843b9"
   ],
   "assignments": [
     {
@@ -19990,6 +20002,9 @@
     "regtest_1789652059",
     "usr-student-1789308526406",
     "test22@gmail.com",
-    "test22"
+    "test22",
+    "usr-student-1789652773097",
+    "regtest_1789652773@castudent.in",
+    "regtest_1789652773"
   ]
 }
