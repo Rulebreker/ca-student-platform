@@ -7986,7 +7986,8 @@ class AdminDashboard {
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
     const token = currentUser ? (currentUser.token || currentUser.email) : '';
 
-    // If inline PDFs were selected, upload them first
+    let matchedDocId = null;
+    // If inline PDFs were selected, upload them first (with deterministic SHA-256 deduplication)
     if (this.aiSelectedPdfFiles && this.aiSelectedPdfFiles.length > 0) {
       for (const pdfFile of this.aiSelectedPdfFiles) {
         if (pdfFile.size > 4 * 1024 * 1024) {
@@ -7994,9 +7995,9 @@ class AdminDashboard {
           continue;
         }
         try {
-          if (stageText) stageText.innerText = `Running Mistral OCR on ${pdfFile.name}...`;
+          if (stageText) stageText.innerText = `Indexing / Checking Deduplication for ${pdfFile.name}...`;
           const base64Data = await this._readFileAsBase64(pdfFile);
-          await fetch('/api/admin/ai/documents/upload', {
+          const upResp = await fetch('/api/admin/ai/documents/upload', {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -8013,6 +8014,15 @@ class AdminDashboard {
               chapterId: chapterId
             })
           });
+          if (upResp.ok) {
+            const upRes = await upResp.json();
+            if (upRes.document && upRes.document.id) {
+              matchedDocId = upRes.document.id;
+              if (upRes.alreadyProcessed) {
+                console.log(`[DEDUPLICATION] Document ${pdfFile.name} was already indexed. Reusing docId ${matchedDocId}.`);
+              }
+            }
+          }
         } catch (uploadErr) {
           console.warn('[AI_INLINE_UPLOAD_WARNING]', uploadErr);
         }
@@ -8035,6 +8045,8 @@ class AdminDashboard {
           chapter: chapter,
           chapterId: chapterId,
           topic: topic,
+          sourceDocId: matchedDocId,
+          sourceDocumentId: matchedDocId,
           examLevel: examLevel,
           examLevelId: examLevelId,
           difficulty: difficulty,
@@ -8551,7 +8563,11 @@ class AdminDashboard {
         throw new Error(errMsg);
       }
 
-      window.app.showToast(`Document "${file.name}" indexed successfully with Mistral OCR!`, 'success');
+      if (res.alreadyProcessed) {
+        window.app.showToast(`Document "${file.name}" was already indexed (v${res.document?.contentVersion || 1}). Reusing existing structured knowledge base.`, 'info');
+      } else {
+        window.app.showToast(`Document "${file.name}" indexed successfully with Mistral OCR!`, 'success');
+      }
       this.renderAiLibrarySubTab(document.getElementById('ai-subtab-container'));
 
     } catch (err) {

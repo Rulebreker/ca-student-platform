@@ -247,10 +247,34 @@ You MUST generate a question testing a DIFFERENT concept or provision than all o
     if admin_description and admin_description.strip():
         guidance_clause = f"\nAdministrative Focus Guidance:\n\"\"\"{admin_description.strip()[:400]}\"\"\"\n"
 
-    # Legacy context fallback (only if non-empty and not the default stub)
-    legacy_context_clause = ""
+    # Authoritative syllabus source material grounding clause
+    grounded_source_clause = ""
     if context and context.strip() and not context.startswith("Standard ICAI syllabus concepts"):
-        legacy_context_clause = f"\nReference Notes:\n\"\"\"\n{context.strip()[:1200]}\n\"\"\"\n"
+        grounded_source_clause = f"""
+AUTHORITATIVE SYLLABUS SOURCE MATERIAL (GROUNDED KNOWLEDGE BASE):
+\"\"\"
+{context.strip()[:3000]}
+\"\"\"
+
+MANDATORY SOURCE-GROUNDED GENERATION RULES:
+1. You are generating examination questions strictly from the supplied syllabus/source material above.
+2. Do NOT introduce concepts, terminology, formulas, subtopics or advanced material that are not supported by the supplied source content.
+3. If the source material is insufficient to formulate a valid, high-quality question for this slot, return "INSUFFICIENT_SOURCE" in the question field rather than inventing content.
+4. Do NOT silently fall back to general ungrounded knowledge outside this authoritative scope.
+"""
+
+    task_instruction = f"Task: Using your expert knowledge of the ICAI syllabus and statutory reasoning, formulate exactly 1 original, challenging CA-style MCQ testing '{ch_name}'."
+    rules_instruction = """Rules:
+- Derive all question logic, scenarios, and options from authoritative syllabus principles.
+- Do NOT copy or paraphrase any prompt guidance verbatim.
+- Respond with ONLY the required JSON object."""
+    if grounded_source_clause:
+        task_instruction = f"Task: Using your expert knowledge of the ICAI syllabus and statutory reasoning grounded in authoritative source material, formulate exactly 1 original, challenging CA-style MCQ testing '{ch_name}'."
+        rules_instruction = """Rules:
+- Derive all question logic, scenarios, and options strictly from supplied source material.
+- If source material is provided and insufficient to formulate a valid question, output "INSUFFICIENT_SOURCE".
+- Do NOT copy or paraphrase any prompt guidance or source verbatim.
+- Respond with ONLY the required JSON object."""
 
     return f"""Exam Level: {exam_level}
 Subject: {subject}
@@ -262,18 +286,15 @@ Allowed Syllabus Topics for this Chapter:
 
 Core Conceptual Focus:
 {allowed_concepts_str}
-{guidance_clause}{legacy_context_clause}
+{guidance_clause}{grounded_source_clause}
 Question Slot: {slot_number} of {total_count} (Attempt: {attempt_number})
 Focal Angle for this Slot: {slot_angle}
 Category: {question_category}
 Target Speed: {question_speed}
 Difficulty: {difficulty}
 {prev_clause}{rejected_clause}
-Task: Using your expert knowledge of the ICAI syllabus and statutory reasoning, formulate exactly 1 original, challenging CA-style MCQ testing '{ch_name}'.
-Rules:
-- Derive all question logic, scenarios, and options from authoritative syllabus principles.
-- Do NOT copy or paraphrase any prompt guidance verbatim.
-- Respond with ONLY the required JSON object.
+{task_instruction}
+{rules_instruction}
 
 Respond with ONLY this JSON object:
 {{
@@ -475,6 +496,12 @@ def validate_mcq_locally_deterministic(
 
     # 1. Non-empty question stem check
     q_text = str(q_data.get('question') or q_data.get('text') or '').strip()
+    if 'INSUFFICIENT_SOURCE' in q_text.upper():
+        return False, "Candidate question returned INSUFFICIENT_SOURCE (insufficient syllabus grounding).", "INSUFFICIENT_SOURCE"
+    for opt_k in ['optionA', 'optionB', 'optionC', 'optionD']:
+        if 'INSUFFICIENT_SOURCE' in str(q_data.get(opt_k) or '').upper():
+            return False, f"Option {opt_k} returned INSUFFICIENT_SOURCE.", "INSUFFICIENT_SOURCE"
+
     if not q_text or len(q_text) < 15:
         return False, "Question stem is empty or too short (<15 characters).", "EMPTY_QUESTION"
     
@@ -579,6 +606,18 @@ def validate_mcq_locally_deterministic(
         if is_reprod:
             return False, f"Source reproduction rejected: {reprod_reason}", "SOURCE_REPRODUCTION_REJECTED"
 
+    # 9. Insufficient source rejection (prevent ungrounded halluncination)
+    if 'INSUFFICIENT_SOURCE' in q_text.upper():
+        return False, "Candidate question returned INSUFFICIENT_SOURCE (insufficient syllabus grounding).", "INSUFFICIENT_SOURCE"
+    for opt_k, opt_v in opts.items():
+        if 'INSUFFICIENT_SOURCE' in str(opt_v).upper():
+            return False, f"Option {opt_k} returned INSUFFICIENT_SOURCE.", "INSUFFICIENT_SOURCE"
+
+    # 10. Strict out-of-syllabus protection
+    q_ch_id = str(q_data.get('chapterId') or '').strip()
+    if chapter_id and q_ch_id and q_ch_id != chapter_id.strip():
+        return False, f"Out-of-syllabus question: tagged with chapterId '{q_ch_id}' instead of required '{chapter_id}'.", "OUT_OF_SYLLABUS_REJECTED"
+
     return True, "Passed local deterministic validation.", None
 
 # ----------------- Core Engine Methods -----------------
@@ -627,20 +666,27 @@ def generate_single_mcq(
         subject = chapter_metadata.get('subject', subject)
         exam_level = chapter_metadata.get('examLevel', exam_level)
 
-    # 2. Legacy context handling (if any caller still passes context_chunks)
+    # 2. Authoritative Syllabus Source Grounding & Traceability
     context_text = ""
     source_doc_id = None
+    source_content_id = None
     source_page = None
-    if context_chunks:
-        selected_chunk = context_chunks[0]
-        raw_text = selected_chunk.get('text', '')
-        if len(raw_text) > 1200 and attempt_number > 1:
-            offset = ((attempt_number - 1) * 450) % max(1, len(raw_text) - 900)
-            context_text = raw_text[offset:offset + 2500]
+    source_chapter = chapter
+    source_topic = topic
+    if context_chunks and len(context_chunks) > 0:
+        chunk_idx = (slot_number - 1 + (attempt_number - 1)) % len(context_chunks)
+        selected_chunk = context_chunks[chunk_idx]
+        raw_text = selected_chunk.get('extractedText') or selected_chunk.get('text', '')
+        if len(raw_text) > 1500 and attempt_number > 1:
+            offset = ((attempt_number - 1) * 350) % max(1, len(raw_text) - 900)
+            context_text = raw_text[offset:offset + 3000]
         else:
-            context_text = raw_text[:2500]
-        source_doc_id = selected_chunk.get('docId')
-        source_page = selected_chunk.get('pages', [1])[0] if selected_chunk.get('pages') else 1
+            context_text = raw_text[:3000]
+        source_doc_id = selected_chunk.get('sourceDocumentId') or selected_chunk.get('docId')
+        source_content_id = selected_chunk.get('contentId') or selected_chunk.get('chunkId')
+        source_page = selected_chunk.get('sourcePage') or (selected_chunk.get('pages', [1])[0] if selected_chunk.get('pages') else 1)
+        source_chapter = selected_chunk.get('chapter') or chapter
+        source_topic = selected_chunk.get('topic') or selected_chunk.get('heading') or topic
 
     prev_summary = "None yet."
     if previous_concepts:
@@ -715,6 +761,9 @@ def generate_single_mcq(
     if chapter:
         q_data['chapter'] = chapter
     q_data['sourceDocId'] = source_doc_id
+    q_data['sourceContentId'] = source_content_id
+    q_data['sourceChapter'] = source_chapter
+    q_data['sourceTopic'] = source_topic
     q_data['sourcePage'] = source_page
 
     return q_data, provider_id, model_name
@@ -897,6 +946,22 @@ def generate_exact_mcqs_pipeline(
     canonical_subject = resolved_ch_meta.get('subject', subject)
     canonical_exam_level = resolved_ch_meta.get('examLevel', exam_level)
 
+    # 2. Retrieve Stored Syllabus Knowledge Base Chunks (Grounded Context)
+    all_docs = source_documents if (source_documents is not None) else (data.get('ai_source_documents', []) if data and isinstance(data, dict) else [])
+    active_chunks = ai_document_indexer.retrieve_relevant_chunks(
+        documents=all_docs,
+        query_topic=topic,
+        subject=canonical_subject,
+        chapter=canonical_ch_name,
+        chapter_id=canonical_ch_id,
+        exam_level=canonical_exam_level,
+        max_chunks=6
+    )
+    if active_chunks:
+        print(f"[GROUNDED_SYLLABUS] Retrieved {len(active_chunks)} authoritative syllabus chunks for '{canonical_ch_name}' ({canonical_ch_id}).", flush=True)
+    else:
+        print(f"[GROUNDED_SYLLABUS] No pre-indexed PDF chunks for '{canonical_ch_name}' ({canonical_ch_id}). Relying on authoritative syllabus hierarchy metadata.", flush=True)
+
     print(f"[BATCH START] batchId={job_id} total={count} chapter='{canonical_ch_name}' ({canonical_ch_id}) category={question_category} speed={question_speed}", flush=True)
 
     MAX_ATTEMPTS_PER_SLOT = 15
@@ -1048,6 +1113,7 @@ def generate_exact_mcqs_pipeline(
                 difficulty=difficulty,
                 question_category=question_category,
                 question_speed=question_speed,
+                context_chunks=active_chunks if active_chunks else None,
                 chapter_metadata=resolved_ch_meta,
                 chapter=canonical_ch_name,
                 chapter_id=canonical_ch_id,
@@ -1182,11 +1248,16 @@ def generate_exact_mcqs_pipeline(
             'isDuplicate': False,
             'aiGenerated': True,
             'aiJobId': job_id or f"job-{int(time.time()*1000)}",
+            'generationJobId': job_id or f"job-{int(time.time()*1000)}",
             'sourceDocId': final_q.get('sourceDocId'),
+            'sourceContentId': final_q.get('sourceContentId'),
+            'sourceChapter': final_q.get('sourceChapter') or canonical_ch_name,
+            'sourceTopic': final_q.get('sourceTopic') or topic,
             'sourcePage': final_q.get('sourcePage'),
             'providerUsed': gen_prov,
             'modelUsed': gen_model,
             'validationProvider': val_prov,
+            'generatedAt': now_iso,
             'createdAt': now_iso,
             'updatedAt': now_iso
         }

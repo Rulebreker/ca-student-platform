@@ -2674,14 +2674,21 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                             q_copy['optionD'] = ''
                             q_copy['optionTypes'] = {'A': 'text', 'B': 'text', 'C': 'text', 'D': 'text'}
                             q_copy['optionImages'] = {'A': None, 'B': None, 'C': None, 'D': None}
-                            q_copy.pop('correctOption', None)
-                            q_copy.pop('explanation', None)
-                            q_copy.pop('aiSuggestedAnswer', None)
                         else:
                             q_copy['isLocked'] = False
-                            q_copy.pop('correctOption', None)
-                            q_copy.pop('explanation', None)
-                            q_copy.pop('aiSuggestedAnswer', None)
+
+                        q_copy.pop('correctOption', None)
+                        q_copy.pop('explanation', None)
+                        q_copy.pop('aiSuggestedAnswer', None)
+                        q_copy.pop('sourceDocId', None)
+                        q_copy.pop('sourceContentId', None)
+                        q_copy.pop('sourceChapter', None)
+                        q_copy.pop('sourceTopic', None)
+                        q_copy.pop('sourcePage', None)
+                        q_copy.pop('generationJobId', None)
+                        q_copy.pop('providerUsed', None)
+                        q_copy.pop('modelUsed', None)
+                        q_copy.pop('validationProvider', None)
                         sanitized_qs.append(q_copy)
                     self.send_json(200, {'test': target_test, 'questions': sanitized_qs, 'userTier': user_tier})
                 else:
@@ -3295,9 +3302,15 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json(400, {'success': False, 'error': err_payload, 'code': 400})
                     return
                     
-                save_backend_data(data)
-                sync_to_firebase(f"ai_source_documents/{doc_record['id']}", doc_record, method='PUT', sync=True)
-                self.send_json(200, {'success': True, 'document': doc_record})
+                if not doc_record.get('alreadyProcessed'):
+                    save_backend_data(data)
+                    sync_to_firebase(f"ai_source_documents/{doc_record['id']}", doc_record, method='PUT', sync=True)
+                self.send_json(200, {
+                    'success': True,
+                    'document': doc_record,
+                    'alreadyProcessed': bool(doc_record.get('alreadyProcessed', False)),
+                    'message': 'Identical syllabus document already indexed; reused existing structured knowledge base.' if doc_record.get('alreadyProcessed') else 'Document indexed successfully.'
+                })
                 return
             except Exception as e:
                 self.send_json(500, {'success': False, 'error': {'code': 'SERVER_ERROR', 'message': f'Failed to index document: {str(e)}'}, 'code': 500})
@@ -3333,6 +3346,35 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             except Exception as e:
                 self.send_json(500, {'error': f'Failed to delete document: {str(e)}', 'code': 500})
+                return
+
+        # 4.1 Toggle Source Document Active Status
+        if path == '/api/admin/ai/documents/toggle-active':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                doc_id = req_data.get('documentId')
+                is_active = bool(req_data.get('isActive', True))
+                if not doc_id:
+                    self.send_json(400, {'error': 'documentId is required.', 'code': 400})
+                    return
+                data = load_backend_data(refresh_collections=['ai_source_documents'])
+                updated_doc = ai_document_indexer.toggle_document_active(doc_id, is_active, data)
+                if updated_doc:
+                    save_backend_data(data)
+                    sync_to_firebase(f"ai_source_documents/{doc_id}", updated_doc, method='PUT', sync=True)
+                    self.send_json(200, {'success': True, 'document': updated_doc})
+                else:
+                    self.send_json(404, {'error': 'Document not found.', 'code': 404})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Failed to toggle document: {str(e)}', 'code': 500})
                 return
 
         # 5. Generate & Host MCQs Now

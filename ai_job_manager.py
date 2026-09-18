@@ -225,12 +225,15 @@ def create_generation_job(
 
     job_record = {
         'id': job_id,
+        'jobId': job_id,
         'title': title,
         'subject': subject,
         'subjectId': params.get('subjectId', 'sub-1'),
         'chapter': chapter,
         'chapterId': chapter_id,
         'topic': topic,
+        'sourceDocumentId': params.get('sourceDocId') or params.get('sourceDocumentId'),
+        'sourceDocId': params.get('sourceDocId') or params.get('sourceDocumentId'),
         'examLevel': params.get('examLevel', 'CA Foundation'),
         'examLevelId': exam_level_id,
         'difficulty': params.get('difficulty', 'ICAI Exam Standard'),
@@ -240,6 +243,8 @@ def create_generation_job(
         'count': count,
         'requestedCount': count,
         'generatedCount': 0,
+        'validatedCount': 0,
+        'rejectedCount': 0,
         'failedCount': 0,
         'retryCount': 0,
         'marksPerCorrect': float(params.get('marksPerCorrect', 2.0)),
@@ -258,6 +263,9 @@ def create_generation_job(
         'testId': None,
         'createdTs': now_ts,
         'createdAt': datetime.now(timezone.utc).isoformat(),
+        'startedAt': None,
+        'completedAt': None,
+        'lastHeartbeatAt': datetime.now(timezone.utc).isoformat(),
         'error': None,
         'result': None
     }
@@ -310,12 +318,15 @@ def run_generation_job_synchronous(
 
     job_record = {
         'id': job_id,
+        'jobId': job_id,
         'title': title,
         'subject': subject,
         'subjectId': params.get('subjectId', 'sub-1'),
         'chapter': chapter,
         'chapterId': chapter_id,
         'topic': topic,
+        'sourceDocumentId': params.get('sourceDocId') or params.get('sourceDocumentId'),
+        'sourceDocId': params.get('sourceDocId') or params.get('sourceDocumentId'),
         'examLevel': params.get('examLevel', 'CA Foundation'),
         'examLevelId': exam_level_id,
         'difficulty': params.get('difficulty', 'ICAI Exam Standard'),
@@ -325,6 +336,8 @@ def run_generation_job_synchronous(
         'count': count,
         'requestedCount': count,
         'generatedCount': 0,
+        'validatedCount': 0,
+        'rejectedCount': 0,
         'failedCount': 0,
         'retryCount': 0,
         'marksPerCorrect': float(params.get('marksPerCorrect', 2.0)),
@@ -343,6 +356,9 @@ def run_generation_job_synchronous(
         'testId': None,
         'createdTs': now_ts,
         'createdAt': datetime.now(timezone.utc).isoformat(),
+        'startedAt': None,
+        'completedAt': None,
+        'lastHeartbeatAt': datetime.now(timezone.utc).isoformat(),
         'error': None,
         'result': None
     }
@@ -352,10 +368,10 @@ def run_generation_job_synchronous(
     _run_generation_job_worker(job_id, params, data, save_callback, firebase_sync_callback)
 
     final_job = get_job_status(job_id, data) or {}
-    if final_job.get('status') == 'COMPLETED':
+    if final_job.get('status') in ['COMPLETED', 'PARTIAL']:
         return True, None, final_job.get('result')
     else:
-        err = final_job.get('error') or "Generation job failed to complete exact requested question count."
+        err = final_job.get('error') or "Generation job failed to generate questions."
         return False, err, None
 
 execute_ai_generation_job_sync = run_generation_job_synchronous
@@ -563,6 +579,27 @@ def _run_generation_job_worker(
         job_record['validationProvider'] = metrics.get('validationProvider', 'local')
         job_record['regenerationCount'] = metrics.get('regenerationCount', 0)
 
+        job_record['completedAt'] = completed_iso
+        job_record['lastHeartbeatAt'] = completed_iso
+        job_record['validatedCount'] = len(questions)
+        job_record['rejectedCount'] = metrics.get('rejectedDuplicates', 0) + metrics.get('rejectedValidation', 0)
+        job_record['retryCount'] = metrics.get('regenerationAttempts', 0)
+        job_record['providersUsed'] = list(metrics.get('providersUsed', []))
+        job_record['validationProvidersUsed'] = list(metrics.get('validationProvidersUsed', []))
+
+        # Ensure all verified questions are preserved in data['questions']
+        if data is not None and isinstance(data, dict):
+            existing_q_ids = {q.get('id') for q in data.get('questions', []) if isinstance(q, dict)}
+            for q in questions:
+                if isinstance(q, dict) and q.get('id') and q.get('id') not in existing_q_ids:
+                    data.setdefault('questions', []).append(q)
+                    existing_q_ids.add(q.get('id'))
+                    if firebase_sync_callback:
+                        try:
+                            firebase_sync_callback(f"questions/{q['id']}", q, method='PUT', sync=False)
+                        except Exception:
+                            pass
+
         if len(questions) == count:
             # Full completion: exactly requested count generated and verified
             test_record['totalQuestions'] = len(questions)
@@ -585,19 +622,44 @@ def _run_generation_job_worker(
             if firebase_sync_callback:
                 firebase_sync_callback(f"tests/{test_id}", test_record, method='PUT', sync=False)
 
-        else:
-            # Incomplete generation: Partial tests must NEVER be published or hosted
-            # Purge partial/incomplete test from DB and Firebase so no partial test appears in student/admin lists
-            data['tests'] = [t for t in data.get('tests', []) if t.get('id') != test_id]
-            if firebase_sync_callback:
-                firebase_sync_callback(f"tests/{test_id}", None, method='DELETE', sync=True)
+        elif len(questions) > 0:
+            # Partial completion: persist verified questions, update test record, never freeze or silently discard
+            test_record['totalQuestions'] = len(questions)
+            test_record['maximumMarks'] = round(len(questions) * marks_per_correct, 2)
+            test_record['isPublished'] = auto_publish
+            test_record['status'] = 'Published' if auto_publish else 'Draft'
+            test_record['updatedAt'] = completed_iso
 
-            job_record['status'] = 'FAILED'
-            job_record['error'] = f"Incomplete generation: only {len(questions)} of {count} questions verified. Partial tests are never hosted or published."
-            job_record['currentStage'] = f"Failed: Only {len(questions)} of {count} questions verified."
+            job_record['status'] = 'PARTIAL'
+            job_record['progressPct'] = int((len(questions) / count) * 100) if count > 0 else 50
+            job_record['currentStage'] = f"Partial Success: {len(questions)} of {count} questions verified and hosted."
             job_record['generatedCount'] = len(questions)
             job_record['failedCount'] = count - len(questions)
-            job_record['progressPct'] = int((len(questions) / count) * 100) if count > 0 else 0
+            job_record['error'] = f"Partial generation: {len(questions)} of {count} questions verified after retries."
+            job_record['result'] = {
+                'test': test_record,
+                'questions': questions,
+                'metrics': metrics,
+                'job': dict(job_record)
+            }
+            if firebase_sync_callback:
+                firebase_sync_callback(f"tests/{test_id}", test_record, method='PUT', sync=False)
+
+        else:
+            # 0 questions generated: Clean up empty test container
+            data['tests'] = [t for t in data.get('tests', []) if t.get('id') != test_id]
+            if firebase_sync_callback:
+                try:
+                    firebase_sync_callback(f"tests/{test_id}", None, method='DELETE', sync=True)
+                except Exception:
+                    pass
+
+            job_record['status'] = 'FAILED'
+            job_record['error'] = f"Incomplete generation: 0 of {count} questions could be verified."
+            job_record['currentStage'] = f"Failed: 0 of {count} questions verified."
+            job_record['generatedCount'] = 0
+            job_record['failedCount'] = count
+            job_record['progressPct'] = 0
             job_record['result'] = None
 
         # 6. Telemetry Log

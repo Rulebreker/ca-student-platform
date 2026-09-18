@@ -2,8 +2,9 @@ import os
 import re
 import time
 import uuid
+import hashlib
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Callable
 
 import ai_provider_manager
 import syllabus_hierarchy
@@ -33,6 +34,11 @@ except ImportError:
             return False, "File is not a valid PDF document (missing %PDF signature).", None, None, None
 
         return True, None, binary_data, 'application/pdf', '.pdf'
+
+def validate_pdf_binary(raw_bytes: bytes, max_size_bytes: int = 20 * 1024 * 1024) -> Tuple[bool, Optional[str]]:
+    """Validate that raw bytes contain a valid %PDF signature and obey maximum size limit."""
+    valid, err, _, _, _ = validate_and_sanitize_upload(raw_bytes, allowed_types=['pdf'], max_size_bytes=max_size_bytes)
+    return valid, err
 
 def chunk_document_content(pages: List[Dict[str, Any]], target_chunk_words: int = 500) -> List[Dict[str, Any]]:
     """
@@ -102,11 +108,14 @@ def index_pdf_document(
     chapter_id: str = '',
     topic: str = '',
     topic_id: str = '',
-    data: Optional[Dict[str, Any]] = None
+    data: Optional[Dict[str, Any]] = None,
+    force_reprocess: bool = False,
+    status_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None
 ) -> Tuple[bool, Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """
-    Validate, run Mistral OCR, and index document chunks with full syllabus hierarchy metadata:
-    Exam Level -> Subject -> Chapter -> Topic -> Source Chunks.
+    Validate, check SHA-256 hash deduplication, run Mistral OCR once, and index document chunks
+    with full syllabus hierarchy metadata: Exam Level -> Subject -> Chapter -> Topic -> Source Chunks.
+    If already indexed and content has not changed, skips OCR and returns the existing document record.
     """
     # 1. Security & format validation (20MB limit)
     is_valid, err, binary_data, mime, ext = validate_and_sanitize_upload(
@@ -121,6 +130,8 @@ def index_pdf_document(
             'message': f"PDF Validation Error: {err}"
         }, None
 
+    content_hash = hashlib.sha256(binary_data).hexdigest()
+
     # 2. Canonical metadata resolution
     lvl_info = syllabus_hierarchy.normalize_exam_level(exam_level_id or exam_level)
     canonical_exam_level = lvl_info['name'] if lvl_info else (exam_level or 'CA Foundation')
@@ -133,7 +144,6 @@ def index_pdf_document(
         if sub_obj:
             canonical_subject_name = sub_obj['name']
     else:
-        # Resolve from name
         for s in syllabus_hierarchy.get_subjects_for_level(canonical_level_id):
             if s['name'].lower() == canonical_subject_name.lower():
                 canonical_subject_id = s['id']
@@ -148,51 +158,112 @@ def index_pdf_document(
             canonical_chapter_id = ch_obj['id']
             canonical_chapter_name = ch_obj['name']
 
-    # 3. Mistral OCR processing
+    # 3. Deterministic Deduplication: Check if identical PDF has already been processed
+    if not force_reprocess and data and isinstance(data, dict):
+        existing_docs = data.get('ai_source_documents', [])
+        for ex_doc in existing_docs:
+            if ex_doc.get('contentHash') == content_hash and ex_doc.get('status') in ['COMPLETED', 'indexed']:
+                print(f"[PDF_DEDUPLICATION] Document '{filename}' (hash: {content_hash[:12]}...) already processed as {ex_doc.get('id')}. Reusing existing structured syllabus knowledge base.", flush=True)
+                res_doc = dict(ex_doc)
+                res_doc['alreadyProcessed'] = True
+                return True, None, res_doc
+
+    # 4. Versioning calculation: Determine version if updating existing syllabus doc
+    existing_docs = (data.get('ai_source_documents', []) if data and isinstance(data, dict) else [])
+    matching_versions = [
+        int(d.get('contentVersion', 1)) for d in existing_docs
+        if (d.get('filename') == filename or 
+            (d.get('chapterId') == canonical_chapter_id and d.get('subjectId') == canonical_subject_id and canonical_chapter_id))
+    ]
+    content_version = (max(matching_versions) + 1) if matching_versions else 1
+
+    if status_callback:
+        status_callback('PROCESSING', {'filename': filename, 'contentHash': content_hash})
+
+    # 5. One-Time OCR Processing (Mistral OCR or deterministic local fallback)
     try:
         ocr_result = ai_provider_manager.call_mistral_ocr(binary_data, filename=filename)
     except Exception as e:
         err_msg = str(e)
+        if status_callback:
+            status_callback('FAILED', {'error': err_msg})
         return False, {
             'code': 'OCR_PROVIDER_ERROR',
             'message': f"Mistral OCR Processing Failed: {err_msg}"
         }, None
 
+    if status_callback:
+        status_callback('OCR_COMPLETE', {'pageCount': ocr_result.get('page_count', 1)})
+
     pages = ocr_result.get('pages', [])
     full_text = ocr_result.get('full_text', '')
     
     if not full_text or len(full_text.strip()) < 20:
+        if status_callback:
+            status_callback('FAILED', {'error': 'No legible text extracted'})
         return False, {
             'code': 'OCR_EMPTY_TEXT',
             'message': "Mistral OCR completed, but no legible text was extracted from this PDF."
         }, None
 
-    # 4. Semantic Chunking
+    if status_callback:
+        status_callback('STRUCTURING', {'pageCount': len(pages)})
+
+    # 6. Semantic Chunking & Structuring into Syllabus Knowledge Base
     raw_chunks = chunk_document_content(pages, target_chunk_words=500)
 
-    # 5. Tag chunks with complete syllabus hierarchy metadata
-    tagged_chunks = []
+    now_iso = datetime.now(timezone.utc).isoformat()
     doc_id = f"doc-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}"
+
+    # Tag chunks with complete syllabus hierarchy metadata
+    tagged_chunks = []
+    unique_headings = set()
     for chk in raw_chunks:
         chk_copy = dict(chk)
+        c_id = chk_copy.get('chunkId') or f"chk-{uuid.uuid4().hex[:8]}"
+        chk_copy['chunkId'] = c_id
+        chk_copy['contentId'] = c_id
         chk_copy['docId'] = doc_id
+        chk_copy['sourceDocumentId'] = doc_id
         chk_copy['docFilename'] = filename
+        chk_copy['sourceFilename'] = filename
+        
+        pages_list = chk_copy.get('pages', [1])
+        chk_copy['sourcePage'] = pages_list[0] if pages_list else 1
+        chk_copy['sourcePages'] = pages_list
+        chk_copy['pageDisplay'] = chk_copy.get('pageDisplay', f"p. {chk_copy['sourcePage']}")
+        
         chk_copy['examLevel'] = canonical_exam_level
         chk_copy['examLevelId'] = canonical_level_id
         chk_copy['subject'] = canonical_subject_name
         chk_copy['subjectId'] = canonical_subject_id
         chk_copy['chapter'] = canonical_chapter_name
         chk_copy['chapterId'] = canonical_chapter_id
-        chk_copy['topic'] = topic or ''
+        
+        heading = chk_copy.get('heading', 'General')
+        unique_headings.add(heading)
+        chk_copy['topic'] = topic or heading
+        chk_copy['subTopic'] = heading
         chk_copy['topicId'] = topic_id or ''
+        
+        # Ensure both text and extractedText fields are present
+        chk_text = chk_copy.get('text', '')
+        chk_copy['extractedText'] = chk_text
+        chk_copy['text'] = chk_text
+        chk_copy['contentVersion'] = content_version
+        chk_copy['isActive'] = True
+        chk_copy['processedAt'] = now_iso
+        
         tagged_chunks.append(chk_copy)
 
-    # 6. Construct Document Record
-    now_iso = datetime.now(timezone.utc).isoformat()
+    # 7. Construct Authoritative Document Record
     doc_record = {
         'id': doc_id,
         'filename': filename,
         'fileSize': len(binary_data),
+        'contentHash': content_hash,
+        'contentVersion': content_version,
+        'isActive': True,
         'pageCount': ocr_result.get('page_count', len(pages)),
         'chunkCount': len(tagged_chunks),
         'examLevel': canonical_exam_level,
@@ -203,12 +274,20 @@ def index_pdf_document(
         'chapterId': canonical_chapter_id,
         'topic': topic or '',
         'topicId': topic_id or '',
+        'chapterList': [canonical_chapter_name] if canonical_chapter_name else [],
+        'topicList': sorted(list(unique_headings)) if unique_headings else [topic or 'General Concepts'],
         'ocrEngine': ocr_result.get('engine', 'mistral-ocr-latest'),
+        'processingStatus': 'COMPLETED',
+        'status': 'COMPLETED',
         'uploadedAt': now_iso,
-        'status': 'indexed',
+        'processedAt': now_iso,
         'chunks': tagged_chunks,
-        'summary': (full_text[:350] + '...') if len(full_text) > 350 else full_text
+        'summary': (full_text[:350] + '...') if len(full_text) > 350 else full_text,
+        'alreadyProcessed': False
     }
+
+    if status_callback:
+        status_callback('COMPLETED', doc_record)
 
     if data is not None:
         if 'ai_source_documents' not in data:
@@ -216,6 +295,17 @@ def index_pdf_document(
         data['ai_source_documents'].insert(0, doc_record)
 
     return True, None, doc_record
+
+def toggle_document_active(doc_id: str, is_active: bool, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Activate or deactivate a syllabus document version."""
+    docs = data.get('ai_source_documents', [])
+    for d in docs:
+        if d.get('id') == doc_id:
+            d['isActive'] = bool(is_active)
+            for chk in d.get('chunks', []):
+                chk['isActive'] = bool(is_active)
+            return d
+    return None
 
 def retrieve_relevant_chunks(
     documents: List[Dict[str, Any]],
@@ -236,7 +326,7 @@ def retrieve_relevant_chunks(
     if not documents:
         return []
 
-    target_docs = list(documents)
+    target_docs = [d for d in documents if d.get('isActive', True) is not False]
 
     # 1. Filter by Exam Level
     if exam_level_id:
@@ -285,6 +375,8 @@ def retrieve_relevant_chunks(
         doc_chapter_id = doc.get('chapterId')
         doc_chapter = doc.get('chapter')
         for chk in doc.get('chunks', []):
+            if chk.get('isActive', True) is False:
+                continue
             chk_chapter_id = chk.get('chapterId') or doc_chapter_id
             chk_chapter = chk.get('chapter') or doc_chapter
             # Strict chapter match on chunks
@@ -295,9 +387,15 @@ def retrieve_relevant_chunks(
                 continue
             chunk_copy = dict(chk)
             chunk_copy['docId'] = doc_id
+            chunk_copy['sourceDocumentId'] = doc_id
             chunk_copy['docFilename'] = doc_name
+            chunk_copy['sourceFilename'] = doc_name
             chunk_copy['chapterId'] = chk_chapter_id
             chunk_copy['chapter'] = chk_chapter
+            chunk_copy['sourceContentId'] = chk.get('contentId') or chk.get('chunkId')
+            chunk_copy['sourcePage'] = chk.get('sourcePage') or (chk.get('pages', [1])[0] if chk.get('pages') else 1)
+            chunk_copy['extractedText'] = chk.get('extractedText') or chk.get('text', '')
+            chunk_copy['text'] = chunk_copy['extractedText']
             all_chunks.append(chunk_copy)
 
     if not all_chunks:
@@ -325,3 +423,6 @@ def retrieve_relevant_chunks(
 
     scored_chunks.sort(key=lambda x: x[0], reverse=True)
     return [item[1] for item in scored_chunks[:max_chunks]]
+
+# Backward-compatible alias
+index_document = index_pdf_document
