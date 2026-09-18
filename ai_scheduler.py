@@ -388,6 +388,62 @@ def cancel_scheduled_task(task_id: str, data: Dict[str, Any]) -> Optional[Dict[s
 # ======================================================================
 # EXECUTION & HOSTING ENGINE
 # ======================================================================
+# ATOMIC TASK CLAIMING & EXECUTION ENGINE
+# ======================================================================
+
+def attempt_claim_task(
+    task: Dict[str, Any],
+    data: Dict[str, Any],
+    worker_id: Optional[str] = None,
+    save_callback: Any = None,
+    firebase_sync_callback: Any = None
+) -> Tuple[bool, Optional[str]]:
+    """
+    Attempt atomic claim on a scheduled task to prevent race conditions across concurrent workers/cron triggers.
+    Workflow: scheduled -> CLAIMING -> PROCESSING -> live / completed / failed.
+    If another worker already holds an active lease (< 180s), claim fails -> False.
+    """
+    task_id = task.get('id')
+    now_utc = get_now_utc()
+    now_iso = format_iso_utc(now_utc)
+    current_status = task.get('status')
+    
+    # Check if task is already in CLAIMING or processing with active lease (<180s)
+    if current_status in ['CLAIMING', 'processing', 'PROCESSING']:
+        claimed_at_str = task.get('claimedAt')
+        if claimed_at_str:
+            try:
+                claimed_dt = parse_iso_utc(claimed_at_str)
+                age_seconds = (now_utc - claimed_dt).total_seconds()
+                if age_seconds < 180:
+                    print(f"[SCHEDULER_RACE_AVOIDED] Task '{task.get('name')}' (ID: {task_id}) is actively claimed by worker '{task.get('workerId')}' ({age_seconds:.1f}s ago). Skipping duplicate execution.", flush=True)
+                    return False, f"Task already claimed by worker '{task.get('workerId')}'"
+            except Exception:
+                pass
+
+    assigned_worker = worker_id or f"worker-{os.getpid()}-{uuid.uuid4().hex[:6]}"
+    execution_id = f"exec-{int(time.time()*1000)}-{uuid.uuid4().hex[:6]}"
+
+    # Atomic transition to CLAIMING
+    task['status'] = 'CLAIMING'
+    task['claimedAt'] = now_iso
+    task['workerId'] = assigned_worker
+    task['executionId'] = execution_id
+    task['updatedAt'] = now_iso
+
+    if save_callback:
+        try:
+            save_callback(data)
+        except Exception:
+            pass
+
+    if firebase_sync_callback:
+        try:
+            firebase_sync_callback(f"ai_scheduled_tasks/{task_id}", task, method='PUT', sync=True)
+        except Exception:
+            pass
+
+    return True, execution_id
 
 def execute_scheduler_task_sync(
     task: Dict[str, Any],
@@ -397,7 +453,7 @@ def execute_scheduler_task_sync(
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Synchronously execute an independent scheduled task:
-    1. Lock task as 'processing'
+    1. Lock task as 'processing' (advance from CLAIMING)
     2. Generate questions and construct test record
     3. Host test into database (data['tests'] and data['questions'])
     4. If isLiveEvent, configure live window (startsAt, expiresAt) and mark test Live
@@ -415,6 +471,12 @@ def execute_scheduler_task_sync(
     # 1. Lock task state
     task['status'] = 'processing'
     task['updatedAt'] = now_iso
+    if not task.get('claimedAt'):
+        task['claimedAt'] = now_iso
+    if not task.get('workerId'):
+        task['workerId'] = f"worker-{os.getpid()}-{uuid.uuid4().hex[:6]}"
+    if not task.get('executionId'):
+        task['executionId'] = f"exec-{int(time.time()*1000)}-{uuid.uuid4().hex[:6]}"
     if save_callback:
         save_callback(data)
     if firebase_sync_callback:
@@ -576,6 +638,9 @@ def process_due_tasks(
             due_to_start.append(t)
 
     for t in due_to_start:
+        claimed, claim_id = attempt_claim_task(t, data, save_callback=save_callback, firebase_sync_callback=firebase_sync_callback)
+        if not claimed:
+            continue
         ok, err, res = execute_scheduler_task_sync(t, data, save_callback, firebase_sync_callback)
         executed_results.append({
             'taskId': t.get('id'),
@@ -583,7 +648,8 @@ def process_due_tasks(
             'action': 'started_live' if t.get('status') == 'live' else 'completed_host',
             'success': ok,
             'error': err,
-            'testId': t.get('lastTestId')
+            'testId': t.get('lastTestId'),
+            'executionId': claim_id
         })
 
     # Phase 2: Due Expiry Events (live -> expired)

@@ -46,7 +46,8 @@ def chunk_document_content(pages: List[Dict[str, Any]], target_chunk_words: int 
     preserving section headings, tables, and page number context.
     """
     chunks = []
-    current_heading = "General Overview"
+    current_heading = "General"
+    current_chapter_heading = ""
     current_chunk_words = []
     current_pages = set()
 
@@ -65,6 +66,8 @@ def chunk_document_content(pages: List[Dict[str, Any]], target_chunk_words: int 
                 heading_text = re.sub(r'^#+\s*', '', stripped)
                 if heading_text:
                     current_heading = heading_text
+                    if re.search(r'\b(?:chapter|ch)\s*\d+\b', heading_text, re.IGNORECASE):
+                        current_chapter_heading = heading_text
 
             words = stripped.split()
             current_chunk_words.extend(words)
@@ -75,6 +78,7 @@ def chunk_document_content(pages: List[Dict[str, Any]], target_chunk_words: int 
                 chunks.append({
                     'chunkId': f"chk-{uuid.uuid4().hex[:8]}",
                     'heading': current_heading,
+                    'chapterHeading': current_chapter_heading,
                     'pages': sorted(list(current_pages)),
                     'pageDisplay': f"p. {', '.join(map(str, sorted(list(current_pages))))}",
                     'wordCount': len(current_chunk_words),
@@ -89,6 +93,7 @@ def chunk_document_content(pages: List[Dict[str, Any]], target_chunk_words: int 
         chunks.append({
             'chunkId': f"chk-{uuid.uuid4().hex[:8]}",
             'heading': current_heading,
+            'chapterHeading': current_chapter_heading,
             'pages': sorted(list(current_pages)) if current_pages else [1],
             'pageDisplay': f"p. {', '.join(map(str, sorted(list(current_pages))))}" if current_pages else "p. 1",
             'wordCount': len(current_chunk_words),
@@ -233,21 +238,79 @@ def index_pdf_document(
         chk_copy['sourcePages'] = pages_list
         chk_copy['pageDisplay'] = chk_copy.get('pageDisplay', f"p. {chk_copy['sourcePage']}")
         
+        chk_text = chk_copy.get('text', '')
+        heading = chk_copy.get('heading', 'General')
+        chapter_heading = chk_copy.get('chapterHeading', '')
+        unique_headings.add(heading)
+
+        # Detect preface / unmatchable sections
+        preface_patterns = [
+            r'\b(?:preface|table of contents|contents|acknowledgement|acknowledgments|about the author|publisher notes|preliminary|disclaimer|foreword|how to use this book|study plan)\b'
+        ]
+        is_preface = False
+        for pat in preface_patterns:
+            if re.search(pat, heading, re.IGNORECASE) or (len(chk_text) < 300 and re.search(pat, chk_text[:200], re.IGNORECASE)):
+                is_preface = True
+                break
+
+        if is_preface:
+            chunk_chapter = 'UNKNOWN'
+            chunk_chapter_id = 'UNKNOWN'
+            chunk_topic = 'UNKNOWN'
+        else:
+            # Try to match chunk chapter heading or heading against syllabus hierarchy chapters for this subject
+            matched_meta = None
+            generic_headings = {'general', 'general overview', 'overview', 'introduction', 'summary', 'basic concepts', 'preliminary concepts'}
+            
+            candidates_to_check = []
+            if chapter_heading and chapter_heading.lower() not in generic_headings:
+                candidates_to_check.append(chapter_heading)
+            if heading and heading.lower() not in generic_headings:
+                candidates_to_check.append(heading)
+            
+            first_lines = chk_text[:300]
+            ch_match = re.search(r'\b(?:chapter|ch)\s*(\d+)\b[^\n]*', first_lines, re.IGNORECASE)
+            if ch_match:
+                candidates_to_check.append(ch_match.group(0))
+
+            for s in syllabus_hierarchy.CANONICAL_SUBJECTS:
+                if (canonical_subject_name.lower() in s.get('name', '').lower() or s.get('name', '').lower() in canonical_subject_name.lower()) and s.get('levelId') == canonical_level_id:
+                    for cand in candidates_to_check:
+                        cand_clean = cand.lower()
+                        for ch in s.get('chapters', []):
+                            ch_name_clean = ch.get('name', '').lower()
+                            ch_num = ch.get('number')
+                            if ch_num is not None and re.search(rf'\b(?:chapter|ch)\s*{ch_num}\b', cand_clean):
+                                matched_meta = syllabus_hierarchy.get_authoritative_chapter_metadata(chapter_id=ch.get('id'), data=data)
+                                break
+                            if len(ch_name_clean) >= 8 and (ch_name_clean in cand_clean or cand_clean in ch_name_clean):
+                                matched_meta = syllabus_hierarchy.get_authoritative_chapter_metadata(chapter_id=ch.get('id'), data=data)
+                                break
+                        if matched_meta:
+                            break
+                    if matched_meta:
+                        break
+
+            if matched_meta:
+                chunk_chapter = matched_meta['chapterName']
+                chunk_chapter_id = matched_meta['chapterId']
+                chunk_topic = heading
+            else:
+                chunk_chapter = canonical_chapter_name or 'UNKNOWN'
+                chunk_chapter_id = canonical_chapter_id or 'UNKNOWN'
+                chunk_topic = topic or heading
+
         chk_copy['examLevel'] = canonical_exam_level
         chk_copy['examLevelId'] = canonical_level_id
         chk_copy['subject'] = canonical_subject_name
         chk_copy['subjectId'] = canonical_subject_id
-        chk_copy['chapter'] = canonical_chapter_name
-        chk_copy['chapterId'] = canonical_chapter_id
-        
-        heading = chk_copy.get('heading', 'General')
-        unique_headings.add(heading)
-        chk_copy['topic'] = topic or heading
+        chk_copy['chapter'] = chunk_chapter
+        chk_copy['chapterId'] = chunk_chapter_id
+        chk_copy['topic'] = chunk_topic
         chk_copy['subTopic'] = heading
         chk_copy['topicId'] = topic_id or ''
         
         # Ensure both text and extractedText fields are present
-        chk_text = chk_copy.get('text', '')
         chk_copy['extractedText'] = chk_text
         chk_copy['text'] = chk_text
         chk_copy['contentVersion'] = content_version
@@ -257,6 +320,7 @@ def index_pdf_document(
         tagged_chunks.append(chk_copy)
 
     # 7. Construct Authoritative Document Record
+    detected_chapters = {c['chapter'] for c in tagged_chunks if c.get('chapter') and c['chapter'] != 'UNKNOWN'}
     doc_record = {
         'id': doc_id,
         'filename': filename,
@@ -274,7 +338,7 @@ def index_pdf_document(
         'chapterId': canonical_chapter_id,
         'topic': topic or '',
         'topicId': topic_id or '',
-        'chapterList': [canonical_chapter_name] if canonical_chapter_name else [],
+        'chapterList': sorted(list(detected_chapters)) if detected_chapters else ([canonical_chapter_name] if canonical_chapter_name else []),
         'topicList': sorted(list(unique_headings)) if unique_headings else [topic or 'General Concepts'],
         'ocrEngine': ocr_result.get('engine', 'mistral-ocr-latest'),
         'processingStatus': 'COMPLETED',
@@ -356,12 +420,15 @@ def retrieve_relevant_chunks(
     if chapter_id:
         target_docs = [
             d for d in target_docs 
-            if d.get('chapterId') == chapter_id or (chapter and d.get('chapter', '').strip().lower() == chapter.strip().lower())
+            if d.get('chapterId') == chapter_id 
+            or (chapter and d.get('chapter', '').strip().lower() == chapter.strip().lower())
+            or any((c.get('chapterId') == chapter_id or (chapter and c.get('chapter', '').strip().lower() == chapter.strip().lower())) for c in d.get('chunks', []))
         ]
     elif chapter:
         target_docs = [
             d for d in target_docs 
             if d.get('chapter', '').strip().lower() == chapter.strip().lower()
+            or any(chapter and c.get('chapter', '').strip().lower() == chapter.strip().lower() for c in d.get('chunks', []))
         ]
 
     if not target_docs:
@@ -379,11 +446,19 @@ def retrieve_relevant_chunks(
                 continue
             chk_chapter_id = chk.get('chapterId') or doc_chapter_id
             chk_chapter = chk.get('chapter') or doc_chapter
+            # Exclude unmapped / preface UNKNOWN chunks from scoped retrieval
+            if chk_chapter_id == 'UNKNOWN' or chk_chapter == 'UNKNOWN':
+                continue
             # Strict chapter match on chunks
-            if chapter_id and chk_chapter_id and chk_chapter_id != chapter_id:
-                if not (chapter and chk_chapter and chk_chapter.strip().lower() == chapter.strip().lower()):
-                    continue
-            elif chapter and chk_chapter and chk_chapter.strip().lower() != chapter.strip().lower():
+            matches_chapter = False
+            if chapter_id and chk_chapter_id and chk_chapter_id == chapter_id:
+                matches_chapter = True
+            elif chapter and chk_chapter and chk_chapter.strip().lower() == chapter.strip().lower():
+                matches_chapter = True
+            elif not chapter_id and not chapter:
+                matches_chapter = True
+
+            if not matches_chapter:
                 continue
             chunk_copy = dict(chk)
             chunk_copy['docId'] = doc_id

@@ -31,6 +31,11 @@ def save_job_record(
     job_id = job_record.get('id')
     if not job_id:
         return
+    now_utc_iso = datetime.now(timezone.utc).isoformat()
+    if 'lastHeartbeatAt' not in job_record or job_record.get('status') in ['QUEUED', 'PROCESSING', 'GENERATING']:
+        job_record['lastHeartbeatAt'] = now_utc_iso
+    job_record['updatedAt'] = now_utc_iso
+    job_record['updatedTs'] = time.time()
     with _jobs_lock:
         _active_jobs[job_id] = dict(job_record)
     
@@ -147,17 +152,46 @@ def get_active_generation_job(data: Optional[Dict[str, Any]] = None) -> Optional
             worker = _active_workers.get(j_id)
             if worker and worker.is_alive():
                 return dict(j)
-            # If no alive worker exists and job was created > 30s ago, it is orphaned from a prior process
-            if (now_ts - c_ts) > 30:
-                j['status'] = 'FAILED'
-                j['error'] = 'Job interrupted by server restart'
-                j['currentStage'] = 'Terminated: Server Restart'
-                with _jobs_lock:
-                    _active_jobs[j_id] = dict(j)
-                continue
-            # If very recently created (<30s) and has worker
-            if (now_ts - c_ts) <= 30 and worker:
+
+            # Check heartbeat timestamp
+            last_hb = j.get('lastHeartbeatAt')
+            last_hb_ts = 0
+            if last_hb:
+                try:
+                    last_hb_ts = datetime.fromisoformat(last_hb.replace('Z', '+00:00')).timestamp()
+                except Exception:
+                    last_hb_ts = 0
+            if not last_hb_ts:
+                last_hb_ts = j.get('updatedTs') or c_ts
+
+            # If heartbeat is within 120s, the job is actively processing in another worker/thread
+            if (now_ts - last_hb_ts) <= 120:
                 return dict(j)
+
+            # If heartbeat is older than 120s, the job has truly stalled
+            verified_qs = j.get('generatedQuestions', [])
+            if len(verified_qs) > 0:
+                j['status'] = 'PARTIAL'
+                j['currentStage'] = f"Partially Completed: {len(verified_qs)} questions preserved"
+                j['error'] = f"Job interrupted: worker heartbeat timed out (>120s). {len(verified_qs)} questions preserved."
+            else:
+                j['status'] = 'FAILED'
+                j['error'] = 'Job interrupted by server restart / worker timeout (>120s)'
+            with _jobs_lock:
+                _active_jobs[j_id] = dict(j)
+
+            if data and isinstance(data, dict):
+                for orig_j in data.get('ai_generation_jobs', []):
+                    if orig_j.get('id') == j_id:
+                        orig_j['status'] = j['status']
+                        orig_j['currentStage'] = j['currentStage']
+                        orig_j['error'] = j['error']
+                test_id = j.get('testId')
+                if test_id and len(verified_qs) > 0:
+                    for t in data.get('tests', []):
+                        if t.get('id') == test_id:
+                            t['questions'] = list(verified_qs)
+            continue
 
     return None
 
