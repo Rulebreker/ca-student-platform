@@ -318,6 +318,7 @@ def _run_generation_job_worker(
         negative_marks = float(params.get('negativeMarksPerWrong', 0.5))
         question_category = str(params.get('questionCategory') or job_record.get('questionCategory') or 'Direct Questions').strip()
         question_speed = str(params.get('questionSpeed') or job_record.get('questionSpeed') or 'Quick').strip()
+        admin_description = str(params.get('description') or params.get('adminDescription') or '').strip()
 
         sub_id = params.get('subjectId')
         if not sub_id:
@@ -452,7 +453,8 @@ def _run_generation_job_worker(
             subject_id=sub_id,
             chapter=chapter,
             chapter_id=chapter_id,
-            on_question_verified=_on_question_verified_cb
+            on_question_verified=_on_question_verified_cb,
+            admin_description=admin_description
         )
 
         completed_iso = datetime.now(timezone.utc).isoformat()

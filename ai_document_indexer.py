@@ -262,34 +262,42 @@ def retrieve_relevant_chunks(
             if d.get('subject', '').lower() == subject.lower()
         ]
 
-    # 3. Filter by Chapter
+    # 3. Filter by Chapter (Strict Lock - NEVER silently fall back to other chapters)
     if chapter_id:
-        ch_filtered = [
+        target_docs = [
             d for d in target_docs 
-            if d.get('chapterId') == chapter_id or (chapter and d.get('chapter', '').lower() == chapter.lower())
+            if d.get('chapterId') == chapter_id or (chapter and d.get('chapter', '').strip().lower() == chapter.strip().lower())
         ]
-        if ch_filtered:
-            target_docs = ch_filtered
     elif chapter:
-        ch_filtered = [
+        target_docs = [
             d for d in target_docs 
-            if d.get('chapter', '').lower() == chapter.lower()
+            if d.get('chapter', '').strip().lower() == chapter.strip().lower()
         ]
-        if ch_filtered:
-            target_docs = ch_filtered
 
-    # 4. Gather all chunks from target docs
+    if not target_docs:
+        return []
+
+    # 4. Gather all chunks strictly from matching target docs
     all_chunks = []
     for doc in target_docs:
         doc_id = doc.get('id')
         doc_name = doc.get('filename')
+        doc_chapter_id = doc.get('chapterId')
+        doc_chapter = doc.get('chapter')
         for chk in doc.get('chunks', []):
+            chk_chapter_id = chk.get('chapterId') or doc_chapter_id
+            chk_chapter = chk.get('chapter') or doc_chapter
+            # Strict chapter match on chunks
+            if chapter_id and chk_chapter_id and chk_chapter_id != chapter_id:
+                if not (chapter and chk_chapter and chk_chapter.strip().lower() == chapter.strip().lower()):
+                    continue
+            elif chapter and chk_chapter and chk_chapter.strip().lower() != chapter.strip().lower():
+                continue
             chunk_copy = dict(chk)
             chunk_copy['docId'] = doc_id
             chunk_copy['docFilename'] = doc_name
-            # If specific chapter requested, only include matching chunks
-            if chapter_id and chk.get('chapterId') and chk.get('chapterId') != chapter_id:
-                continue
+            chunk_copy['chapterId'] = chk_chapter_id
+            chunk_copy['chapter'] = chk_chapter
             all_chunks.append(chunk_copy)
 
     if not all_chunks:

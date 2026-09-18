@@ -68,6 +68,42 @@ def is_duplicate_question(
 
     return False, None
 
+def is_source_reproduction(
+    candidate_text: str,
+    admin_description: str,
+    threshold: float = 0.60
+) -> Tuple[bool, Optional[str]]:
+    """
+    Detect if candidate question copies, verbatim quotes, or closely paraphrases
+    the admin-provided source description / prompt notes.
+    """
+    if not admin_description or len(admin_description.strip()) < 15:
+        return False, None
+
+    cand_norm = re.sub(r'\s+', ' ', candidate_text.strip().lower())
+    admin_norm = re.sub(r'\s+', ' ', admin_description.strip().lower())
+
+    # Skip generic template descriptions
+    if "ai-generated" in admin_norm and "practice test" in admin_norm:
+        return False, None
+
+    # Verbatim substring match
+    if len(admin_norm) >= 30 and (admin_norm in cand_norm or cand_norm in admin_norm):
+        return True, "Candidate question contains verbatim match with admin source description."
+
+    # Sentence-level overlap
+    admin_sentences = [s.strip() for s in re.split(r'[.!?\n]', admin_norm) if len(s.strip()) >= 25]
+    for sent in admin_sentences:
+        if sent in cand_norm:
+            return True, f"Candidate question verbatim copies sentence from admin description: '{sent[:40]}...'"
+
+    # Token-level Jaccard similarity check
+    sim = calculate_jaccard_similarity(candidate_text, admin_description)
+    if sim >= threshold:
+        return True, f"Candidate question closely paraphrases admin description ({sim:.2f} similarity >= {threshold})."
+
+    return False, None
+
 # ----------------- Dynamic Prompt Builders -----------------
 
 def build_generation_system_instruction(
@@ -378,7 +414,10 @@ def validate_mcq_locally_deterministic(
     question_category: str = 'Direct Questions',
     question_speed: str = 'Quick',
     existing_questions: Optional[List[Dict[str, Any]]] = None,
-    current_batch_questions: Optional[List[Dict[str, Any]]] = None
+    current_batch_questions: Optional[List[Dict[str, Any]]] = None,
+    chapter: str = '',
+    chapter_id: str = '',
+    admin_description: str = ''
 ) -> Tuple[bool, str, Optional[str]]:
     """
     Comprehensive local deterministic validation verifying all correctness criteria:
@@ -386,9 +425,10 @@ def validate_mcq_locally_deterministic(
     2. Exactly 4 distinct options (A, B, C, D present, non-empty, distinct, no placeholder strings)
     3. Exactly 1 correct answer index (strictly A, B, C, or D) pointing to a non-empty option
     4. Explanation present and >= 10 characters
-    5. Subject/topic & difficulty consistency
+    5. Subject/topic & difficulty consistency, and strict chapter verification
     6. Category and speed constraints (word count & structure)
     7. Duplicate detection (Jaccard similarity threshold against DB and current batch)
+    8. Source reproduction protection (rejects verbatim/close paraphrases of admin description)
     Returns: (is_valid: bool, reason: str, error_code: Optional[str])
     """
     if not isinstance(q_data, dict):
@@ -453,6 +493,15 @@ def validate_mcq_locally_deterministic(
     q_data['category'] = question_category
     q_data['estimatedThinkingLevel'] = question_speed
 
+    if chapter:
+        q_ch = str(q_data.get('chapter') or '').strip()
+        if q_ch and q_ch.lower() != chapter.strip().lower():
+            return False, f"Off-chapter question detected: belongs to '{q_ch}' instead of '{chapter}'.", "OFF_CHAPTER_QUESTION"
+    if chapter_id:
+        q_ch_id = str(q_data.get('chapterId') or '').strip()
+        if q_ch_id and q_ch_id != chapter_id.strip():
+            return False, f"Off-chapter question detected: chapterId '{q_ch_id}' does not match '{chapter_id}'.", "OFF_CHAPTER_QUESTION"
+
     # 6. Word / Length constraints
     word_count = len(words)
     if question_category == 'Direct Questions':
@@ -483,6 +532,14 @@ def validate_mcq_locally_deterministic(
         if is_dup:
             return False, f"Duplicate check: {dup_reason}", "DUPLICATE_QUESTION"
 
+    # 8. Source question reproduction protection
+    if admin_description:
+        is_reprod, reprod_reason = is_source_reproduction(q_text, admin_description)
+        if not is_reprod and q_data.get('explanation'):
+            is_reprod, reprod_reason = is_source_reproduction(str(q_data.get('explanation')), admin_description)
+        if is_reprod:
+            return False, f"Source reproduction rejected: {reprod_reason}", "SOURCE_REPRODUCTION_REJECTED"
+
     return True, "Passed local deterministic validation.", None
 
 # ----------------- Core Engine Methods -----------------
@@ -501,7 +558,9 @@ def generate_single_mcq(
     total_count: int = 1,
     on_provider_event: Optional[Any] = None,
     rejected_questions: Optional[List[str]] = None,
-    attempt_number: int = 1
+    attempt_number: int = 1,
+    job_id: Optional[str] = None,
+    question_number: Optional[int] = None
 ) -> Tuple[Dict[str, Any], str, str]:
     """
     Generate a single candidate MCQ matching category and speed constraints.
@@ -561,7 +620,10 @@ def generate_single_mcq(
         json_mode=True,
         data=data,
         on_provider_event=on_provider_event,
-        temperature=retry_temp
+        temperature=retry_temp,
+        job_id=job_id,
+        question_number=question_number or slot_number,
+        attempt=attempt_number
     )
 
     q_data = parse_and_repair_mcq_json(response_text)
@@ -602,13 +664,17 @@ def validate_mcq_independently(
     question_speed: str = 'Quick',
     existing_questions: Optional[List[Dict[str, Any]]] = None,
     current_batch_questions: Optional[List[Dict[str, Any]]] = None,
-    force_ai_validation: bool = False
+    force_ai_validation: bool = False,
+    chapter: str = '',
+    chapter_id: str = '',
+    admin_description: str = ''
 ) -> Tuple[bool, str, Optional[Dict[str, Any]], str]:
     """
     Two-stage validation architecture:
     Stage 1 (Primary): Local deterministic validation (0 API calls, 0 Gemini calls).
                        Verifies 4 options, 1 answer, valid index, non-empty question,
-                       subject/chapter consistency, difficulty, word constraints, duplicates.
+                       subject/chapter consistency, difficulty, word constraints, duplicates,
+                       source reproduction protection.
     Stage 2 (Fallback/Audit): Secondary AI provider (Groq/OpenRouter) ONLY when local validation
                              cannot reliably determine validity or when force_ai_validation is True.
                              Gemini is NEVER used for validation.
@@ -624,7 +690,10 @@ def validate_mcq_independently(
         question_category=question_category,
         question_speed=question_speed,
         existing_questions=existing_questions,
-        current_batch_questions=current_batch_questions
+        current_batch_questions=current_batch_questions,
+        chapter=chapter,
+        chapter_id=chapter_id,
+        admin_description=admin_description
     )
 
     if not is_valid_local:
@@ -690,7 +759,8 @@ def generate_exact_mcqs_pipeline(
     subject_id: str = '',
     chapter: str = '',
     chapter_id: str = '',
-    on_question_verified: Optional[Any] = None
+    on_question_verified: Optional[Any] = None,
+    admin_description: str = ''
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Resilient generation pipeline executing an independent question slot lifecycle.
@@ -702,7 +772,7 @@ def generate_exact_mcqs_pipeline(
     if source_documents is None:
         source_documents = []
 
-    # Retrieve relevant source chunks
+    # Retrieve relevant source chunks strictly matching chapter if specified
     relevant_chunks = ai_document_indexer.retrieve_relevant_chunks(
         documents=source_documents,
         query_topic=topic or chapter,
@@ -747,6 +817,25 @@ def generate_exact_mcqs_pipeline(
         'endTime': None
     }
 
+    # Strict Chapter Lock: If chapter/chapter_id requested and source documents exist for subject,
+    # never silently fall back to other chapters of the subject; fail fast with NO_VALID_CHAPTER_CONTEXT.
+    if (chapter or chapter_id) and source_documents:
+        subject_docs = [
+            d for d in source_documents
+            if d.get('subject', '').lower() == subject.lower() or (subject_id and d.get('subjectId') == subject_id)
+        ]
+        if subject_docs and not relevant_chunks:
+            err_msg = f"NO_VALID_CHAPTER_CONTEXT: No indexed documents found matching chapter '{chapter or chapter_id}' for subject '{subject}'."
+            print(f"[CHAPTER_LOCK_ERROR] {err_msg}", flush=True)
+            for s in question_statuses:
+                s['status'] = 'failed'
+                s['error'] = err_msg
+            metrics['failedCount'] = count
+            metrics['endTime'] = time.time()
+            metrics['durationSeconds'] = round(metrics['endTime'] - metrics['startTime'], 1)
+            metrics['error'] = err_msg
+            return [], metrics
+
     print(f"[BATCH START] batchId={job_id} total={count} category={question_category} speed={question_speed}", flush=True)
 
     MAX_RETRIES_PER_SLOT = 2  # up to 3 attempts per slot
@@ -760,6 +849,7 @@ def generate_exact_mcqs_pipeline(
         slot_saved = False
         last_slot_error = None
 
+        print(f"[QUESTION_START] batchId={job_id} questionNumber={slot_idx} attempt=1 concurrentActiveRequests=1", flush=True)
         print(f"[QUESTION START] batchId={job_id} questionNumber={slot_idx} attempt=1", flush=True)
 
         chunk_slice = None
@@ -821,8 +911,10 @@ def generate_exact_mcqs_pipeline(
                 chunk_slice = [relevant_chunks[chunk_idx]]
 
             # Check slot watchdog timeout
-            if (time.time() - slot_start_time) > SLOT_MAX_TIMEOUT:
+            elapsed = time.time() - slot_start_time
+            if elapsed > SLOT_MAX_TIMEOUT:
                 last_slot_error = f"Slot watchdog timeout ({SLOT_MAX_TIMEOUT}s) exceeded."
+                print(f"[QUESTION_TIMEOUT] batchId={job_id} questionNumber={slot_idx} elapsed={elapsed:.1f}s timeout={SLOT_MAX_TIMEOUT:.1f}s", flush=True)
                 print(f"[QUESTION FAILED] batchId={job_id} questionNumber={slot_idx} attempt={attempt+1} error={last_slot_error}", flush=True)
                 break
 
@@ -848,6 +940,7 @@ def generate_exact_mcqs_pipeline(
                     pass
 
             # Step 1: Generate single MCQ via failover
+            gen_start_time = time.time()
             try:
                 # Provide all generated questions in batch as well as rejected attempts
                 batch_prev_stems = [q.get('text') for q in generated_questions if q.get('text')]
@@ -865,8 +958,12 @@ def generate_exact_mcqs_pipeline(
                     total_count=count,
                     on_provider_event=slot_prov_event_cb,
                     rejected_questions=list(slot_rejected_stems),
-                    attempt_number=attempt + 1
+                    attempt_number=attempt + 1,
+                    job_id=job_id,
+                    question_number=slot_idx
                 )
+                gen_duration = (time.time() - gen_start_time) * 1000.0
+                print(f"[QUESTION_GENERATED] batchId={job_id} questionNumber={slot_idx} attempt={attempt+1} provider={gen_prov} model={gen_model} duration={gen_duration:.1f}ms", flush=True)
                 metrics['providersUsed'].add(gen_prov)
                 if not slot_gemini_called[0] and gen_prov and 'gemini' in str(gen_prov).lower():
                     metrics['geminiGenerationCalls'] += 1
@@ -895,6 +992,7 @@ def generate_exact_mcqs_pipeline(
                 except Exception:
                     pass
 
+            val_start_time = time.time()
             is_valid, val_reason, suggested_fix, val_prov = validate_mcq_independently(
                 q_data=q_candidate,
                 subject=subject,
@@ -906,8 +1004,12 @@ def generate_exact_mcqs_pipeline(
                 existing_questions=existing_questions,
                 current_batch_questions=generated_questions,
                 data=data,
-                on_provider_event=slot_prov_event_cb
+                on_provider_event=slot_prov_event_cb,
+                chapter=chapter,
+                chapter_id=chapter_id,
+                admin_description=admin_description
             )
+            val_duration = (time.time() - val_start_time) * 1000.0
             metrics['validationCalls'] += 1
             metrics['validationProvider'] = val_prov
             metrics['validationProvidersUsed'].add(val_prov)
@@ -924,6 +1026,8 @@ def generate_exact_mcqs_pipeline(
                 if cand_stem and cand_stem not in slot_rejected_stems:
                     slot_rejected_stems.append(cand_stem)
 
+                print(f"[VALIDATION_FAILED] batchId={job_id} questionNumber={slot_idx} attempt={attempt+1} validator={val_prov} reason={clean_err}", flush=True)
+
                 if 'duplicate' in val_reason.lower():
                     metrics['rejectedDuplicates'] += 1
                 else:
@@ -931,6 +1035,8 @@ def generate_exact_mcqs_pipeline(
                 metrics['regenerationAttempts'] += 1
                 metrics['regenerationCount'] = metrics['regenerationAttempts']
                 continue
+
+            print(f"[VALIDATION_PASSED] batchId={job_id} questionNumber={slot_idx} validator={val_prov} checksCount=8 duration={val_duration:.1f}ms", flush=True)
 
             # Apply fix if suggested by validator
             final_q = q_candidate
@@ -990,6 +1096,7 @@ def generate_exact_mcqs_pipeline(
                 except Exception as cb_err:
                     print(f"[AI_PIPELINE_CB_WARNING] on_question_verified callback error: {cb_err}", flush=True)
 
+            print(f"[QUESTION_VERIFIED] batchId={job_id} questionNumber={slot_idx} provider={gen_prov} model={gen_model} verifiedTotal={len(generated_questions)}/{count}", flush=True)
             print(f"[QUESTION SUCCESS] batchId={job_id} questionNumber={slot_idx} provider={gen_prov} model={gen_model} verifiedTotal={len(generated_questions)}", flush=True)
             break  # Attempt loop ends on success
 
@@ -1001,6 +1108,7 @@ def generate_exact_mcqs_pipeline(
             if clean_err.startswith("Duplicate check: "):
                 clean_err = "Duplicate: " + clean_err[len("Duplicate check: "):].strip()
             slot_status_obj['error'] = clean_err
+            print(f"[QUESTION_FAILED] batchId={job_id} questionNumber={slot_idx} attempt={attempt+1} error={clean_err}", flush=True)
             print(f"[QUESTION FAILED] batchId={job_id} questionNumber={slot_idx} error={clean_err}", flush=True)
             if progress_callback:
                 try:
@@ -1026,6 +1134,7 @@ def generate_exact_mcqs_pipeline(
     metrics['validationProvidersUsed'] = list(metrics['validationProvidersUsed'])
 
     final_status = 'COMPLETED' if len(generated_questions) == count else ('PARTIAL' if len(generated_questions) > 0 else 'FAILED')
+    print(f"[BATCH_COMPLETED] batchId={job_id} total={count} verified={len(generated_questions)} failed={metrics['failedCount']} totalDuration={metrics['durationSeconds']}s providersUsed={list(metrics['providersUsed'])}", flush=True)
     print(f"[BATCH COMPLETE] batchId={job_id} totalGenerated={len(generated_questions)} totalFailed={metrics['failedCount']} duration={metrics['durationSeconds']}s status={final_status}", flush=True)
 
     return generated_questions, metrics

@@ -8145,16 +8145,20 @@ class AdminDashboard {
               color = 'bg-purple-100 text-purple-800 border-purple-300';
               label = 'VALIDATING';
             }
-            else if (qs.status === 'saved') {
+            else if (qs.status === 'saved' || qs.status === 'verified') {
               color = 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold';
               label = 'VERIFIED';
+            }
+            else if (qs.status === 'timeout' || (qs.error && qs.error.toLowerCase().includes('timeout'))) {
+              color = 'bg-amber-100 text-amber-900 border-amber-400 font-bold';
+              label = 'TIMEOUT';
             }
             else if (qs.status === 'failed') {
               color = 'bg-red-100 text-red-800 border-red-300 font-bold';
               const cleanReason = qs.error ? qs.error.replace(/^Validation rejected:\s*/i, '').replace(/^Duplicate check:\s*/i, 'Duplicate: ') : 'Rejected';
               label = `FAILED — ${cleanReason}`;
             }
-            return `<span class="px-2 py-0.5 text-[10px] rounded border ${color}" title="${qs.error || 'Failed'}">Q${qs.number}: ${label}</span>`;
+            return `<span class="px-2 py-0.5 text-[10px] rounded border ${color}" title="${qs.error || qs.provider || 'Slot'}">Q${qs.number}: ${label}</span>`;
           }).join('');
         }
 

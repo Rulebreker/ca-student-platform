@@ -8,6 +8,8 @@ import base64
 import hashlib
 import hmac
 import secrets
+import random
+import threading
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -22,11 +24,81 @@ FIREBASE_RTDB_URL = "https://excellenceca-45a9d-default-rtdb.firebaseio.com"
 # Standard browser User-Agent for providers that enforce Cloudflare browser checks (e.g. Groq)
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
-# Cooldown and health tracking in memory
-_provider_cooldowns: Dict[str, float] = {}
-_provider_failures: Dict[str, int] = {}
+# Cooldown, family, and health tracking in memory
+_family_cooldowns: Dict[str, float] = {}
+
+class _CooldownDict(dict):
+    def clear(self):
+        super().clear()
+        _family_cooldowns.clear()
+
+_provider_cooldowns: Dict[str, float] = _CooldownDict()
+_provider_failures: Dict[str, Any] = {}
 _provider_latencies: Dict[str, float] = {}
 _memory_secrets_cache: Dict[str, str] = {}
+
+# Server-side pacing tracking
+_last_provider_call_time: Dict[str, float] = {}
+_pacing_lock = threading.Lock()
+
+PROVIDER_FAMILIES = {
+    'gemini_1': 'gemini',
+    'gemini_2': 'gemini',
+    'groq': 'groq',
+    'openrouter': 'openrouter',
+    'mistral_ocr': 'mistral'
+}
+
+def get_provider_family(provider_id: str, provider_engine: str = '') -> str:
+    if provider_id in PROVIDER_FAMILIES:
+        return PROVIDER_FAMILIES[provider_id]
+    if provider_engine:
+        return provider_engine
+    p_lower = str(provider_id).lower()
+    if 'gemini' in p_lower:
+        return 'gemini'
+    if 'groq' in p_lower:
+        return 'groq'
+    if 'openrouter' in p_lower:
+        return 'openrouter'
+    return provider_id
+
+def get_provider_health(provider_id: str, enabled: bool = True) -> str:
+    """Return authoritative health state: 'healthy', 'rate_limited', 'temporarily_unavailable', 'cooling_down', 'disabled'."""
+    if not enabled:
+        return 'disabled'
+    now = time.time()
+    family = get_provider_family(provider_id)
+    if _family_cooldowns.get(family, 0) > now or _provider_cooldowns.get(provider_id, 0) > now:
+        f_type = _provider_failures.get(f"{provider_id}_type") or _provider_failures.get(f"{family}_type")
+        if f_type == 'rate_limited':
+            return 'rate_limited'
+        if f_type == 'temporarily_unavailable':
+            return 'temporarily_unavailable'
+        return 'cooling_down'
+    return 'healthy'
+
+def apply_server_side_pacing(provider_id: str, data: Optional[Dict[str, Any]] = None):
+    """
+    Enforce controlled server-side inter-request delay between consecutive calls to the SAME provider/family.
+    Prevents RPM and burst pressure. Does NOT apply when switching to a different provider.
+    """
+    pacing_cfg = (data.get('ai_pacing_config') if data and isinstance(data, dict) else {}) or {}
+    base_delay = float(pacing_cfg.get('min_delay_seconds', 2.0))
+    jitter_min = float(pacing_cfg.get('jitter_min_seconds', 0.5))
+    jitter_max = float(pacing_cfg.get('jitter_max_seconds', 1.0))
+    target_delay = base_delay + random.uniform(jitter_min, jitter_max)
+
+    family = get_provider_family(provider_id)
+    pace_key = family
+    with _pacing_lock:
+        last_time = _last_provider_call_time.get(pace_key, 0)
+        now = time.time()
+        elapsed = now - last_time
+        if last_time > 0 and elapsed < target_delay:
+            sleep_time = target_delay - elapsed
+            time.sleep(sleep_time)
+        _last_provider_call_time[pace_key] = time.time()
 
 class RateLimitError(RuntimeError):
     """Raised when an AI provider returns HTTP 429 or quota exceeded."""
@@ -423,25 +495,55 @@ def delete_provider(data: Dict[str, Any], provider_id: str) -> bool:
     return False
 
 def mark_provider_failure(provider_id: str, error_msg: str, status_code: Optional[int] = None, retry_after: Optional[float] = None):
-    """Mark a provider failure and apply exponential/circuit cooldown."""
+    """Mark a provider failure and apply exponential/family circuit cooldown."""
     _provider_failures[provider_id] = _provider_failures.get(provider_id, 0) + 1
-    cooldown = 30.0
-    if status_code == 429 or '429' in str(error_msg) or 'RESOURCE_EXHAUSTED' in str(error_msg) or 'quota' in str(error_msg).lower():
+    now = time.time()
+    family = get_provider_family(provider_id)
+
+    is_429 = (status_code == 429 or '429' in str(error_msg) or 'RESOURCE_EXHAUSTED' in str(error_msg) or 'quota' in str(error_msg).lower())
+    if is_429:
         cooldown = max(float(retry_after or 60.0), 30.0)
-        _provider_cooldowns[provider_id] = time.time() + cooldown
-        print(f"[429 RATE LIMITED] Provider '{provider_id}' quota exhausted: {error_msg}. Cooling down for {cooldown:.1f}s.", flush=True)
+        _provider_failures[f"{provider_id}_type"] = 'rate_limited'
+        _provider_failures[f"{family}_type"] = 'rate_limited'
+        _provider_cooldowns[provider_id] = now + cooldown
+        _family_cooldowns[family] = now + cooldown
+
+        # Apply family-level cooldown to all sister providers in the same family (e.g. gemini_1 & gemini_2)
+        for pid, fam in PROVIDER_FAMILIES.items():
+            if fam == family:
+                _provider_cooldowns[pid] = now + cooldown
+        print(f"[COOLDOWN_STARTED] provider={provider_id} family={family} duration={cooldown:.1f}s error={error_msg}", flush=True)
+        print(f"[429 RATE LIMITED] Provider '{provider_id}' family '{family}' quota exhausted: {error_msg}. Cooling down for {cooldown:.1f}s.", flush=True)
         return
-    elif status_code and 500 <= status_code < 600:
+
+    is_5xx = (status_code and 500 <= status_code < 600) or any(code in str(error_msg) for code in ['500', '502', '503', '504', 'timed out', 'timeout'])
+    if is_5xx:
         cooldown = 45.0
-    _provider_cooldowns[provider_id] = time.time() + cooldown
+        _provider_failures[f"{provider_id}_type"] = 'temporarily_unavailable'
+        _provider_failures[f"{family}_type"] = 'temporarily_unavailable'
+        _provider_cooldowns[provider_id] = now + cooldown
+        _family_cooldowns[family] = now + cooldown
+        for pid, fam in PROVIDER_FAMILIES.items():
+            if fam == family:
+                _provider_cooldowns[pid] = now + cooldown
+        print(f"[COOLDOWN_STARTED] provider={provider_id} family={family} duration={cooldown:.1f}s error={error_msg}", flush=True)
+        print(f"[AI_GATEWAY_FAIL] Provider '{provider_id}' 5xx error: {error_msg}. Cooling down for {cooldown:.1f}s.", flush=True)
+        return
+
+    cooldown = 30.0
+    _provider_cooldowns[provider_id] = now + cooldown
     print(f"[AI_GATEWAY_FAIL] Provider '{provider_id}' failed: {error_msg}. Cooling down for {cooldown:.1f}s.", flush=True)
 
 def mark_provider_success(provider_id: str, latency_ms: float):
     """Mark a provider call success, reset failures, record latency."""
     _provider_failures[provider_id] = 0
+    _provider_failures.pop(f"{provider_id}_type", None)
     _provider_latencies[provider_id] = round(latency_ms, 1)
     if provider_id in _provider_cooldowns:
         del _provider_cooldowns[provider_id]
+    family = get_provider_family(provider_id)
+    if family in _family_cooldowns:
+        del _family_cooldowns[family]
 
 # ----------------------------------------------------------------------
 # DIRECT HTTP PROVIDER CLIENTS
@@ -747,7 +849,10 @@ def call_llm_with_failover(
     preferred_provider: Optional[str] = None,
     timeout: float = 18.0,
     on_provider_event: Optional[Any] = None,
-    temperature: Optional[float] = None
+    temperature: Optional[float] = None,
+    job_id: Optional[str] = None,
+    question_number: Optional[int] = None,
+    attempt: Optional[int] = None
 ) -> Tuple[str, str, str]:
     providers = get_registered_providers(data)
     secrets_map = load_secrets()
@@ -770,10 +875,17 @@ def call_llm_with_failover(
     if not candidates:
         raise RuntimeError(f"No configured or enabled AI providers available for purpose '{purpose}'. Please configure API keys in Admin Settings.")
 
-    if preferred_provider:
-        candidates.sort(key=lambda x: 0 if x['id'] == preferred_provider else x.get('priority', 99))
-    else:
-        candidates.sort(key=lambda x: x.get('priority', 99))
+    # Canonical priority: Gemini (family rank 1) -> Groq (family rank 2) -> OpenRouter (family rank 3)
+    def _sort_key(prov):
+        if preferred_provider and prov['id'] == preferred_provider:
+            return (-1, 0)
+        p_id = prov['id']
+        family = get_provider_family(p_id, prov.get('provider', ''))
+        family_rank = {'gemini': 1, 'groq': 2, 'openrouter': 3}.get(family, 99)
+        prov_priority = prov.get('priority', 50)
+        return (family_rank, prov_priority)
+
+    candidates.sort(key=_sort_key)
 
     errors = []
     
@@ -786,71 +898,109 @@ def call_llm_with_failover(
         key = secrets_map.get(pid, '')
         model = prov.get('model', '')
         fallback_model = prov.get('fallback_model', '')
+        family = get_provider_family(pid, prov.get('provider', ''))
         
         now = time.time()
-        if pid in _provider_cooldowns and _provider_cooldowns[pid] > now and len(candidates) > 1:
-            remaining = _provider_cooldowns[pid] - now
-            print(f"[AI_FAILOVER_SKIP] Provider '{pid}' in cooldown ({remaining:.1f}s remaining). Skipping to next candidate.", flush=True)
+        # Health-aware skip: Check both individual provider cooldown AND family-level cooldown
+        if (_provider_cooldowns.get(pid, 0) > now or _family_cooldowns.get(family, 0) > now) and len(candidates) > 1:
+            remaining = max(_provider_cooldowns.get(pid, 0) - now, _family_cooldowns.get(family, 0) - now)
+            print(f"[PROVIDER_SKIPPED] provider={pid} family={family} reason=cooling_down remaining={remaining:.1f}s", flush=True)
+            print(f"[AI_FAILOVER_SKIP] Provider '{pid}' (family: {family}) in cooldown ({remaining:.1f}s remaining). Skipping to next candidate.", flush=True)
             continue
             
-        print(f"[AI_GATEWAY_TRY] Attempting '{purpose}' via provider '{pid}' (model: {model})...", flush=True)
+        print(f"[AI_GATEWAY_TRY] Attempting '{purpose}' via provider '{pid}' (family: {family}, model: {model})...", flush=True)
         
         models_to_try = [model]
         if fallback_model and fallback_model != model:
             models_to_try.append(fallback_model)
             
         provider_rate_limited = False
+        provider_succeeded = False
+
         for current_model in models_to_try:
-            if time.time() - gateway_start > GATEWAY_MAX_TOTAL_TIMEOUT:
-                break
-            try:
-                print(f"[AI REQUEST START] purpose={purpose} provider={pid} model={current_model}", flush=True)
-                if on_provider_event:
-                    try:
-                        on_provider_event('ai_call_start', pid, current_model, purpose)
-                    except Exception:
-                        pass
-                if prov['provider'] == 'gemini':
-                    text, latency = _call_gemini_api(key, current_model, prompt, system_instruction, json_mode, timeout=timeout, temperature=temperature)
-                elif prov['provider'] == 'openrouter':
-                    text, latency = _call_openrouter_api(key, current_model, prompt, system_instruction, json_mode, timeout=timeout, temperature=temperature)
-                elif prov['provider'] == 'groq':
-                    text, latency = _call_groq_api(key, current_model, prompt, system_instruction, json_mode, timeout=timeout, temperature=temperature)
-                else:
-                    raise ValueError(f"Unknown provider engine: {prov['provider']}")
-
-                mark_provider_success(pid, latency)
-                print(f"[AI RESPONSE RECEIVED] purpose={purpose} provider={pid} model={current_model} duration={latency:.1f}ms", flush=True)
-                print(f"[AI_GATEWAY_SUCCESS] Provider '{pid}' (model: {current_model}) responded in {latency:.1f}ms.", flush=True)
-                return text, pid, current_model
-
-            except RateLimitError as rle:
-                err_str = str(rle)
-                mark_provider_failure(pid, err_str, status_code=429, retry_after=rle.retry_after)
-                errors.append(f"[{pid}/{current_model}]: {err_str}")
-                print(f"[429 RATE LIMITED] Provider '{pid}' model '{current_model}' quota exhausted. Retry after {rle.retry_after:.1f}s. Breaking to next candidate provider...", flush=True)
-                if on_provider_event:
-                    try:
-                        on_provider_event('rate_limited', pid, current_model, rle.retry_after)
-                    except Exception:
-                        pass
-                provider_rate_limited = True
-                # Critical: Break out of inner model loop immediately on 429 quota exhaustion
+            if time.time() - gateway_start > GATEWAY_MAX_TOTAL_TIMEOUT or provider_succeeded:
                 break
 
-            except Exception as e:
-                err_str = str(e)
-                status_code = getattr(e, 'code', None)
-                mark_provider_failure(pid, err_str, status_code)
-                errors.append(f"[{pid}/{current_model}]: {err_str}")
-                print(f"[AI_GATEWAY_RETRY] Failed {pid}/{current_model}: {err_str}. Cascading to fallback...", flush=True)
+            # Transient retry loop (max 1 retry for transient 5xx, network timeout, or connection resets)
+            max_transient_retries = 1
+            for transient_attempt in range(max_transient_retries + 1):
+                if time.time() - gateway_start > GATEWAY_MAX_TOTAL_TIMEOUT:
+                    break
 
-        if provider_rate_limited:
+                try:
+                    # Enforce server-side API pacing between calls to the same provider/family
+                    apply_server_side_pacing(pid, data)
+
+                    print(f"[API_CALL_STARTED] batchId={job_id or 'none'} questionNumber={question_number or 0} attempt={attempt or 1} provider={pid} model={current_model} providerFamily={family}", flush=True)
+                    print(f"[AI REQUEST START] purpose={purpose} provider={pid} model={current_model}", flush=True)
+                    if on_provider_event:
+                        try:
+                            on_provider_event('ai_call_start', pid, current_model, purpose)
+                        except Exception:
+                            pass
+
+                    if prov['provider'] == 'gemini':
+                        text, latency = _call_gemini_api(key, current_model, prompt, system_instruction, json_mode, timeout=timeout, temperature=temperature)
+                    elif prov['provider'] == 'openrouter':
+                        text, latency = _call_openrouter_api(key, current_model, prompt, system_instruction, json_mode, timeout=timeout, temperature=temperature)
+                    elif prov['provider'] == 'groq':
+                        text, latency = _call_groq_api(key, current_model, prompt, system_instruction, json_mode, timeout=timeout, temperature=temperature)
+                    else:
+                        raise ValueError(f"Unknown provider engine: {prov['provider']}")
+
+                    mark_provider_success(pid, latency)
+                    print(f"[API_CALL_COMPLETED] batchId={job_id or 'none'} questionNumber={question_number or 0} attempt={attempt or 1} provider={pid} model={current_model} duration={latency:.1f}ms httpStatus=200", flush=True)
+                    print(f"[AI RESPONSE RECEIVED] purpose={purpose} provider={pid} model={current_model} duration={latency:.1f}ms", flush=True)
+                    print(f"[AI_GATEWAY_SUCCESS] Provider '{pid}' (model: {current_model}) responded in {latency:.1f}ms.", flush=True)
+                    provider_succeeded = True
+                    return text, pid, current_model
+
+                except RateLimitError as rle:
+                    err_str = str(rle)
+                    mark_provider_failure(pid, err_str, status_code=429, retry_after=rle.retry_after)
+                    errors.append(f"[{pid}/{current_model}]: {err_str}")
+                    print(f"[RATE_LIMITED] batchId={job_id or 'none'} questionNumber={question_number or 0} provider={pid} model={current_model} retryAfter={rle.retry_after:.1f}s", flush=True)
+                    print(f"[429 RATE LIMITED] Provider '{pid}' model '{current_model}' quota exhausted. Retry after {rle.retry_after:.1f}s. Breaking to next candidate provider...", flush=True)
+                    if on_provider_event:
+                        try:
+                            on_provider_event('rate_limited', pid, current_model, rle.retry_after)
+                        except Exception:
+                            pass
+                    provider_rate_limited = True
+                    # Critical: Break immediately on 429 without retrying models on exhausted key
+                    break
+
+                except Exception as e:
+                    err_str = str(e)
+                    status_code = getattr(e, 'code', None)
+                    is_transient = (
+                        (status_code and 500 <= status_code < 600) or
+                        any(code in err_str for code in ['500', '502', '503', '504', 'timed out', 'timeout', 'ConnectionResetError', 'RemoteDisconnected'])
+                    )
+                    if is_transient and transient_attempt < max_transient_retries:
+                        backoff = 1.5 + random.uniform(0.3, 0.7)
+                        print(f"[TRANSIENT_RETRY] provider={pid} model={current_model} error={err_str}. Retrying in {backoff:.2f}s...", flush=True)
+                        time.sleep(backoff)
+                        continue
+
+                    mark_provider_failure(pid, err_str, status_code)
+                    errors.append(f"[{pid}/{current_model}]: {err_str}")
+                    print(f"[AI_GATEWAY_RETRY] Failed {pid}/{current_model}: {err_str}. Cascading to fallback...", flush=True)
+                    break
+
+            if provider_rate_limited or pid in _provider_cooldowns or _family_cooldowns.get(family, 0) > time.time():
+                break
+
+        if provider_rate_limited or not provider_succeeded:
             # Check if there is a next provider to fallback to
-            next_candidates = [c for c in candidates[prov_idx + 1:] if _provider_cooldowns.get(c['id'], 0) <= time.time()]
+            next_candidates = [
+                c for c in candidates[prov_idx + 1:] 
+                if _provider_cooldowns.get(c['id'], 0) <= time.time() and _family_cooldowns.get(get_provider_family(c['id']), 0) <= time.time()
+            ]
             if next_candidates:
                 next_prov = next_candidates[0]
-                print(f"[FALLBACK PROVIDER] Provider '{pid}' was rate limited. Immediately switching to fallback provider '{next_prov['id']}' ({next_prov.get('model')}).", flush=True)
+                print(f"[FALLBACK_SELECTED] fromProvider={pid} toProvider={next_prov['id']} toModel={next_prov.get('model')}", flush=True)
+                print(f"[FALLBACK PROVIDER] Provider '{pid}' was rate limited or failed. Immediately switching to fallback provider '{next_prov['id']}' ({next_prov.get('model')}).", flush=True)
                 if on_provider_event:
                     try:
                         on_provider_event('fallback', next_prov['id'], next_prov.get('model'), None)
