@@ -26,6 +26,7 @@ class FirebaseSyncManager {
     this._isMergingReferrals = false;
     this._knownUserIds = new Set();
     this._profileRenderTimer = null; // Debounce timer for profile page re-renders
+    this._activeListeners = []; // Registry of attached listener references for clean teardown
   }
 
   // Debounced profile re-render: coalesces multiple Firebase listener triggers
@@ -191,209 +192,125 @@ class FirebaseSyncManager {
     });
   }
 
+  _registerListener(ref, eventType, callback) {
+    ref.on(eventType, callback);
+    this._activeListeners.push({ ref, eventType, callback });
+  }
+
+  detachAllListeners() {
+    if (Array.isArray(this._activeListeners)) {
+      this._activeListeners.forEach(({ ref, eventType, callback }) => {
+        try {
+          if (callback) {
+            ref.off(eventType, callback);
+          } else {
+            ref.off(eventType);
+          }
+        } catch (e) {}
+      });
+      this._activeListeners = [];
+    }
+    this.detachUserListeners();
+  }
+
   attachListeners() {
     if (!this.db) return;
 
-    // --- USERS REALTIME LISTENER ---
-    this.db.ref('users').on('value', snap => {
-      if (this._isMergingUsers) return;
-      const val = snap.val();
-      const remoteUsers = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
-      this.mergeRemoteUsers(remoteUsers);
-    }, err => {
-      console.warn('[FirebaseSync] Users listener error:', err);
-    });
+    // Detach any previous listeners to prevent duplicate listener accumulation on reconnect / soft reload
+    this.detachAllListeners();
 
+    const isAdmin = window.auth && typeof window.auth.isAdmin === 'function' && window.auth.isAdmin();
+    const curUser = window.store ? window.store.getCurrentUser() : null;
+
+    // 1. Core academic syllabus & test paper metadata (lightweight, ~20-35 KB)
     // --- ASSIGNMENTS REALTIME LISTENER ---
-    this.db.ref('assignments').on('value', snap => {
+    const asgRef = this.db.ref('assignments');
+    const asgCb = snap => {
       if (this._isMergingAssignments) return;
       const val = snap.val();
       const remoteAssignments = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
       this.mergeRemoteAssignments(remoteAssignments);
-    }, err => {
-      console.warn('[FirebaseSync] Assignments listener error:', err);
-    });
+    };
+    this._registerListener(asgRef, 'value', asgCb);
 
-    // --- SUBMISSIONS REALTIME LISTENER ---
-    this.db.ref('submissions').on('value', snap => {
-      if (this._isMergingSubmissions) return;
-      const val = snap.val();
-      const remoteSubs = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
-      this.mergeRemoteSubmissions(remoteSubs);
-    }, err => {
-      console.warn('[FirebaseSync] Submissions listener error:', err);
-    });
-
-    // --- TESTS REALTIME LISTENER ---
-    this.db.ref('tests').on('value', snap => {
+    // --- TESTS REALTIME LISTENER (Metadata only; individual questions loaded scoped per test) ---
+    const testsRef = this.db.ref('tests');
+    const testsCb = snap => {
       if (this._isMergingTests) return;
       const val = snap.val();
       const remoteTests = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
       this.mergeRemoteTests(remoteTests);
-    }, err => {
-      console.warn('[FirebaseSync] Tests listener error:', err);
-    });
-
-    // --- QUESTIONS REALTIME LISTENER ---
-    this.db.ref('questions').on('value', snap => {
-      if (this._isMergingQuestions) return;
-      const val = snap.val();
-      const remoteQs = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
-      this.mergeRemoteQuestions(remoteQs);
-    }, err => {
-      console.warn('[FirebaseSync] Questions listener error:', err);
-    });
+    };
+    this._registerListener(testsRef, 'value', testsCb);
 
     // --- SUBJECTS REALTIME LISTENER ---
-    this.db.ref('subjects').on('value', snap => {
+    const subjRef = this.db.ref('subjects');
+    const subjCb = snap => {
       if (this._isMergingSubjects) return;
       const val = snap.val();
       const remoteSubjects = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
       this.mergeRemoteSubjects(remoteSubjects);
-    }, err => {
-      console.warn('[FirebaseSync] Subjects listener error:', err);
-    });
+    };
+    this._registerListener(subjRef, 'value', subjCb);
 
-    // --- NOTIFICATIONS REALTIME LISTENER ---
-    this.db.ref('notifications').on('value', snap => {
-      if (this._isMergingNotifications) return;
-      const val = snap.val();
-      const remoteNotifs = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
-      this.mergeRemoteNotifications(remoteNotifs);
-    }, err => {
-      console.warn('[FirebaseSync] Notifications listener error:', err);
-    });
+    // 2. Role-specific listeners:
+    if (isAdmin) {
+      // Admin needs user management, grading submissions, and audit log updates
+      const usersRef = this.db.ref('users');
+      const usersCb = snap => {
+        if (this._isMergingUsers) return;
+        const val = snap.val();
+        const remoteUsers = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
+        this.mergeRemoteUsers(remoteUsers);
+      };
+      this._registerListener(usersRef, 'value', usersCb);
 
-    // --- BOOKMARKS REALTIME LISTENER ---
-    this.db.ref('bookmarks').on('value', snap => {
-      if (this._isMergingBookmarks) return;
-      const val = snap.val();
-      const remoteBms = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
-      this.mergeRemoteBookmarks(remoteBms);
-    }, err => {
-      console.warn('[FirebaseSync] Bookmarks listener error:', err);
-    });
+      const subsRef = this.db.ref('submissions');
+      const subsCb = snap => {
+        if (this._isMergingSubmissions) return;
+        const val = snap.val();
+        const remoteSubs = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
+        this.mergeRemoteSubmissions(remoteSubs);
+      };
+      this._registerListener(subsRef, 'value', subsCb);
 
-    // --- XP TRANSACTIONS REALTIME LISTENER ---
-    this.db.ref('xp_transactions').on('value', snap => {
-      if (this._isMergingXpTransactions) return;
-      const val = snap.val();
-      const remoteTxs = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
-      this.mergeRemoteXpTransactions(remoteTxs);
-    }, err => {
-      console.warn('[FirebaseSync] XP transactions listener error:', err);
-    });
-
-    // --- REFERRALS REALTIME LISTENER ---
-    this.db.ref('referrals').on('value', snap => {
-      if (this._isMergingReferrals) return;
-      const val = snap.val();
-      const remoteRefs = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
-      this.mergeRemoteReferrals(remoteRefs);
-    }, err => {
-      console.warn('[FirebaseSync] Referrals listener error:', err);
-    });
-
-    // --- XP RESET SETTINGS REALTIME LISTENER ---
-    this.db.ref('xp_reset_settings').on('value', snap => {
-      const val = snap.val();
-      if (val && window.store && typeof window.store.saveXpResetSettings === 'function') {
-        window.store.saveXpResetSettings(val);
-        if (window.adminDashboard && window.adminDashboard.currentTab === 'xp-reset') {
-          window.adminDashboard.renderXpResetSettings();
+      // Scoped audit logs: only retrieve last 50 entries to prevent downloading full historical logs
+      const auditRef = this.db.ref('admin_audit_logs').limitToLast(50);
+      const auditCb = snap => {
+        const val = snap.val();
+        if (val && window.store) {
+          const logs = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
+          window.store.saveAdminAuditLogs(logs);
         }
-      }
-    });
+      };
+      this._registerListener(auditRef, 'value', auditCb);
 
-    // --- XP RESET HISTORY REALTIME LISTENER ---
-    this.db.ref('xp_reset_history').on('value', snap => {
-      const val = snap.val();
-      if (val && window.store) {
-        const list = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
-        list.sort((a, b) => new Date(b.resetAt || b.timestamp || 0) - new Date(a.resetAt || a.timestamp || 0));
-        localStorage.setItem('excellenceca_xp_reset_history', JSON.stringify(list.slice(0, 100)));
-        if (window.adminDashboard && window.adminDashboard.currentTab === 'xp-reset') {
-          window.adminDashboard.renderXpResetSettings();
+      const xpResetRef = this.db.ref('xp_reset_settings');
+      const xpResetCb = snap => {
+        const val = snap.val();
+        if (val && window.store && typeof window.store.saveXpResetSettings === 'function') {
+          window.store.saveXpResetSettings(val);
         }
-      }
-    });
+      };
+      this._registerListener(xpResetRef, 'value', xpResetCb);
+    } else if (curUser && curUser.id) {
+      // Student: attach scoped user listener and scoped subscription listener
+      this.attachCurrentUserListener(curUser.id);
 
-    // --- SUBSCRIPTIONS REALTIME LISTENER ---
-    this.db.ref('subscriptions').on('value', snap => {
-      const val = snap.val();
-      if (val && window.store) {
-        window.store.saveSubscriptions(val);
-        if (window.subscriptionManager && typeof window.subscriptionManager.onSubscriptionUpdate === 'function') {
-          window.subscriptionManager.onSubscriptionUpdate();
-        }
-        if (window.studentDashboard && typeof window.studentDashboard.renderPassBadge === 'function') {
-          window.studentDashboard.renderPassBadge();
-        }
-        if (window.adminDashboard && window.adminDashboard.currentTab === 'subscriptions') {
-          window.adminDashboard.renderSubscriptions(true);
-        }
-      }
-    });
-
-    // --- PAYMENT SESSIONS REALTIME LISTENER ---
-    this.db.ref('payment_sessions').on('value', snap => {
-      const val = snap.val();
-      if (val && window.store) {
-        const sessions = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
-        window.store.savePaymentSessions(sessions);
-        if (window.subscriptionManager && typeof window.subscriptionManager.onPaymentSessionsUpdate === 'function') {
-          window.subscriptionManager.onPaymentSessionsUpdate();
-        }
-        if (window.adminDashboard && window.adminDashboard.currentTab === 'payments') {
-          window.adminDashboard.renderPaymentVerifications(true);
-        }
-      }
-    });
-
-    // --- PAYMENT CHANNELS REALTIME LISTENER ---
-    this.db.ref('payment_channels').on('value', snap => {
-      const val = snap.val();
-      if (val && window.store) {
-        const channels = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
-        window.store.savePaymentChannels(channels);
-        if (window.adminDashboard && window.adminDashboard.currentTab === 'payment-channels') {
-          window.adminDashboard.renderPaymentChannels();
-        }
-      }
-    });
-
-    // --- SUBSCRIPTION PLANS REALTIME LISTENER ---
-    this.db.ref('subscription_plans').on('value', snap => {
-      const val = snap.val();
-      if (val && window.store) {
-        window.store.saveSubscriptionPlans(val);
-        if (window.subscriptionManager) {
-          window.subscriptionManager._cachedPlans = val;
-          if (window.location.hash === '#passes' && typeof window.subscriptionManager.renderPassesPage === 'function') {
-            window.subscriptionManager.renderPassesPage(false);
+      const subRef = this.db.ref('subscriptions/' + curUser.id);
+      const subCb = snap => {
+        const val = snap.val();
+        if (val && window.store) {
+          const subs = window.store.getSubscriptions() || {};
+          subs[curUser.id] = val;
+          window.store.saveSubscriptions(subs);
+          if (window.subscriptionManager && typeof window.subscriptionManager.onSubscriptionUpdate === 'function') {
+            window.subscriptionManager.onSubscriptionUpdate();
           }
         }
-        if (window.adminDashboard && window.adminDashboard.currentTab === 'plans-config') {
-          window.adminDashboard.renderPlanConfig();
-        }
-      }
-    });
-
-    // --- ADMIN AUDIT LOGS REALTIME LISTENER ---
-    this.db.ref('admin_audit_logs').on('value', snap => {
-      const val = snap.val();
-      if (val && window.store) {
-        const logs = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
-        window.store.saveAdminAuditLogs(logs);
-        if (window.adminDashboard && (window.adminDashboard.currentTab === 'audit-logs' || window.adminDashboard.currentTab === 'audit')) {
-          if (typeof window.adminDashboard.renderAdminAuditLogs === 'function') {
-            window.adminDashboard.renderAdminAuditLogs(true);
-          } else if (typeof window.adminDashboard.renderAuditLogs === 'function') {
-            window.adminDashboard.renderAuditLogs();
-          }
-        }
-      }
-    });
+      };
+      this._registerListener(subRef, 'value', subCb);
+    }
   }
 
   mergeRemoteUsers(remoteUsers) {

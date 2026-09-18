@@ -10,6 +10,7 @@ import socketserver
 import os
 import json
 import urllib.parse
+import urllib.request
 import uuid
 import base64
 from datetime import datetime, timezone, timedelta
@@ -1285,6 +1286,12 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
 
     if updated and os.path.exists(DATA_STORE_FILE):
         try:
+            if sanitize_rtdb_binary_payloads(data):
+                try:
+                    sync_to_firebase('payment_channels', data.get('payment_channels', []))
+                    sync_to_firebase('payment_sessions', data.get('payment_sessions', []))
+                except Exception:
+                    pass
             with open(DATA_STORE_FILE, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
         except Exception:
@@ -1292,7 +1299,83 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
 
     return data
 
-def load_backend_data(refresh_collections=None):
+def sanitize_rtdb_binary_payloads(data):
+    """
+    Ensures large binary assets (base64 images) are not stored inside RTDB collections.
+    Converts base64 QR data in payment_channels and payment_sessions to disk-backed image URLs.
+    """
+    dirty = False
+    channels = data.get('payment_channels', [])
+    for ch in channels:
+        if isinstance(ch, dict):
+            qr_url = ch.get('qrCodeUrl', '')
+            if qr_url and isinstance(qr_url, str) and qr_url.startswith('data:image/'):
+                try:
+                    import base64
+                    header, b64_data = qr_url.split(';base64,', 1)
+                    raw_bytes = base64.b64decode(b64_data)
+                    ext = '.png'
+                    if 'jpeg' in header or 'jpg' in header: ext = '.jpg'
+                    elif 'webp' in header: ext = '.webp'
+                    img_id = f"qr_{ch.get('id', 'chan')}{ext}"
+                    img_path = os.path.join(PRIVATE_IMAGES_DIR, img_id)
+                    with open(img_path, 'wb') as f:
+                        f.write(raw_bytes)
+                    ch['qrCodeUrl'] = f"/api/images/{img_id}"
+                    dirty = True
+                except Exception:
+                    ch['qrCodeUrl'] = ''
+                    dirty = True
+
+    sessions = data.get('payment_sessions', [])
+    for s in sessions:
+        if isinstance(s, dict):
+            qr_data = s.get('qrData', '')
+            if qr_data and isinstance(qr_data, str) and qr_data.startswith('data:image/'):
+                s['qrData'] = s.get('upiPayUri') or ''
+                dirty = True
+            cs = s.get('channelSnapshot')
+            if isinstance(cs, dict):
+                cs_qr = cs.get('qrCodeUrl', '')
+                if cs_qr and isinstance(cs_qr, str) and cs_qr.startswith('data:image/'):
+                    cs['qrCodeUrl'] = s.get('upiPayUri') or ''
+                    dirty = True
+            screenshot = s.get('screenshot', '')
+            if screenshot and isinstance(screenshot, str) and screenshot.startswith('data:image/'):
+                try:
+                    import base64
+                    header, b64_data = screenshot.split(';base64,', 1)
+                    raw_bytes = base64.b64decode(b64_data)
+                    ext = '.jpg'
+                    if 'png' in header: ext = '.png'
+                    elif 'webp' in header: ext = '.webp'
+                    sid = s.get('paymentSessionId') or s.get('id') or uuid.uuid4().hex[:8]
+                    safe_sid = re.sub(r'[^a-zA-Z0-9_\-]', '', str(sid))[:40]
+                    img_id = f"shot_{safe_sid}{ext}"
+                    img_path = os.path.join(PRIVATE_IMAGES_DIR, img_id)
+                    with open(img_path, 'wb') as f:
+                        f.write(raw_bytes)
+                    s['screenshot'] = f"/api/images/{img_id}"
+                    dirty = True
+                except Exception:
+                    pass
+
+    logs = data.get('admin_audit_logs', [])
+    for l in logs:
+        if isinstance(l, dict):
+            for k in ['newValue', 'oldValue', 'details']:
+                v = l.get(k)
+                if isinstance(v, dict):
+                    if 'qrCodeUrl' in v and isinstance(v['qrCodeUrl'], str) and v['qrCodeUrl'].startswith('data:image/'):
+                        v['qrCodeUrl'] = '[IMAGE_ARCHIVED]'
+                        dirty = True
+                elif isinstance(v, str) and 'data:image/' in v:
+                    l[k] = re.sub(r'data:image\/[a-zA-Z]+;base64,[A-Za-z0-9+/=]+', '[IMAGE_ARCHIVED]', v)
+                    dirty = True
+
+    return dirty
+
+def load_backend_data(refresh_collections=None, min_interval=10.0):
     with _backend_data_lock:
         if not os.path.exists(DATA_STORE_FILE):
             bundled_seed = os.path.join(BASE_DIR, 'backend_data.json')
@@ -1308,7 +1391,9 @@ def load_backend_data(refresh_collections=None):
                         cur_data = json.load(f)
                     
                     import urllib.request
-                    keys_to_fetch = ['revoked_users', 'revoked_tokens', 'users', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'papers', 'assignments', 'ai_source_documents', 'ai_generation_logs', 'ai_providers', 'ai_autopilot_config', 'subjects', 'ai_scheduled_tasks', 'ai_generation_jobs']
+                    # Cold start hydration: Only fetch critical dynamic collections from Firebase.
+                    # Heavy static collections (questions, documents, jobs, logs) are already present from bundled seed.
+                    keys_to_fetch = ['revoked_users', 'revoked_tokens', 'users', 'subscriptions', 'ai_autopilot_config', 'ai_providers', 'ai_scheduled_tasks']
                     
                     for key in keys_to_fetch:
                         try:
@@ -1543,9 +1628,17 @@ def load_backend_data(refresh_collections=None):
                 except Exception as xp_err:
                     print(f"[SYNC_XP_WARNING] {xp_err}", flush=True)
 
+                try:
+                    if sanitize_rtdb_binary_payloads(d):
+                        save_backend_data(d)
+                        sync_to_firebase('payment_channels', d.get('payment_channels', []))
+                        sync_to_firebase('payment_sessions', d.get('payment_sessions', []))
+                except Exception as san_err:
+                    print(f"[SANITIZE_PAYLOAD_WARNING] {san_err}", flush=True)
+
                 if refresh_collections:
                     try:
-                        sync_collections_from_firebase(d, collections=refresh_collections, min_interval=1.0)
+                        sync_collections_from_firebase(d, collections=refresh_collections, min_interval=min_interval)
                     except Exception:
                         pass
 
@@ -2226,7 +2319,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not user:
                 self.send_json(401, {'success': False, 'error': 'Authentication required.', 'code': 401})
                 return
-            data = load_backend_data(refresh_collections=['payment_sessions'])
+            data = load_backend_data()
             user_sessions = [s for s in data.get('payment_sessions', []) if s.get('userId') == user['id'] or (user.get('email') and s.get('userEmail') == user.get('email'))]
             self.send_json(200, {
                 'success': True,
@@ -2243,7 +2336,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not user:
                 self.send_json(401, {'success': False, 'error': 'Authentication required.', 'code': 401})
                 return
-            data = load_backend_data(refresh_collections=['payment_sessions'])
+            data = load_backend_data()
             sessions = data.get('payment_sessions', [])
             user_sessions = [s for s in sessions if s.get('userId') == user['id'] or (user.get('email') and s.get('userEmail') == user.get('email'))]
 
@@ -2268,7 +2361,6 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                             break
                         else:
                             s['status'] = 'expired'
-                            sync_to_firebase(f"payment_sessions/{s.get('paymentSessionId') or s.get('id')}", s)
                             dirty = True
                     except Exception:
                         pass
@@ -2277,19 +2369,12 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 save_backend_data(data)
 
             if active_session:
-                try:
-                    clean_exp = active_session['expiresAt'].replace('Z', '+00:00')
-                    exp_dt = datetime.fromisoformat(clean_exp)
-                    if exp_dt.tzinfo is None:
-                        exp_dt = exp_dt.replace(tzinfo=timezone.utc)
-                    rem_sec = max(0, int((exp_dt - now_utc).total_seconds()))
-                except Exception:
-                    rem_sec = 0
+                remaining = max(0, int((datetime.fromisoformat(active_session['expiresAt'].replace('Z', '+00:00')) - now_utc).total_seconds()))
                 self.send_json(200, {
                     'success': True,
                     'hasActiveSession': True,
                     'session': active_session,
-                    'remainingSeconds': rem_sec
+                    'remainingSeconds': remaining
                 })
             else:
                 self.send_json(200, {
@@ -2307,42 +2392,52 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not admin_u or admin_u.get('role') != 'admin':
                 self.send_json(403, {'success': False, 'error': 'Administrator authorization required.', 'code': 403})
                 return
-            data = load_backend_data(refresh_collections=['subscriptions'])
+            data = load_backend_data(refresh_collections=['subscriptions'], min_interval=30.0)
             subscriptions = data.get('subscriptions', {})
             users_dict = data.get('users', {})
             enriched = []
             subs_map = {}
             for u_id, sub in subscriptions.items():
                 st_user = next((u for u in users_dict.values() if u.get('id') == u_id), {})
-                entitlements = subscription_manager.get_user_entitlements(u_id, data, sync_to_firebase)
-                entry = {
-                    'subscription': sub,
-                    'entitlements': entitlements,
+                plan_id = sub.get('planId') or sub.get('targetPlanId')
+                plans_dict = data.get('subscription_plans', {})
+                plan = plans_dict.get(plan_id, {})
+                enriched_sub = {
                     'student': {
                         'id': u_id,
-                        'name': st_user.get('name', 'Student'),
+                        'name': st_user.get('name', 'Unknown Student'),
                         'email': st_user.get('email', ''),
-                        'phone': st_user.get('phone', ''),
                         'username': st_user.get('username', ''),
-                        'caLevel': st_user.get('caLevel', ''),
-                        'avatar': st_user.get('avatar', '')
-                    }
+                        'caLevel': st_user.get('caLevel', 'CA FOUNDATION')
+                    },
+                    'subscription': sub,
+                    'plan': plan
                 }
-                enriched.append(entry)
+                enriched.append(enriched_sub)
                 subs_map[u_id] = sub
+
             active_count = sum(1 for s in enriched if s['subscription'].get('status') in ('active', 'manually_granted') and not s['subscription'].get('isTrial'))
             trial_count = sum(1 for s in enriched if s['subscription'].get('status') in ('active', 'manually_granted') and s['subscription'].get('isTrial'))
             expired_count = sum(1 for s in enriched if s['subscription'].get('status') == 'expired')
-            print(f"[ADMIN_SUBSCRIPTIONS] Serving {len(enriched)} subscriptions to admin {admin_u.get('email')}", flush=True)
+            stats = {
+                'activeSubscriptions': active_count,
+                'activeTrials': trial_count,
+                'expiredSubscriptions': expired_count,
+                'totalSubscribers': len(enriched)
+            }
+
             self.send_json(200, {
                 'success': True,
                 'subscriptions': subs_map,
                 'subscriptionsList': enriched,
-                'stats': {
-                    'activeSubscriptions': active_count,
+                'items': enriched,
+                'total': len(enriched),
+                'stats': stats,
+                'plans': data.get('subscription_plans', {}),
+                'kpis': {
+                    'totalActive': active_count,
                     'activeTrials': trial_count,
-                    'expiredSubscriptions': expired_count,
-                    'totalSubscribers': len(enriched)
+                    'expired': expired_count
                 }
             })
             return
@@ -2354,7 +2449,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not admin_u or admin_u.get('role') != 'admin':
                 self.send_json(403, {'success': False, 'error': 'Administrator authorization required.', 'code': 403})
                 return
-            data = load_backend_data(refresh_collections=['payment_sessions', 'users'])
+            data = load_backend_data(refresh_collections=['payment_sessions', 'users'], min_interval=30.0)
             sessions = data.get('payment_sessions', [])
             status_filter = query.get('status', [None])[0]
             if status_filter and status_filter != 'all':
@@ -2617,11 +2712,12 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             token = self.get_auth_token()
             user = authenticate_token(token)
             is_admin = user and user.get('role') == 'admin'
-            data = load_backend_data(refresh_collections=['tests', 'questions'])
+            test_id = query.get('testId', [None])[0]
+            refresh_nodes = ['tests', 'questions'] if test_id else ['tests']
+            data = load_backend_data(refresh_collections=refresh_nodes)
             if check_scheduled_mcq_tests(data, sync_to_firebase):
                 save_backend_data(data)
             tests = data.get('tests', [])
-            test_id = query.get('testId', [None])[0]
             user_tier = get_user_tier(user.get('id') if user else None, data) if not is_admin else 'admin'
 
             if test_id:
@@ -3041,8 +3137,26 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not job_id:
                 self.send_json(400, {'error': 'Missing jobId parameter', 'code': 400})
                 return
-            data = load_backend_data(refresh_collections=['ai_generation_jobs'])
+            data = load_backend_data()
             job = ai_job_manager.get_job_status(job_id, data)
+            # Scoped job poll: fetch ONLY this single job from Firebase if active or not cached locally
+            if not job or job.get('status') in ('running', 'QUEUED', 'CLAIMING', 'GENERATING', 'STARTING'):
+                try:
+                    req = urllib.request.Request(f"{FIREBASE_RTDB_URL}/ai_generation_jobs/{job_id}.json")
+                    with urllib.request.urlopen(req, timeout=2.0) as resp:
+                        raw = resp.read()
+                        if raw:
+                            remote_job = json.loads(raw.decode('utf-8'))
+                            if remote_job and isinstance(remote_job, dict):
+                                job = remote_job
+                                jobs_list = data.setdefault('ai_generation_jobs', [])
+                                idx = next((i for i, j in enumerate(jobs_list) if isinstance(j, dict) and j.get('id') == job_id), None)
+                                if idx is not None:
+                                    jobs_list[idx] = remote_job
+                                else:
+                                    jobs_list.insert(0, remote_job)
+                except Exception:
+                    pass
             if job:
                 self.send_json(200, {'success': True, 'job': job})
             else:
@@ -3056,7 +3170,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not user or user.get('role') != 'admin':
                 self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
                 return
-            data = load_backend_data(refresh_collections=['ai_generation_jobs'])
+            data = load_backend_data(refresh_collections=['ai_generation_jobs'], min_interval=15.0)
             active_job = ai_job_manager.get_active_generation_job(data)
             self.send_json(200, {'success': True, 'job': active_job, 'hasActiveJob': bool(active_job)})
             return
@@ -3694,7 +3808,13 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json(400, {'success': False, 'error': f'Invalid payment proof: {err}'})
                     return
 
-                clean_screenshot_uri = f"data:{mime};base64,{base64.b64encode(binary_data).decode('utf-8')}"
+                img_ext = ext if ext else '.png'
+                safe_sid = re.sub(r'[^a-zA-Z0-9_\-]', '', str(session_id or 'receipt'))[:40]
+                img_id = f"shot_{safe_sid}_{uuid.uuid4().hex[:6]}{img_ext}"
+                dest_path = os.path.join(PRIVATE_IMAGES_DIR, img_id)
+                with open(dest_path, 'wb') as f:
+                    f.write(binary_data)
+                clean_screenshot_uri = f"/api/images/{img_id}"
                 data = load_backend_data()
                 sync_sync_fn = lambda p, d, method='PUT': sync_to_firebase(p, d, method=method, sync=True)
                 success, res = subscription_manager.submit_payment(user['id'], session_id, utr, clean_screenshot_uri, data, sync_sync_fn)
@@ -3843,20 +3963,19 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 with open(dest_path, 'wb') as f:
                     f.write(binary_data)
 
-                clean_b64 = base64.b64encode(binary_data).decode('utf-8')
-                qr_url = f'data:{mime_type};base64,{clean_b64}'
+                image_url = f'/api/images/{unique_img_id}'
                 data = load_backend_data()
                 if channel_id:
                     channels = data.setdefault('payment_channels', [])
                     target = next((c for c in channels if c.get('id') == channel_id), None)
                     if target:
-                        target['qrCodeUrl'] = qr_url
+                        target['qrCodeUrl'] = image_url
                         save_backend_data(data)
                         sync_to_firebase(f"payment_channels/{channel_id}", target)
 
                 self.send_json(200, {
                     'success': True,
-                    'qrCodeUrl': qr_url,
+                    'qrCodeUrl': image_url,
                     'imageId': unique_img_id
                 })
                 return

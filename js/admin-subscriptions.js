@@ -95,7 +95,7 @@
     return subs;
   }
 
-  AdminDashboard.prototype.startTabPolling = function(tabName, callback, intervalMs = 12000) {
+  AdminDashboard.prototype.startTabPolling = function(tabName, callback, intervalMs = 60000) {
     this.stopTabPolling();
     // Do not poll on payment-channels, plans-config, or audit-logs where realtime listeners / manual actions handle state
     if (tabName === 'payment-channels' || tabName === 'plans-config' || tabName === 'audit-logs') {

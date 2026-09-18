@@ -199,13 +199,15 @@ class AdminDashboard {
   }
 
   // --- 1. OVERVIEW & KPIS ---
-  renderOverview() {
+  renderOverview(skipSync = false) {
     const container = document.getElementById('admin-content-area');
     if (!container) return;
 
-    this.syncBackendUsers(() => {
-      if (this.currentTab === 'overview') this.renderOverview();
-    });
+    if (!skipSync) {
+      this.syncBackendUsers(() => {
+        if (this.currentTab === 'overview') this.renderOverview(true);
+      });
+    }
 
     const allStudents = window.store.getStudents();
     const activeStudents = allStudents.filter(s => s.isActive !== false);

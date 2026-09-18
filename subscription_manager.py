@@ -622,8 +622,15 @@ def create_payment_session(user, plan_id, data, sync_fn=None):
         'durationDays': plan.get('durationDays', 30),
         'upiPayUri': encoded_upi_uri,
         'channelId': channel_snapshot.get('id'),
-        'channelSnapshot': channel_snapshot,
-        'qrData': channel_snapshot.get('qrCodeUrl') or f"upi://pay?pa={channel_snapshot.get('upiId')}&pn={channel_snapshot.get('name') or 'ExcellenceCA'}&am={plan['price']}&cu=INR",
+        'channelSnapshot': {
+            k: v for k, v in channel_snapshot.items()
+            if not (isinstance(v, str) and v.startswith('data:image/'))
+        },
+        'qrData': (
+            channel_snapshot.get('qrCodeUrl')
+            if channel_snapshot.get('qrCodeUrl') and not str(channel_snapshot.get('qrCodeUrl', '')).startswith('data:image/')
+            else (encoded_upi_uri or f"upi://pay?pa={channel_snapshot.get('upiId')}&pn={channel_snapshot.get('name') or 'ExcellenceCA'}&am={plan['price']}&cu=INR")
+        ),
         'status': 'pending',
         'createdAt': now.isoformat(),
         'expiresAt': expires_at.isoformat(),
