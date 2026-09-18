@@ -3374,6 +3374,36 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(500, {'error': f'Failed to start generation job: {str(e)}', 'code': 500})
                 return
 
+        # Cancel AI Generation Job
+        if path == '/api/admin/ai/jobs/cancel':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                job_id = req_data.get('jobId')
+                data = load_backend_data(refresh_collections=['ai_generation_jobs'])
+                if not job_id:
+                    active_job = ai_job_manager.get_active_generation_job(data)
+                    if active_job:
+                        job_id = active_job.get('id')
+                if not job_id:
+                    self.send_json(200, {'success': True, 'message': 'No active job to cancel'})
+                    return
+                ok, err = ai_job_manager.cancel_generation_job(job_id, data, save_backend_data, sync_to_firebase)
+                if not ok:
+                    self.send_json(400, {'error': err, 'code': 400})
+                    return
+                self.send_json(200, {'success': True, 'cancelledJobId': job_id})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Failed to cancel job: {str(e)}', 'code': 500})
+                return
+
         # 6. Update Auto-Pilot Scheduler Config
         if path == '/api/admin/ai/autopilot':
             token = self.get_auth_token()

@@ -13,6 +13,7 @@ import syllabus_hierarchy
 
 # Active jobs in memory cache
 _active_jobs: Dict[str, Dict[str, Any]] = {}
+_active_workers: Dict[str, threading.Thread] = {}
 _jobs_lock = threading.Lock()
 
 def save_job_record(
@@ -140,10 +141,47 @@ def get_active_generation_job(data: Optional[Dict[str, Any]] = None) -> Optional
 
     for j in sorted_candidates:
         c_ts = j.get('createdTs', 0)
-        if j.get('status') in active_statuses and (now_ts - c_ts) < 900:
-            return dict(j)
+        status = j.get('status')
+        j_id = j.get('id')
+        if status in active_statuses:
+            worker = _active_workers.get(j_id)
+            if worker and worker.is_alive():
+                return dict(j)
+            # If no alive worker exists and job was created > 30s ago, it is orphaned from a prior process
+            if (now_ts - c_ts) > 30:
+                j['status'] = 'FAILED'
+                j['error'] = 'Job interrupted by server restart'
+                j['currentStage'] = 'Terminated: Server Restart'
+                with _jobs_lock:
+                    _active_jobs[j_id] = dict(j)
+                continue
+            # If very recently created (<30s) and has worker
+            if (now_ts - c_ts) <= 30 and worker:
+                return dict(j)
 
     return None
+
+def cancel_generation_job(
+    job_id: str,
+    data: Optional[Dict[str, Any]] = None,
+    save_callback: Optional[Any] = None,
+    firebase_sync_callback: Optional[Any] = None
+) -> Tuple[bool, Optional[str]]:
+    """Cancel an active generation job and persist status."""
+    with _jobs_lock:
+        job = _active_jobs.get(job_id)
+        if not job and data and isinstance(data.get('ai_generation_jobs'), list):
+            job = next((j for j in data['ai_generation_jobs'] if j.get('id') == job_id), None)
+        if not job:
+            return False, "Job not found"
+        
+        job['status'] = 'FAILED'
+        job['error'] = 'Job cancelled by administrator'
+        job['currentStage'] = 'Generation Cancelled'
+        _active_jobs[job_id] = dict(job)
+
+    save_job_record(job, data, save_callback, firebase_sync_callback)
+    return True, None
 
 def create_generation_job(
     params: Dict[str, Any],
@@ -233,6 +271,8 @@ def create_generation_job(
         args=(job_id, params, data, save_callback, firebase_sync_callback),
         daemon=True
     )
+    with _jobs_lock:
+        _active_workers[job_id] = worker_thread
     worker_thread.start()
 
     return True, None, job_record
