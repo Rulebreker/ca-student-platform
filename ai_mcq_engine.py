@@ -146,28 +146,63 @@ def build_generation_user_prompt(
     context: str,
     previous_concepts_summary: str,
     slot_number: int,
-    total_count: int
+    total_count: int,
+    rejected_questions: Optional[List[str]] = None,
+    attempt_number: int = 1
 ) -> str:
+    focal_angles = [
+        "Core definitions, essential terminology, and statutory meanings",
+        "Classification, taxonomies, forms, or categories of concepts",
+        "Conditions, criteria, prerequisites, or statutory thresholds",
+        "Key objectives, underlying purpose, or economic/legal rationale",
+        "Application, accounting/legal treatment, and practical procedural effects",
+        "Quantitative calculations, measurement formulas, or arithmetic criteria",
+        "Statutory time limits, compliance requirements, or numerical boundaries",
+        "Comparison, contrast, and differences between related principles",
+        "Legal consequences, non-compliance penalties, or operational impacts",
+        "Authoritative regulatory standards, sections, or governance framework"
+    ]
+    slot_angle = focal_angles[(slot_number - 1 + (attempt_number - 1) * 3) % len(focal_angles)]
+
+    rejected_clause = ""
+    if rejected_questions:
+        items = "\n".join([f"- \"{rq.strip()}\"" for rq in rejected_questions if rq and rq.strip()])
+        if items:
+            rejected_clause = f"""
+STRICT PROHIBITION (PREVIOUS ATTEMPT REJECTED AS DUPLICATE):
+The following question(s) were ALREADY proposed and REJECTED because they duplicated existing questions:
+{items}
+You MUST NOT generate or rephrase questions testing those exact facts.
+Select a completely DIFFERENT sentence, rule, or concept from the context below.
+"""
+
+    prev_clause = ""
+    if previous_concepts_summary and previous_concepts_summary.strip() != "None yet.":
+        prev_clause = f"""
+QUESTIONS ALREADY GENERATED IN THIS EXAM SET (DO NOT DUPLICATE):
+{previous_concepts_summary}
+You MUST generate a question testing a DIFFERENT concept or provision than all of the above.
+"""
+
     return f"""Subject: {subject}
 Exam Level: {exam_level}
 Topic / Chapter: {topic}
 Difficulty Level: {difficulty}
 Question Category: {question_category}
 Question Speed: {question_speed}
-Question Slot: {slot_number} of {total_count}
+Question Slot: {slot_number} of {total_count} (Attempt: {attempt_number})
+Focal Angle for this Slot: {slot_angle}
 
 Source Material Context (Extracted from Syllabus Documents):
 \"\"\"
 {context}
 \"\"\"
-
-Task: Create exactly 1 original CA-style MCQ matching category '{question_category}' and speed '{question_speed}'.
-Avoid testing duplicate concepts from previously generated questions:
-{previous_concepts_summary}
+{prev_clause}{rejected_clause}
+Task: Create exactly 1 original CA-style MCQ matching category '{question_category}', speed '{question_speed}', and angle '{slot_angle}'.
 
 Respond with ONLY this JSON object:
 {{
-  "question": "Clear question text here...",
+  "question": "Clear, direct question text here...",
   "optionA": "Option A text",
   "optionB": "Option B text",
   "optionC": "Option C text",
@@ -464,7 +499,9 @@ def generate_single_mcq(
     data: Optional[Dict[str, Any]] = None,
     slot_number: int = 1,
     total_count: int = 1,
-    on_provider_event: Optional[Any] = None
+    on_provider_event: Optional[Any] = None,
+    rejected_questions: Optional[List[str]] = None,
+    attempt_number: int = 1
 ) -> Tuple[Dict[str, Any], str, str]:
     """
     Generate a single candidate MCQ matching category and speed constraints.
@@ -476,13 +513,21 @@ def generate_single_mcq(
 
     if context_chunks:
         selected_chunk = context_chunks[0]
-        context_text = selected_chunk.get('text', context_text)
+        raw_text = selected_chunk.get('text', context_text)
+        # On retries, slice a shifted window into long text to give the LLM alternative sentences
+        if len(raw_text) > 1200 and attempt_number > 1:
+            offset = ((attempt_number - 1) * 450) % max(1, len(raw_text) - 900)
+            context_text = raw_text[offset:offset + 2500]
+        else:
+            context_text = raw_text[:2500]
         source_doc_id = selected_chunk.get('docId')
         source_page = selected_chunk.get('pages', [1])[0] if selected_chunk.get('pages') else 1
 
     prev_summary = "None yet."
     if previous_concepts:
-        prev_summary = "\n- ".join(previous_concepts[-5:])
+        clean_prev = [p.strip() for p in previous_concepts if p and p.strip()]
+        if clean_prev:
+            prev_summary = "\n".join([f"- {p[:140]}" for p in clean_prev[-10:]])
 
     system_instruction = build_generation_system_instruction(
         question_category=question_category,
@@ -496,11 +541,18 @@ def generate_single_mcq(
         difficulty=difficulty,
         question_category=question_category,
         question_speed=question_speed,
-        context=context_text[:2500],
+        context=context_text,
         previous_concepts_summary=prev_summary,
         slot_number=slot_number,
-        total_count=total_count
+        total_count=total_count,
+        rejected_questions=rejected_questions,
+        attempt_number=attempt_number
     )
+
+    # Mild temperature boost on retry breaks token-greedy repetitive duplicate generation
+    retry_temp = None
+    if attempt_number > 1:
+        retry_temp = min(0.35 + 0.15 * (attempt_number - 1), 0.65)
 
     response_text, provider_id, model_name = ai_provider_manager.call_llm_with_failover(
         purpose='generation',
@@ -508,7 +560,8 @@ def generate_single_mcq(
         system_instruction=system_instruction,
         json_mode=True,
         data=data,
-        on_provider_event=on_provider_event
+        on_provider_event=on_provider_event,
+        temperature=retry_temp
     )
 
     q_data = parse_and_repair_mcq_json(response_text)
@@ -757,9 +810,16 @@ def generate_exact_mcqs_pipeline(
                             pass
             return _handler
 
+        slot_rejected_stems: List[str] = []
         slot_prov_event_cb = _make_on_provider_event(slot_idx, slot_status_obj)
 
         for attempt in range(MAX_RETRIES_PER_SLOT + 1):
+            # Rotate chunk index across attempts so retries receive alternative context
+            chunk_slice = None
+            if relevant_chunks:
+                chunk_idx = ((slot_idx - 1) + attempt) % len(relevant_chunks)
+                chunk_slice = [relevant_chunks[chunk_idx]]
+
             # Check slot watchdog timeout
             if (time.time() - slot_start_time) > SLOT_MAX_TIMEOUT:
                 last_slot_error = f"Slot watchdog timeout ({SLOT_MAX_TIMEOUT}s) exceeded."
@@ -789,6 +849,8 @@ def generate_exact_mcqs_pipeline(
 
             # Step 1: Generate single MCQ via failover
             try:
+                # Provide all generated questions in batch as well as rejected attempts
+                batch_prev_stems = [q.get('text') for q in generated_questions if q.get('text')]
                 q_candidate, gen_prov, gen_model = generate_single_mcq(
                     subject=subject,
                     topic=topic,
@@ -797,11 +859,13 @@ def generate_exact_mcqs_pipeline(
                     question_category=question_category,
                     question_speed=question_speed,
                     context_chunks=chunk_slice,
-                    previous_concepts=concept_summaries,
+                    previous_concepts=batch_prev_stems,
                     data=data,
                     slot_number=slot_idx,
                     total_count=count,
-                    on_provider_event=slot_prov_event_cb
+                    on_provider_event=slot_prov_event_cb,
+                    rejected_questions=list(slot_rejected_stems),
+                    attempt_number=attempt + 1
                 )
                 metrics['providersUsed'].add(gen_prov)
                 if not slot_gemini_called[0] and gen_prov and 'gemini' in str(gen_prov).lower():
@@ -849,7 +913,17 @@ def generate_exact_mcqs_pipeline(
             metrics['validationProvidersUsed'].add(val_prov)
 
             if not is_valid:
-                last_slot_error = f"Validation rejected: {val_reason}"
+                clean_err = str(val_reason).strip()
+                if clean_err.startswith("Validation rejected: "):
+                    clean_err = clean_err[len("Validation rejected: "):].strip()
+                if clean_err.startswith("Duplicate check: "):
+                    clean_err = "Duplicate: " + clean_err[len("Duplicate check: "):].strip()
+                last_slot_error = clean_err
+
+                cand_stem = str(q_candidate.get('question') or q_candidate.get('text') or '').strip()
+                if cand_stem and cand_stem not in slot_rejected_stems:
+                    slot_rejected_stems.append(cand_stem)
+
                 if 'duplicate' in val_reason.lower():
                     metrics['rejectedDuplicates'] += 1
                 else:
@@ -921,8 +995,26 @@ def generate_exact_mcqs_pipeline(
 
         if not slot_saved:
             slot_status_obj['status'] = 'failed'
-            slot_status_obj['error'] = last_slot_error or "Exhausted all retry attempts."
-            print(f"[QUESTION FAILED] batchId={job_id} questionNumber={slot_idx} error={slot_status_obj['error']}", flush=True)
+            clean_err = last_slot_error or "Exhausted all retry attempts."
+            if clean_err.startswith("Validation rejected: "):
+                clean_err = clean_err[len("Validation rejected: "):].strip()
+            if clean_err.startswith("Duplicate check: "):
+                clean_err = "Duplicate: " + clean_err[len("Duplicate check: "):].strip()
+            slot_status_obj['error'] = clean_err
+            print(f"[QUESTION FAILED] batchId={job_id} questionNumber={slot_idx} error={clean_err}", flush=True)
+            if progress_callback:
+                try:
+                    progress_callback({
+                        'stage': 'failed',
+                        'current': slot_idx,
+                        'verifiedCount': len(generated_questions),
+                        'total': count,
+                        'status': f"Q{slot_idx} FAILED — {clean_err}",
+                        'progressPct': int((slot_idx / count) * 85) + 5,
+                        'questionStatuses': list(question_statuses)
+                    })
+                except Exception:
+                    pass
 
     metrics['generatedCount'] = len(generated_questions)
     metrics['failedCount'] = count - len(generated_questions)

@@ -8151,9 +8151,10 @@ class AdminDashboard {
             }
             else if (qs.status === 'failed') {
               color = 'bg-red-100 text-red-800 border-red-300 font-bold';
-              label = 'FAILED';
+              const cleanReason = qs.error ? qs.error.replace(/^Validation rejected:\s*/i, '').replace(/^Duplicate check:\s*/i, 'Duplicate: ') : 'Rejected';
+              label = `FAILED — ${cleanReason}`;
             }
-            return `<span class="px-2 py-0.5 text-[10px] rounded border ${color}">Q${qs.number}: ${label}</span>`;
+            return `<span class="px-2 py-0.5 text-[10px] rounded border ${color}" title="${qs.error || 'Failed'}">Q${qs.number}: ${label}</span>`;
           }).join('');
         }
 
@@ -8227,6 +8228,18 @@ class AdminDashboard {
             const idEl = document.getElementById('ai-complete-test-id');
             if (titleEl) titleEl.innerText = `${job.title || (job.result?.test?.title) || 'MCQ Test'} (Partially Completed: ${finalQs.length} MCQs)`;
             if (idEl) idEl.innerText = (job.result?.test?.id) || job.testId || '';
+
+            const failedSlots = (job.questionStatuses || []).filter(s => s.status === 'failed');
+            const existingBreakdown = document.getElementById('ai-partial-failure-breakdown');
+            if (existingBreakdown) existingBreakdown.remove();
+            if (failedSlots.length > 0) {
+              const failDiv = document.createElement('div');
+              failDiv.id = 'ai-partial-failure-breakdown';
+              failDiv.className = 'p-3 bg-red-50 border border-red-200 rounded-lg text-xs space-y-1 text-red-900 mt-2';
+              failDiv.innerHTML = `<div class="font-bold flex items-center gap-1.5 text-red-800"><i data-lucide="alert-circle" class="w-3.5 h-3.5 text-red-600 inline"></i> Failed Question Slots Breakdown:</div>` +
+                failedSlots.map(s => `<div class="pl-2">• <strong>Q${s.number} FAILED —</strong> ${s.error || 'Validation rejected'}</div>`).join('');
+              completionCard.appendChild(failDiv);
+            }
             completionCard.classList.remove('hidden');
           }
 

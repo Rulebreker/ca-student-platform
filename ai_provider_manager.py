@@ -447,7 +447,7 @@ def mark_provider_success(provider_id: str, latency_ms: float):
 # DIRECT HTTP PROVIDER CLIENTS
 # ----------------------------------------------------------------------
 
-def _call_gemini_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 18.0) -> Tuple[str, float]:
+def _call_gemini_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 18.0, temperature: Optional[float] = None) -> Tuple[str, float]:
     start = time.time()
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     
@@ -459,7 +459,7 @@ def _call_gemini_api(api_key: str, model: str, prompt: str, system_instruction: 
     payload: Dict[str, Any] = {
         "contents": contents,
         "generationConfig": {
-            "temperature": 0.2 if json_mode else 0.4,
+            "temperature": temperature if temperature is not None else (0.2 if json_mode else 0.4),
             "maxOutputTokens": 4096
         }
     }
@@ -525,7 +525,7 @@ def _call_gemini_api(api_key: str, model: str, prompt: str, system_instruction: 
     except (KeyError, IndexError) as e:
         raise ValueError(f"Malformed Gemini response: {resp_json}")
 
-def _call_openrouter_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 18.0) -> Tuple[str, float]:
+def _call_openrouter_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 18.0, temperature: Optional[float] = None) -> Tuple[str, float]:
     start = time.time()
     url = "https://openrouter.ai/api/v1/chat/completions"
     
@@ -537,7 +537,7 @@ def _call_openrouter_api(api_key: str, model: str, prompt: str, system_instructi
     payload: Dict[str, Any] = {
         "model": model,
         "messages": messages,
-        "temperature": 0.2 if json_mode else 0.4,
+        "temperature": temperature if temperature is not None else (0.2 if json_mode else 0.4),
         "max_tokens": 4096
     }
     if json_mode:
@@ -585,7 +585,7 @@ def _call_openrouter_api(api_key: str, model: str, prompt: str, system_instructi
     except (KeyError, IndexError) as e:
         raise ValueError(f"Malformed OpenRouter response: {resp_json}")
 
-def _call_groq_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 18.0) -> Tuple[str, float]:
+def _call_groq_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 18.0, temperature: Optional[float] = None) -> Tuple[str, float]:
     start = time.time()
     url = "https://api.groq.com/openai/v1/chat/completions"
     
@@ -597,7 +597,7 @@ def _call_groq_api(api_key: str, model: str, prompt: str, system_instruction: Op
     payload: Dict[str, Any] = {
         "model": model,
         "messages": messages,
-        "temperature": 0.2 if json_mode else 0.4,
+        "temperature": temperature if temperature is not None else (0.2 if json_mode else 0.4),
         "max_tokens": 4096
     }
     if json_mode:
@@ -746,7 +746,8 @@ def call_llm_with_failover(
     data: Optional[Dict[str, Any]] = None,
     preferred_provider: Optional[str] = None,
     timeout: float = 18.0,
-    on_provider_event: Optional[Any] = None
+    on_provider_event: Optional[Any] = None,
+    temperature: Optional[float] = None
 ) -> Tuple[str, str, str]:
     providers = get_registered_providers(data)
     secrets_map = load_secrets()
@@ -810,11 +811,11 @@ def call_llm_with_failover(
                     except Exception:
                         pass
                 if prov['provider'] == 'gemini':
-                    text, latency = _call_gemini_api(key, current_model, prompt, system_instruction, json_mode, timeout=timeout)
+                    text, latency = _call_gemini_api(key, current_model, prompt, system_instruction, json_mode, timeout=timeout, temperature=temperature)
                 elif prov['provider'] == 'openrouter':
-                    text, latency = _call_openrouter_api(key, current_model, prompt, system_instruction, json_mode, timeout=timeout)
+                    text, latency = _call_openrouter_api(key, current_model, prompt, system_instruction, json_mode, timeout=timeout, temperature=temperature)
                 elif prov['provider'] == 'groq':
-                    text, latency = _call_groq_api(key, current_model, prompt, system_instruction, json_mode, timeout=timeout)
+                    text, latency = _call_groq_api(key, current_model, prompt, system_instruction, json_mode, timeout=timeout, temperature=temperature)
                 else:
                     raise ValueError(f"Unknown provider engine: {prov['provider']}")
 
