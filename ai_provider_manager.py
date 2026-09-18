@@ -434,7 +434,7 @@ def mark_provider_success(provider_id: str, latency_ms: float):
 # DIRECT HTTP PROVIDER CLIENTS
 # ----------------------------------------------------------------------
 
-def _call_gemini_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 35.0) -> Tuple[str, float]:
+def _call_gemini_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 25.0) -> Tuple[str, float]:
     start = time.time()
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     
@@ -477,7 +477,7 @@ def _call_gemini_api(api_key: str, model: str, prompt: str, system_instruction: 
     except (KeyError, IndexError) as e:
         raise ValueError(f"Malformed Gemini response: {resp_json}")
 
-def _call_openrouter_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 35.0) -> Tuple[str, float]:
+def _call_openrouter_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 25.0) -> Tuple[str, float]:
     start = time.time()
     url = "https://openrouter.ai/api/v1/chat/completions"
     
@@ -515,7 +515,7 @@ def _call_openrouter_api(api_key: str, model: str, prompt: str, system_instructi
     except (KeyError, IndexError) as e:
         raise ValueError(f"Malformed OpenRouter response: {resp_json}")
 
-def _call_groq_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 35.0) -> Tuple[str, float]:
+def _call_groq_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 25.0) -> Tuple[str, float]:
     start = time.time()
     url = "https://api.groq.com/openai/v1/chat/completions"
     
@@ -653,7 +653,7 @@ def call_llm_with_failover(
     json_mode: bool = True,
     data: Optional[Dict[str, Any]] = None,
     preferred_provider: Optional[str] = None,
-    timeout: float = 35.0
+    timeout: float = 25.0
 ) -> Tuple[str, str, str]:
     providers = get_registered_providers(data)
     secrets_map = load_secrets()

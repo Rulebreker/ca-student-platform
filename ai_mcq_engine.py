@@ -68,43 +68,115 @@ def is_duplicate_question(
 
     return False, None
 
-# ----------------- Prompt Templates -----------------
+# ----------------- Dynamic Prompt Builders -----------------
 
-GENERATION_SYSTEM_PROMPT = """You are an elite Chartered Accountancy (ICAI) Examination Specialist and Senior Professor.
-Your task is to generate ORIGINAL, high-quality, conceptual Multiple Choice Questions (MCQs) for Indian CA students (CA Foundation, CA Intermediate, or CA Final).
+def build_generation_system_instruction(
+    question_category: str = 'Direct Questions',
+    question_speed: str = 'Quick'
+) -> str:
+    category_instructions = {
+        'Direct Questions': (
+            "QUESTION CATEGORY: DIRECT QUESTIONS (MANDATORY RULE)\n"
+            "- Generate straightforward, concise, factual, and direct CA examination questions.\n"
+            "- Focus on definition-based, meaning-based, fact-based, formula-based, or core concept identification.\n"
+            "- Desired style example: 'Who is known as the Father of Economics? A) Adam Smith B) Alfred Marshall C) J.M. Keynes D) David Ricardo'\n"
+            "- Another example: 'Under the Companies Act, 2013, the minimum number of members required for a public company is: A) 2 B) 7 C) 10 D) 50'\n"
+            "- STRICT PROHIBITION: DO NOT create long case studies, multi-paragraph stories, narrative scenarios, hypothetical individuals (e.g. 'Mr. X entered into an agreement with Y...'), or verbose question stems."
+        ),
+        'Direct + Case Based Questions': (
+            "QUESTION CATEGORY: DIRECT + CASE BASED QUESTIONS\n"
+            "- You may formulate either straightforward direct questions or realistic, practical case-based scenarios relevant to the ICAI curriculum."
+        ),
+        'Conceptual Questions': (
+            "QUESTION CATEGORY: CONCEPTUAL QUESTIONS\n"
+            "- Focus on deep understanding of statutory mechanics, accounting principles, and economic logic.\n"
+            "- Test whether the student understands WHY a provision or standard operates as it does, without requiring lengthy narrative stories."
+        ),
+        'Application Based Questions': (
+            "QUESTION CATEGORY: APPLICATION BASED QUESTIONS\n"
+            "- Focus on applying legal provisions, accounting standards, or mathematical formulas to specific practical problems."
+        )
+    }
+
+    speed_instructions = {
+        'Quick': (
+            "QUESTION SPEED: QUICK (FAST TO ANSWER)\n"
+            "- Short wording, concise question stem (under 60 words).\n"
+            "- Minimal reading time and straightforward option identification.\n"
+            "- Suitable for rapid student revision and practice."
+        ),
+        'Medium': (
+            "QUESTION SPEED: MEDIUM (STANDARD PACING)\n"
+            "- Moderate conceptual reasoning and interpretation.\n"
+            "- Balanced stem length (under 85 words), solvable within standard exam pacing."
+        ),
+        'Thinking': (
+            "QUESTION SPEED: THINKING (DEEPER REASONING)\n"
+            "- Requires deeper analytical reasoning, multi-step calculation, or statutory interpretation.\n"
+            "- Challenging problem-solving testing thorough conceptual mastery."
+        )
+    }
+
+    cat_text = category_instructions.get(question_category, category_instructions['Direct Questions'])
+    spd_text = speed_instructions.get(question_speed, speed_instructions['Quick'])
+
+    return f"""You are an elite Chartered Accountancy (ICAI) Examination Specialist and Senior Professor.
+Your task is to generate ORIGINAL, high-quality Multiple Choice Questions (MCQs) for Indian CA students (CA Foundation, CA Intermediate, or CA Final).
+
+{cat_text}
+
+{spd_text}
 
 MANDATORY RULES:
-1. ORIGINALITY: Formulate brand-new questions derived conceptually from the provided syllabus/source context. NEVER copy verbatim from textbook questions.
-2. OPTIONS: Exactly four distinct, mutually exclusive options (A, B, C, D). None of the options should be identical or trivial ("All of the above" / "None of the above" should be avoided).
+1. ORIGINALITY: Formulate brand-new questions derived conceptually from the provided syllabus context. NEVER copy verbatim from textbook exercises.
+2. OPTIONS: Exactly four distinct, mutually exclusive options (A, B, C, D). None of the options should be identical or trivial ("All of the above" / "None of the above" must be avoided).
 3. SINGLE CORRECT ANSWER: Exactly one unequivocally correct answer based strictly on ICAI standard syllabus, Companies Act 2013, relevant Ind AS / AS, Income Tax Act 1961, or economic / mathematical laws.
 4. NUMERICAL VERIFICATION: If the question involves numerical calculations, compute all intermediate values explicitly so the numerical result is exact and unambiguous.
 5. EXPLANATION: Provide an exhaustive, step-by-step reasoning citing applicable standards, sections, or mathematical formulas.
 6. JSON FORMAT: Output MUST be strictly valid JSON matching the required schema with no extra conversational text or markdown code blocks.
 """
 
-GENERATION_USER_PROMPT_TEMPLATE = """Subject: {subject}
+def build_generation_user_prompt(
+    subject: str,
+    exam_level: str,
+    topic: str,
+    difficulty: str,
+    question_category: str,
+    question_speed: str,
+    context: str,
+    previous_concepts_summary: str,
+    slot_number: int,
+    total_count: int
+) -> str:
+    return f"""Subject: {subject}
 Exam Level: {exam_level}
 Topic / Chapter: {topic}
 Difficulty Level: {difficulty}
+Question Category: {question_category}
+Question Speed: {question_speed}
+Question Slot: {slot_number} of {total_count}
 
 Source Material Context (Extracted from Syllabus Documents):
 \"\"\"
 {context}
 \"\"\"
 
-Task: Create 1 original, challenging CA-style MCQ testing conceptual clarity on the topic above.
+Task: Create exactly 1 original CA-style MCQ matching category '{question_category}' and speed '{question_speed}'.
 Avoid testing duplicate concepts from previously generated questions:
 {previous_concepts_summary}
 
-Respond with ONLY this JSON object schema:
+Respond with ONLY this JSON object:
 {{
-  "text": "Question prompt here...",
+  "question": "Clear question text here...",
   "optionA": "Option A text",
   "optionB": "Option B text",
   "optionC": "Option C text",
   "optionD": "Option D text",
-  "correctOption": "A",
-  "explanation": "Detailed step-by-step explanation with section/standard references..."
+  "correctAnswer": "A",
+  "explanation": "Detailed step-by-step explanation with section/standard references...",
+  "category": "{question_category}",
+  "difficulty": "{difficulty}",
+  "estimatedThinkingLevel": "{question_speed}"
 }}
 """
 
@@ -146,6 +218,122 @@ Claimed Correct Option: {correctOption}
 Claimed Explanation: {explanation}
 """
 
+# ----------------- JSON Repair & Quality Validation -----------------
+
+def parse_and_repair_mcq_json(raw_text: str) -> Dict[str, Any]:
+    """
+    Robust JSON parser with multi-strategy auto-repair:
+    1. Direct parse
+    2. Strip markdown code fences (```json ... ```)
+    3. Extract outermost {...}
+    4. Auto-repair trailing commas, unquoted keys, single quotes
+    """
+    if not raw_text or not raw_text.strip():
+        raise ValueError("Empty response from AI model.")
+    
+    text = raw_text.strip()
+    
+    # Strip markdown fences
+    if text.startswith('```'):
+        text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\s*```$', '', text)
+        text = text.strip()
+
+    # Direct parse attempt
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    # Extract outermost {...}
+    match = re.search(r'(\{.*\})', text, re.DOTALL)
+    if match:
+        extracted = match.group(1).strip()
+        try:
+            return json.loads(extracted)
+        except Exception:
+            text = extracted
+
+    # Clean trailing commas: e.g. , } or , ]
+    cleaned = re.sub(r',\s*([\}\]])', r'\1', text)
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
+
+    # Convert single-quoted keys to double-quoted keys
+    cleaned2 = re.sub(r"\'([a-zA-Z0-9_]+)\'\s*:", r'"\1":', cleaned)
+    try:
+        return json.loads(cleaned2)
+    except Exception as e:
+        raise ValueError(f"Unable to parse AI output into valid MCQ JSON: {e} | Raw: {raw_text[:120]}")
+
+def validate_mcq_quality_and_constraints(
+    q_data: Dict[str, Any],
+    question_category: str = 'Direct Questions',
+    question_speed: str = 'Quick'
+) -> Tuple[bool, str]:
+    """
+    Validate MCQ quality, structural completeness, and constraint compliance.
+    Rejects overly long case studies when Direct Questions or Quick are requested.
+    """
+    text = str(q_data.get('question') or q_data.get('text') or '').strip()
+    if not text or len(text) < 15:
+        return False, "Question stem is empty or too short."
+    
+    # Options check
+    opts = [
+        str(q_data.get('optionA', '')).strip(),
+        str(q_data.get('optionB', '')).strip(),
+        str(q_data.get('optionC', '')).strip(),
+        str(q_data.get('optionD', '')).strip()
+    ]
+    if any(not opt for opt in opts):
+        return False, "One or more options (A, B, C, D) are empty."
+    
+    if len(set(opt.lower() for opt in opts)) < 4:
+        return False, "Options must be 4 distinct choices; duplicate options detected."
+
+    # Correct answer check
+    corr = str(q_data.get('correctAnswer') or q_data.get('correctOption') or '').strip().upper()
+    if corr not in ['A', 'B', 'C', 'D']:
+        match = re.search(r'\b([A-D])\b', corr)
+        if match:
+            corr = match.group(1)
+        else:
+            return False, f"Invalid correct answer '{corr}', must be A, B, C, or D."
+
+    # Explanation check
+    expl = str(q_data.get('explanation', '')).strip()
+    if not expl or len(expl) < 10:
+        return False, "Explanation is missing or too brief."
+
+    words = text.split()
+    word_count = len(words)
+
+    # Category constraints: Direct Questions must NOT be lengthy narrative case studies
+    if question_category == 'Direct Questions':
+        if word_count > 95:
+            return False, f"Question stem is too long ({word_count} words) for Direct Questions. Keep questions concise and straightforward."
+        case_patterns = [
+            r'\b(?:consider the following|based on the following|read the following)\s+(?:case|scenario|information|data)\b',
+            r'\bcase\s+study\b',
+            r'\b(?:Mr\.|Ms\.|M/s)\s+[A-Za-z]+\s+(?:runs|operates|invested|purchased|entered|started)\b',
+            r'\b(?:Mr\.\s+[A-Z]\b.*\bMs\.\s+[A-Z]\b)',
+            r'\bentered into a contract where\b.*\bsubsequently\b',
+            r'\b(?:XYZ|ABC|PQR|M/s)\s+(?:Ltd|Limited|Pvt|Company|Corp)\b.*\b(?:transactions|financial year|balance sheet)\b'
+        ]
+        for pat in case_patterns:
+            if re.search(pat, text, re.IGNORECASE):
+                return False, "Question contains a case-study or scenario narrative while 'Direct Questions' was requested."
+
+    # Speed constraints: Quick questions should be concise and fast to answer
+    if question_speed == 'Quick':
+        if word_count > 80:
+            return False, f"Question stem is too long ({word_count} words) for 'Quick' speed. Fast practice requires concise wording."
+
+    return True, "Valid"
+
 # ----------------- Core Engine Methods -----------------
 
 def generate_single_mcq(
@@ -153,20 +341,23 @@ def generate_single_mcq(
     topic: str,
     exam_level: str = 'CA Foundation',
     difficulty: str = 'ICAI Exam Standard',
+    question_category: str = 'Direct Questions',
+    question_speed: str = 'Quick',
     context_chunks: Optional[List[Dict[str, Any]]] = None,
     previous_concepts: Optional[List[str]] = None,
-    data: Optional[Dict[str, Any]] = None
+    data: Optional[Dict[str, Any]] = None,
+    slot_number: int = 1,
+    total_count: int = 1
 ) -> Tuple[Dict[str, Any], str, str]:
     """
-    Generate a single candidate MCQ using prioritized failover (Gemini 1 -> 2 -> OpenRouter -> Groq).
+    Generate a single candidate MCQ matching category and speed constraints.
     Returns (parsed_json_dict, provider_id, model_name).
     """
-    context_text = "Standard ICAI syllabus concepts for " + topic
+    context_text = f"Standard ICAI syllabus concepts for {subject} - {topic}"
     source_doc_id = None
     source_page = None
 
     if context_chunks:
-        # Combine top chunk texts
         selected_chunk = context_chunks[0]
         context_text = selected_chunk.get('text', context_text)
         source_doc_id = selected_chunk.get('docId')
@@ -176,43 +367,53 @@ def generate_single_mcq(
     if previous_concepts:
         prev_summary = "\n- ".join(previous_concepts[-5:])
 
-    user_prompt = GENERATION_USER_PROMPT_TEMPLATE.format(
+    system_instruction = build_generation_system_instruction(
+        question_category=question_category,
+        question_speed=question_speed
+    )
+
+    user_prompt = build_generation_user_prompt(
         subject=subject,
         exam_level=exam_level,
         topic=topic,
         difficulty=difficulty,
+        question_category=question_category,
+        question_speed=question_speed,
         context=context_text[:2500],
-        previous_concepts_summary=prev_summary
+        previous_concepts_summary=prev_summary,
+        slot_number=slot_number,
+        total_count=total_count
     )
 
     response_text, provider_id, model_name = ai_provider_manager.call_llm_with_failover(
         purpose='generation',
         prompt=user_prompt,
-        system_instruction=GENERATION_SYSTEM_PROMPT,
+        system_instruction=system_instruction,
         json_mode=True,
         data=data
     )
 
-    try:
-        q_data = json.loads(response_text)
-    except Exception as e:
-        raise ValueError(f"Failed to parse model JSON: {str(e)} | Raw: {response_text[:150]}")
+    q_data = parse_and_repair_mcq_json(response_text)
 
-    # Required fields check
-    req_fields = ['text', 'optionA', 'optionB', 'optionC', 'optionD', 'correctOption', 'explanation']
-    for rf in req_fields:
-        if rf not in q_data or not str(q_data[rf]).strip():
-            raise ValueError(f"Model output missing required field '{rf}'")
+    # Normalize fields (support question or text, correctAnswer or correctOption)
+    q_text = str(q_data.get('question') or q_data.get('text') or '').strip()
+    if not q_text:
+        raise ValueError("Model output missing question text.")
+    q_data['text'] = q_text
+    q_data['question'] = q_text
 
-    correct_opt = str(q_data['correctOption']).strip().upper()
+    correct_opt = str(q_data.get('correctAnswer') or q_data.get('correctOption') or '').strip().upper()
     if correct_opt not in ['A', 'B', 'C', 'D']:
-        # Attempt to extract letter if format like "Option A"
         match = re.search(r'\b([A-D])\b', correct_opt)
         if match:
             correct_opt = match.group(1)
         else:
             raise ValueError(f"Invalid correctOption '{correct_opt}', must be A, B, C, or D.")
     q_data['correctOption'] = correct_opt
+    q_data['correctAnswer'] = correct_opt
+    q_data['category'] = question_category
+    q_data['difficulty'] = difficulty
+    q_data['estimatedThinkingLevel'] = question_speed
     q_data['sourceDocId'] = source_doc_id
     q_data['sourcePage'] = source_page
 
@@ -229,16 +430,19 @@ def validate_mcq_independently(
     Run independent validator failover chain to verify academic and mathematical soundness.
     Returns: (is_valid: bool, reason: str, suggested_fix: dict or None, validator_provider: str)
     """
+    q_text = q_data.get('question') or q_data.get('text', '')
+    corr_ans = q_data.get('correctAnswer') or q_data.get('correctOption', 'A')
+
     user_prompt = VALIDATOR_USER_PROMPT_TEMPLATE.format(
         subject=subject,
         topic=topic,
         exam_level=exam_level,
-        text=q_data.get('text', ''),
+        text=q_text,
         optionA=q_data.get('optionA', ''),
         optionB=q_data.get('optionB', ''),
         optionC=q_data.get('optionC', ''),
         optionD=q_data.get('optionD', ''),
-        correctOption=q_data.get('correctOption', ''),
+        correctOption=corr_ans,
         explanation=q_data.get('explanation', '')
     )
 
@@ -250,18 +454,17 @@ def validate_mcq_independently(
             json_mode=True,
             data=data
         )
-        val_data = json.loads(val_response)
+        val_data = parse_and_repair_mcq_json(val_response)
         is_valid = bool(val_data.get('isValid', False))
         reason = str(val_data.get('reason', 'Validated successfully.'))
         suggested_fix = val_data.get('suggestedFix')
         return is_valid, reason, suggested_fix, val_prov
     except Exception as e:
-        print(f"[AI_VALIDATION_WARNING] Independent validator error ({e}). Falling back to algorithmic heuristic validation.", flush=True)
-        # Algorithmic structural validation fallback
-        opts = [q_data.get('optionA', ''), q_data.get('optionB', ''), q_data.get('optionC', ''), q_data.get('optionD', '')]
+        print(f"[AI_VALIDATION_WARNING] Independent validator error ({e}). Falling back to algorithmic structural validation.", flush=True)
+        opts = [str(q_data.get('optionA', '')).strip(), str(q_data.get('optionB', '')).strip(), str(q_data.get('optionC', '')).strip(), str(q_data.get('optionD', '')).strip()]
         if len(set(opts)) != 4:
             return False, "Duplicate options detected in question choices.", None, "heuristic"
-        if len(q_data.get('text', '')) < 20:
+        if len(q_text) < 15:
             return False, "Question text too short or incomplete.", None, "heuristic"
         return True, "Passed structural validation fallback.", None, "heuristic"
 
@@ -271,6 +474,8 @@ def generate_exact_mcqs_pipeline(
     count: int,
     exam_level: str = 'CA Foundation',
     difficulty: str = 'ICAI Exam Standard',
+    question_category: str = 'Direct Questions',
+    question_speed: str = 'Quick',
     test_id: Optional[str] = None,
     source_documents: Optional[List[Dict[str, Any]]] = None,
     existing_questions: Optional[List[Dict[str, Any]]] = None,
@@ -286,16 +491,16 @@ def generate_exact_mcqs_pipeline(
     on_question_verified: Optional[Any] = None
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
-    Main resilient generation pipeline guaranteeing EXACT count of validated MCQs.
-    Employs single-item failure recovery: only the failed item is regenerated.
-    Persists valid MCQs immediately via on_question_verified callback.
+    Resilient generation pipeline executing an independent question slot lifecycle.
+    Guarantees that a single failing question NEVER freezes or blocks the remaining batch.
+    Terminates in strictly bounded time with complete failure isolation.
     """
     if existing_questions is None:
         existing_questions = []
     if source_documents is None:
         source_documents = []
 
-    # Retrieve relevant source chunks for targeted context
+    # Retrieve relevant source chunks
     relevant_chunks = ai_document_indexer.retrieve_relevant_chunks(
         documents=source_documents,
         query_topic=topic or chapter,
@@ -310,154 +515,214 @@ def generate_exact_mcqs_pipeline(
 
     generated_questions: List[Dict[str, Any]] = []
     concept_summaries: List[str] = []
-    
-    # Telemetry metrics
+    question_statuses: List[Dict[str, Any]] = []
+
+    for s in range(1, count + 1):
+        question_statuses.append({
+            'number': s,
+            'status': 'pending',
+            'error': None,
+            'provider': None
+        })
+
     metrics = {
         'requestedCount': count,
         'generatedCount': 0,
+        'failedCount': 0,
         'rejectedDuplicates': 0,
         'rejectedValidation': 0,
         'regenerationAttempts': 0,
         'providersUsed': set(),
         'validationProvidersUsed': set(),
+        'questionStatuses': question_statuses,
+        'category': question_category,
+        'speed': question_speed,
         'startTime': time.time(),
         'endTime': None
     }
 
-    max_total_attempts = max(count * 4, 15)
-    total_attempts = 0
-    consecutive_failures = 0
+    MAX_RETRIES_PER_SLOT = 2  # up to 3 attempts per slot
 
-    while len(generated_questions) < count and total_attempts < max_total_attempts:
-        current_index = len(generated_questions) + 1
-        total_attempts += 1
+    for slot_idx in range(1, count + 1):
+        slot_status_obj = question_statuses[slot_idx - 1]
+        slot_status_obj['status'] = 'generating'
+        slot_saved = False
+        last_slot_error = None
 
-        if progress_callback:
-            try:
-                progress_callback({
-                    'stage': 'generating',
-                    'current': current_index,
-                    'total': count,
-                    'status': f"Generating question {current_index} of {count}...",
-                    'progressPct': int((len(generated_questions) / count) * 90)
-                })
-            except Exception:
-                pass
-
-        # Context rotation across chunks
         chunk_slice = None
         if relevant_chunks:
-            chunk_idx = (current_index - 1) % len(relevant_chunks)
+            chunk_idx = (slot_idx - 1) % len(relevant_chunks)
             chunk_slice = [relevant_chunks[chunk_idx]]
 
-        # Step 1: Generate single MCQ via failover
-        try:
-            q_candidate, gen_prov, gen_model = generate_single_mcq(
+        for attempt in range(MAX_RETRIES_PER_SLOT + 1):
+            is_retry = attempt > 0
+            if progress_callback:
+                try:
+                    retry_label = f" (Attempt {attempt + 1})" if is_retry else ""
+                    progress_callback({
+                        'stage': 'generating',
+                        'current': slot_idx,
+                        'total': count,
+                        'status': f"Generating question {slot_idx} of {count}{retry_label}...",
+                        'progressPct': int(((slot_idx - 1) / count) * 85) + 5,
+                        'questionStatuses': list(question_statuses)
+                    })
+                except Exception:
+                    pass
+
+            # Step 1: Generate single MCQ via failover
+            try:
+                q_candidate, gen_prov, gen_model = generate_single_mcq(
+                    subject=subject,
+                    topic=topic,
+                    exam_level=exam_level,
+                    difficulty=difficulty,
+                    question_category=question_category,
+                    question_speed=question_speed,
+                    context_chunks=chunk_slice,
+                    previous_concepts=concept_summaries,
+                    data=data,
+                    slot_number=slot_idx,
+                    total_count=count
+                )
+                metrics['providersUsed'].add(gen_prov)
+            except Exception as gen_err:
+                last_slot_error = f"Generation error: {gen_err}"
+                metrics['regenerationAttempts'] += 1
+                time.sleep(min(1.0 * (attempt + 1), 3.0))
+                continue
+
+            # Step 2: Quality & Category/Speed validation
+            q_valid, q_reason = validate_mcq_quality_and_constraints(
+                q_candidate,
+                question_category=question_category,
+                question_speed=question_speed
+            )
+            if not q_valid:
+                last_slot_error = f"Quality check failed: {q_reason}"
+                metrics['regenerationAttempts'] += 1
+                continue
+
+            # Step 3: Duplicate check
+            cand_text = q_candidate.get('question') or q_candidate.get('text', '')
+            is_dup, dup_reason = is_duplicate_question(
+                candidate_text=cand_text,
+                existing_questions=existing_questions,
+                current_batch_questions=generated_questions,
+                threshold=0.75,
+                subject_topic=f"{subject} {topic}"
+            )
+            if is_dup:
+                last_slot_error = f"Duplicate check: {dup_reason}"
+                metrics['rejectedDuplicates'] += 1
+                metrics['regenerationAttempts'] += 1
+                continue
+
+            # Step 4: Independent validator verification
+            slot_status_obj['status'] = 'validating'
+            if progress_callback:
+                try:
+                    progress_callback({
+                        'stage': 'validating',
+                        'current': slot_idx,
+                        'total': count,
+                        'status': f"Validating question {slot_idx} of {count}...",
+                        'progressPct': int(((slot_idx - 0.5) / count) * 85) + 5,
+                        'questionStatuses': list(question_statuses)
+                    })
+                except Exception:
+                    pass
+
+            is_valid, val_reason, suggested_fix, val_prov = validate_mcq_independently(
+                q_data=q_candidate,
                 subject=subject,
                 topic=topic,
                 exam_level=exam_level,
-                difficulty=difficulty,
-                context_chunks=chunk_slice,
-                previous_concepts=concept_summaries,
                 data=data
             )
-            metrics['providersUsed'].add(gen_prov)
-            consecutive_failures = 0
-        except Exception as gen_err:
-            consecutive_failures += 1
-            backoff = min(1.5 ** min(consecutive_failures, 5), 8.0)
-            print(f"[AI_PIPELINE_RETRY] Generation error on item {current_index} (fail #{consecutive_failures}): {gen_err}. Backing off {backoff:.1f}s...", flush=True)
-            metrics['regenerationAttempts'] += 1
-            time.sleep(backoff)
-            continue
+            metrics['validationProvidersUsed'].add(val_prov)
 
-        # Step 2: Duplicate & near-duplicate check
-        is_dup, dup_reason = is_duplicate_question(
-            candidate_text=q_candidate['text'],
-            existing_questions=existing_questions,
-            current_batch_questions=generated_questions,
-            threshold=0.75,
-            subject_topic=f"{subject} {topic}"
-        )
-        if is_dup:
-            print(f"[AI_PIPELINE_REJECT] Item {current_index} rejected as duplicate: {dup_reason}. Regenerating item only...", flush=True)
-            metrics['rejectedDuplicates'] += 1
-            metrics['regenerationAttempts'] += 1
-            continue
+            if not is_valid:
+                last_slot_error = f"Validator rejected: {val_reason}"
+                metrics['rejectedValidation'] += 1
+                metrics['regenerationAttempts'] += 1
+                continue
 
-        # Step 3: Independent validator verification
-        is_valid, val_reason, suggested_fix, val_prov = validate_mcq_independently(
-            q_data=q_candidate,
-            subject=subject,
-            topic=topic,
-            exam_level=exam_level,
-            data=data
-        )
-        metrics['validationProvidersUsed'].add(val_prov)
+            # Apply fix if suggested by validator
+            final_q = q_candidate
+            if suggested_fix and isinstance(suggested_fix, dict):
+                for k in ['question', 'text', 'optionA', 'optionB', 'optionC', 'optionD', 'correctAnswer', 'correctOption', 'explanation']:
+                    if suggested_fix.get(k):
+                        final_q[k] = suggested_fix[k]
 
-        if not is_valid:
-            print(f"[AI_PIPELINE_REJECT] Item {current_index} rejected by validator: {val_reason}. Regenerating item only...", flush=True)
-            metrics['rejectedValidation'] += 1
-            metrics['regenerationAttempts'] += 1
-            continue
+            # Step 5: Construct production-ready Question record
+            q_text = final_q.get('question') or final_q.get('text')
+            c_ans = (final_q.get('correctAnswer') or final_q.get('correctOption', 'A')).strip().upper()
+            now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
-        # Apply fix if suggested by validator
-        final_q = q_candidate
-        if suggested_fix and isinstance(suggested_fix, dict):
-            for k in ['text', 'optionA', 'optionB', 'optionC', 'optionD', 'correctOption', 'explanation']:
-                if suggested_fix.get(k):
-                    final_q[k] = suggested_fix[k]
+            q_record = {
+                'id': f"q-ai-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}",
+                'testId': test_id or "tst-ai-pending",
+                'number': len(generated_questions) + 1,
+                'text': q_text,
+                'questionType': 'text',
+                'questionImage': None,
+                'optionA': final_q['optionA'],
+                'optionB': final_q['optionB'],
+                'optionC': final_q['optionC'],
+                'optionD': final_q['optionD'],
+                'optionTypes': {'A': 'text', 'B': 'text', 'C': 'text', 'D': 'text'},
+                'optionImages': {'A': None, 'B': None, 'C': None, 'D': None},
+                'correctOption': c_ans,
+                'marks': float(marks_per_correct),
+                'negativeMarks': float(negative_marks),
+                'explanation': final_q.get('explanation', ''),
+                'category': question_category,
+                'difficulty': difficulty,
+                'estimatedThinkingLevel': question_speed,
+                'isDraft': False,
+                'aiSuggestedAnswer': c_ans,
+                'isDuplicate': False,
+                'aiGenerated': True,
+                'aiJobId': job_id or f"job-{int(time.time()*1000)}",
+                'sourceDocId': final_q.get('sourceDocId'),
+                'sourcePage': final_q.get('sourcePage'),
+                'providerUsed': gen_prov,
+                'modelUsed': gen_model,
+                'validationProvider': val_prov,
+                'createdAt': now_iso,
+                'updatedAt': now_iso
+            }
 
-        # Step 4: Construct production-ready Question record
-        now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-        q_record = {
-            'id': f"q-ai-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}",
-            'testId': test_id or f"tst-ai-pending",
-            'number': current_index,
-            'text': final_q['text'],
-            'questionType': 'text',
-            'questionImage': None,
-            'optionA': final_q['optionA'],
-            'optionB': final_q['optionB'],
-            'optionC': final_q['optionC'],
-            'optionD': final_q['optionD'],
-            'optionTypes': {'A': 'text', 'B': 'text', 'C': 'text', 'D': 'text'},
-            'optionImages': {'A': None, 'B': None, 'C': None, 'D': None},
-            'correctOption': final_q['correctOption'].upper(),
-            'marks': float(marks_per_correct),
-            'negativeMarks': float(negative_marks),
-            'explanation': final_q['explanation'],
-            'isDraft': False,
-            'aiSuggestedAnswer': final_q['correctOption'].upper(),
-            'isDuplicate': False,
-            'aiGenerated': True,
-            'aiJobId': job_id or f"job-{int(time.time()*1000)}",
-            'sourceDocId': final_q.get('sourceDocId'),
-            'sourcePage': final_q.get('sourcePage'),
-            'providerUsed': gen_prov,
-            'modelUsed': gen_model,
-            'validationProvider': val_prov,
-            'createdAt': now_iso,
-            'updatedAt': now_iso
-        }
+            generated_questions.append(q_record)
+            concept_summaries.append(q_text[:120])
+            slot_saved = True
+            slot_status_obj['status'] = 'saved'
+            slot_status_obj['provider'] = gen_prov
 
-        generated_questions.append(q_record)
-        concept_summaries.append(final_q['text'][:120])
-        if on_question_verified:
-            try:
-                on_question_verified(q_record, generated_questions, current_index, count)
-            except Exception as cb_err:
-                print(f"[AI_PIPELINE_CB_WARNING] on_question_verified callback error: {cb_err}", flush=True)
+            if on_question_verified:
+                try:
+                    on_question_verified(q_record, generated_questions, len(generated_questions), count)
+                except Exception as cb_err:
+                    print(f"[AI_PIPELINE_CB_WARNING] on_question_verified callback error: {cb_err}", flush=True)
 
-        print(f"[AI_PIPELINE_SUCCESS] Successfully generated and verified question {current_index}/{count} (Provider: {gen_prov}, Validator: {val_prov}).", flush=True)
+            print(f"[AI_PIPELINE_SUCCESS] Successfully generated and verified question {len(generated_questions)}/{count} for slot {slot_idx} (Provider: {gen_prov}, Validator: {val_prov}).", flush=True)
+            break  # Attempt loop ends on success
+
+        if not slot_saved:
+            slot_status_obj['status'] = 'failed'
+            slot_status_obj['error'] = last_slot_error or "Exhausted all retry attempts."
+            print(f"[AI_PIPELINE_SLOT_FAILED] Question slot {slot_idx}/{count} failed after retries: {slot_status_obj['error']}. Continuing to remaining questions...", flush=True)
 
     metrics['generatedCount'] = len(generated_questions)
+    metrics['failedCount'] = count - len(generated_questions)
+    metrics['questionStatuses'] = question_statuses
     metrics['endTime'] = time.time()
     metrics['durationSeconds'] = round(metrics['endTime'] - metrics['startTime'], 1)
     metrics['providersUsed'] = list(metrics['providersUsed'])
     metrics['validationProvidersUsed'] = list(metrics['validationProvidersUsed'])
 
     if len(generated_questions) < count:
-        print(f"[AI_PIPELINE_WARNING] Pipeline stopped after {total_attempts} attempts. Generated {len(generated_questions)}/{count} questions.", flush=True)
+        print(f"[AI_PIPELINE_PARTIAL] Pipeline finished. Successfully verified {len(generated_questions)}/{count} questions ({metrics['failedCount']} failed).", flush=True)
 
     return generated_questions, metrics

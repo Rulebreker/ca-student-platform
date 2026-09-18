@@ -145,6 +145,8 @@ def create_generation_job(
     exam_level_id = params.get('examLevelId', 'foundation')
     platform_xp = float(params.get('platformXp', 10))
     allowed_plans = params.get('allowedPlans', ['free', 'trial', 'core', 'plus', 'elite'])
+    question_category = str(params.get('questionCategory') or 'Direct Questions').strip()
+    question_speed = str(params.get('questionSpeed') or 'Quick').strip()
 
     job_record = {
         'id': job_id,
@@ -157,6 +159,8 @@ def create_generation_job(
         'examLevel': params.get('examLevel', 'CA Foundation'),
         'examLevelId': exam_level_id,
         'difficulty': params.get('difficulty', 'ICAI Exam Standard'),
+        'questionCategory': question_category,
+        'questionSpeed': question_speed,
         'durationMinutes': int(params.get('durationMinutes', 15)),
         'count': count,
         'requestedCount': count,
@@ -175,6 +179,7 @@ def create_generation_job(
         'currentQuestionIndex': 0,
         'totalQuestions': count,
         'generatedQuestions': [],
+        'questionStatuses': [{'number': s, 'status': 'pending', 'error': None, 'provider': None} for s in range(1, count + 1)],
         'testId': None,
         'createdTs': now_ts,
         'createdAt': datetime.now(timezone.utc).isoformat(),
@@ -223,6 +228,9 @@ def run_generation_job_synchronous(
     platform_xp = float(params.get('platformXp', 10))
     allowed_plans = params.get('allowedPlans', ['free', 'trial', 'core', 'plus', 'elite'])
 
+    question_category = str(params.get('questionCategory') or 'Direct Questions').strip()
+    question_speed = str(params.get('questionSpeed') or 'Quick').strip()
+
     job_record = {
         'id': job_id,
         'title': title,
@@ -234,6 +242,8 @@ def run_generation_job_synchronous(
         'examLevel': params.get('examLevel', 'CA Foundation'),
         'examLevelId': exam_level_id,
         'difficulty': params.get('difficulty', 'ICAI Exam Standard'),
+        'questionCategory': question_category,
+        'questionSpeed': question_speed,
         'durationMinutes': int(params.get('durationMinutes', 15)),
         'count': count,
         'requestedCount': count,
@@ -252,6 +262,7 @@ def run_generation_job_synchronous(
         'currentQuestionIndex': 0,
         'totalQuestions': count,
         'generatedQuestions': [],
+        'questionStatuses': [{'number': s, 'status': 'pending', 'error': None, 'provider': None} for s in range(1, count + 1)],
         'testId': None,
         'createdTs': now_ts,
         'createdAt': datetime.now(timezone.utc).isoformat(),
@@ -264,7 +275,7 @@ def run_generation_job_synchronous(
     _run_generation_job_worker(job_id, params, data, save_callback, firebase_sync_callback)
 
     final_job = get_job_status(job_id, data) or {}
-    if final_job.get('status') in ['COMPLETED', 'PARTIAL']:
+    if final_job.get('status') in ['COMPLETED', 'PARTIAL', 'PARTIALLY_COMPLETED']:
         return True, None, final_job.get('result')
     else:
         err = final_job.get('error') or "Generation job failed to complete."
@@ -305,6 +316,8 @@ def _run_generation_job_worker(
         auto_publish = bool(params.get('autoPublish', True))
         marks_per_correct = float(params.get('marksPerCorrect', 2.0))
         negative_marks = float(params.get('negativeMarksPerWrong', 0.5))
+        question_category = str(params.get('questionCategory') or job_record.get('questionCategory') or 'Direct Questions').strip()
+        question_speed = str(params.get('questionSpeed') or job_record.get('questionSpeed') or 'Quick').strip()
 
         sub_id = params.get('subjectId')
         if not sub_id:
@@ -331,6 +344,9 @@ def _run_generation_job_worker(
             'topic': params.get('topic'),
             'examLevel': params.get('examLevel', 'CA Foundation'),
             'examLevelId': exam_level_id,
+            'difficulty': params.get('difficulty', 'ICAI Exam Standard'),
+            'questionCategory': question_category,
+            'questionSpeed': question_speed,
             'durationMinutes': int(params.get('durationMinutes', 15)),
             'totalQuestions': 0,
             'marksPerCorrect': marks_per_correct,
@@ -372,6 +388,10 @@ def _run_generation_job_worker(
             q_record['chapter'] = chapter
             q_record['chapterId'] = chapter_id
             q_record['examLevel'] = params.get('examLevel', 'CA Foundation')
+            q_record['category'] = question_category
+            q_record['questionCategory'] = question_category
+            q_record['estimatedThinkingLevel'] = question_speed
+            q_record['questionSpeed'] = question_speed
 
             # Insert question into authoritative data store
             data['questions'].append(q_record)
@@ -398,6 +418,12 @@ def _run_generation_job_worker(
 
         def _on_progress_cb(p_info):
             job_record['currentStage'] = p_info.get('status', 'Generating MCQs...')
+            if 'questionStatuses' in p_info:
+                job_record['questionStatuses'] = p_info['questionStatuses']
+            if 'progressPct' in p_info:
+                job_record['progressPct'] = p_info['progressPct']
+            if 'current' in p_info:
+                job_record['currentQuestionIndex'] = p_info['current']
             save_job_record(job_record, data, save_callback, firebase_sync_callback)
 
         # 4. Run MCQ Engine with incremental persistence and recovery
@@ -407,6 +433,8 @@ def _run_generation_job_worker(
             count=count,
             exam_level=params.get('examLevel', 'CA Foundation'),
             difficulty=params.get('difficulty', 'ICAI Exam Standard'),
+            question_category=question_category,
+            question_speed=question_speed,
             test_id=test_id,
             source_documents=source_docs,
             existing_questions=existing_qs,
@@ -425,6 +453,8 @@ def _run_generation_job_worker(
         completed_iso = datetime.now(timezone.utc).isoformat()
 
         # 5. Finalize Test & Job States
+        job_record['questionStatuses'] = metrics.get('questionStatuses', job_record.get('questionStatuses', []))
+
         if len(questions) == count:
             # Full completion
             test_record['totalQuestions'] = len(questions)
@@ -488,14 +518,18 @@ def _run_generation_job_worker(
             'testTitle': test_record.get('title', 'MCQ Test') if len(questions) > 0 else 'Failed Generation',
             'subject': params.get('subject'),
             'topic': params.get('topic'),
+            'questionCategory': question_category,
+            'questionSpeed': question_speed,
             'requestedCount': count,
             'generatedCount': len(questions),
+            'failedCount': metrics.get('failedCount', count - len(questions)),
+            'questionStatuses': metrics.get('questionStatuses', []),
             'rejectedDuplicates': metrics.get('rejectedDuplicates', 0),
             'rejectedValidation': metrics.get('rejectedValidation', 0),
             'regenerationAttempts': metrics.get('regenerationAttempts', 0),
             'durationSeconds': metrics.get('durationSeconds', 0),
-            'providersUsed': metrics.get('providersUsed', []),
-            'validationProvidersUsed': metrics.get('validationProvidersUsed', []),
+            'providersUsed': list(metrics.get('providersUsed', [])),
+            'validationProvidersUsed': list(metrics.get('validationProvidersUsed', [])),
             'status': job_record['status'],
             'isPublished': auto_publish if len(questions) > 0 else False,
             'timestamp': completed_iso

@@ -3345,8 +3345,18 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(content_length) if content_length > 0 else b'{}'
                 req_data = json.loads(body.decode('utf-8'))
                 
-                data = load_backend_data(refresh_collections=['tests', 'questions', 'ai_source_documents', 'ai_providers'])
+                data = load_backend_data(refresh_collections=['tests', 'questions', 'ai_source_documents', 'ai_providers', 'ai_generation_jobs'])
                 
+                # Double-click and concurrent submission guard
+                active_job = ai_job_manager.get_active_generation_job(data)
+                if active_job:
+                    self.send_json(409, {
+                        'error': 'A generation job is already in progress. Please wait for it to complete.',
+                        'code': 409,
+                        'job': active_job
+                    })
+                    return
+
                 ok, err, job_record = ai_job_manager.create_generation_job(
                     params=req_data,
                     data=data,

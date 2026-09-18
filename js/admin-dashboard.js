@@ -7546,7 +7546,15 @@ class AdminDashboard {
 
     const levels = this._syllabusHierarchy || [];
 
-    const populateSubjects = (lvlVal, preselectedSubId) => {
+    if (initialLevelId) {
+      const opt = Array.from(levelEl.options).find(o => o.dataset.id === initialLevelId || o.value === initialLevelId);
+      if (opt) {
+        opt.selected = true;
+        levelEl.value = opt.value;
+      }
+    }
+
+    const populateSubjects = (lvlVal, preselectedSubId, preselectedChId) => {
       const foundLvl = levels.find(l => l.id === lvlVal || l.name === lvlVal) || levels[0];
       const subs = foundLvl ? (foundLvl.subjects || []) : [];
       subjectEl.innerHTML = subs.map(s => `<option value="${s.name}" data-id="${s.id}" data-level-id="${foundLvl ? foundLvl.id : ''}">${s.code ? `[${s.code}] ` : ''}${s.name}</option>`).join('');
@@ -7554,7 +7562,7 @@ class AdminDashboard {
         const opt = Array.from(subjectEl.options).find(o => o.dataset.id === preselectedSubId || o.value === preselectedSubId);
         if (opt) opt.selected = true;
       }
-      populateChapters(subjectEl.value, initialChapterId);
+      populateChapters(subjectEl.value, preselectedChId);
     };
 
     const populateChapters = (subVal, preselectedChId) => {
@@ -7576,7 +7584,7 @@ class AdminDashboard {
     levelEl.onchange = () => populateSubjects(levelEl.value);
     subjectEl.onchange = () => populateChapters(subjectEl.value);
 
-    populateSubjects(levelEl.value, initialSubjectId);
+    populateSubjects(levelEl.value, initialSubjectId, initialChapterId);
   }
 
   // --- SUB-TAB 1: GENERATE & HOST NOW ---
@@ -7658,6 +7666,27 @@ class AdminDashboard {
                     <option value="Easy">Easy</option>
                     <option value="Medium">Medium</option>
                     <option value="Hard">Hard</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Question Category & Thinking Speed -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Question Category <span class="text-rose-600">*</span></label>
+                  <select id="ai-gen-category" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none bg-white font-medium">
+                    <option value="Direct Questions" selected>Direct Questions (Concise, Definition/Fact)</option>
+                    <option value="Direct + Case Based Questions">Direct + Case Based Questions</option>
+                    <option value="Conceptual Questions">Conceptual Questions</option>
+                    <option value="Application Based Questions">Application Based Questions</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Question Speed / Thinking Level <span class="text-rose-600">*</span></label>
+                  <select id="ai-gen-speed" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none bg-white font-medium">
+                    <option value="Quick" selected>Quick (&lt; 60-70 words, fast answer)</option>
+                    <option value="Medium">Medium (Standard pacing)</option>
+                    <option value="Thinking">Thinking (Deeper multi-step reasoning)</option>
                   </select>
                 </div>
               </div>
@@ -7789,6 +7818,12 @@ class AdminDashboard {
                 </div>
               </div>
 
+              <!-- Question Slot Status Indicators -->
+              <div id="ai-question-slots-container" class="hidden p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Question Slot Lifecycles (Failure-Isolated)</span>
+                <div id="ai-question-slots-grid" class="flex flex-wrap gap-1.5"></div>
+              </div>
+
               <!-- Live Stream of Formulated MCQs -->
               <div class="space-y-3">
                 <span class="text-xs font-bold text-slate-700 block">Streamed MCQ Pipeline Output</span>
@@ -7877,6 +7912,11 @@ class AdminDashboard {
   }
 
   async startAiGenerationJob() {
+    if (this._isGenerating) {
+      window.app.showToast('An AI generation job is already in progress. Please wait for it to finish.', 'warning');
+      return;
+    }
+
     const title = document.getElementById('ai-gen-title')?.value.trim();
     const topic = document.getElementById('ai-gen-topic')?.value.trim();
 
@@ -7893,6 +7933,8 @@ class AdminDashboard {
     const chapterId = chapterSelect?.selectedOptions[0]?.dataset.id || '';
 
     const difficulty = document.getElementById('ai-gen-difficulty')?.value || 'ICAI Exam Standard';
+    const questionCategory = document.getElementById('ai-gen-category')?.value || 'Direct Questions';
+    const questionSpeed = document.getElementById('ai-gen-speed')?.value || 'Quick';
     const count = parseInt(document.getElementById('ai-gen-count')?.value || '5', 10);
     const duration = parseInt(document.getElementById('ai-gen-duration')?.value || '15', 10);
     const marks = parseFloat(document.getElementById('ai-gen-marks')?.value || '2.0');
@@ -7905,6 +7947,8 @@ class AdminDashboard {
       window.app.showToast('Please provide both Test Title and Topic.', 'error');
       return;
     }
+
+    this._isGenerating = true;
 
     const plans = [];
     if (document.getElementById('ai-plan-free')?.checked) plans.push('free');
@@ -7994,6 +8038,8 @@ class AdminDashboard {
           examLevel: examLevel,
           examLevelId: examLevelId,
           difficulty: difficulty,
+          questionCategory: questionCategory,
+          questionSpeed: questionSpeed,
           count: count,
           durationMinutes: duration,
           marksPerCorrect: marks,
@@ -8014,6 +8060,14 @@ class AdminDashboard {
         throw new Error(rawText || `Server returned HTTP ${response.status}`);
       }
 
+      if (response.status === 409 && resData && resData.job) {
+        window.app.showToast(resData.error || 'A generation job is already in progress.', 'warning');
+        const activeJobId = resData.job.id;
+        this.aiActiveJobId = activeJobId;
+        this.pollAiJobStatus(activeJobId, resData.job.totalQuestions || count);
+        return;
+      }
+
       if (!response.ok || !resData.success) {
         const errMsg = (resData && (resData.error?.message || resData.error)) || 'Failed to queue generation job.';
         throw new Error(errMsg);
@@ -8024,6 +8078,7 @@ class AdminDashboard {
       this.pollAiJobStatus(jobId, count);
 
     } catch (err) {
+      this._isGenerating = false;
       window.app.showToast(`Generation error: ${err.message}`, 'error');
       if (btn) {
         btn.disabled = false;
@@ -8065,6 +8120,21 @@ class AdminDashboard {
         if (progressPct) progressPct.innerText = `${pct}%`;
         if (stageText) stageText.innerText = job.currentStage || 'Processing...';
 
+        // Render question slot lifecycle telemetry
+        const slotsContainer = document.getElementById('ai-question-slots-container');
+        const slotsGrid = document.getElementById('ai-question-slots-grid');
+        if (slotsContainer && slotsGrid && Array.isArray(job.questionStatuses) && job.questionStatuses.length > 0) {
+          slotsContainer.classList.remove('hidden');
+          slotsGrid.innerHTML = job.questionStatuses.map(qs => {
+            let color = 'bg-slate-100 text-slate-600 border-slate-200';
+            if (qs.status === 'generating') color = 'bg-rose-100 text-rose-800 border-rose-300 animate-pulse';
+            else if (qs.status === 'validating') color = 'bg-amber-100 text-amber-800 border-amber-300';
+            else if (qs.status === 'saved') color = 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold';
+            else if (qs.status === 'failed') color = 'bg-red-100 text-red-800 border-red-300 font-bold';
+            return `<span class="px-2 py-0.5 text-[10px] rounded border ${color}">Q${qs.number}: ${qs.status.toUpperCase()}</span>`;
+          }).join('');
+        }
+
         if (job.status === 'GENERATING') {
           if (badge) {
             badge.innerText = 'GENERATING';
@@ -8081,6 +8151,7 @@ class AdminDashboard {
 
         // Stream completed questions if job finished or result exists
         if (job.status === 'COMPLETED' && job.result) {
+          this._isGenerating = false;
           clearInterval(this.aiJobPollInterval);
           this.aiJobPollInterval = null;
 
@@ -8114,7 +8185,8 @@ class AdminDashboard {
           if (window.store && window.store.refreshTests) window.store.refreshTests();
           window.app.showToast('AI MCQ Test successfully created and hosted in ExcellenceCA!', 'success');
           if (window.lucide) window.lucide.createIcons();
-        } else if (job.status === 'PARTIAL' && job.result) {
+        } else if ((job.status === 'PARTIALLY_COMPLETED' || job.status === 'PARTIAL') && job.result) {
+          this._isGenerating = false;
           clearInterval(this.aiJobPollInterval);
           this.aiJobPollInterval = null;
 
@@ -8148,6 +8220,7 @@ class AdminDashboard {
           window.app.showToast(`Test created with ${finalQs.length} verified MCQs.`, 'warning');
           if (window.lucide) window.lucide.createIcons();
         } else if (job.status === 'FAILED') {
+          this._isGenerating = false;
           clearInterval(this.aiJobPollInterval);
           this.aiJobPollInterval = null;
           if (badge) {
@@ -8735,7 +8808,13 @@ class AdminDashboard {
                       ${task.lastTestTitle ? `<span>Last Hosted: <b class="text-emerald-700">${escapeHtml(task.lastTestTitle)}</b> <span class="text-slate-400 text-[10px]">(${escapeHtml(task.lastTestId || '')})</span></span>` : ''}
                       ${task.lastError ? `<span class="text-rose-600 font-semibold truncate max-w-xs" title="${escapeHtml(task.lastError)}">Error: ${escapeHtml(task.lastError)}</span>` : ''}
                     </div>
-                    <div class="flex items-center gap-1.5">
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                      <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        ${escapeHtml(task.questionCategory || 'Direct Questions')}
+                      </span>
+                      <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200">
+                        ${escapeHtml(task.questionSpeed || 'Quick')}
+                      </span>
                       ${(task.allowedPlans || ['free', 'trial', 'core', 'plus', 'elite']).map(p => `<span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">${escapeHtml(p)}</span>`).join('')}
                       <span class="text-[10px] font-bold px-1.5 py-0.5 rounded ${task.autoPublish ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}">
                         ${task.autoPublish ? 'Auto-Published' : 'Draft'}
@@ -8925,6 +9004,27 @@ class AdminDashboard {
                 </div>
               </div>
 
+              <!-- Question Category & Thinking Speed -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Question Category <span class="text-rose-600">*</span></label>
+                  <select id="ai-sched-category" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none bg-white font-medium">
+                    <option value="Direct Questions" selected>Direct Questions (Concise, Definition/Fact)</option>
+                    <option value="Direct + Case Based Questions">Direct + Case Based Questions</option>
+                    <option value="Conceptual Questions">Conceptual Questions</option>
+                    <option value="Application Based Questions">Application Based Questions</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Question Speed / Thinking Level <span class="text-rose-600">*</span></label>
+                  <select id="ai-sched-speed" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none bg-white font-medium">
+                    <option value="Quick" selected>Quick (&lt; 60-70 words, fast answer)</option>
+                    <option value="Medium">Medium (Standard pacing)</option>
+                    <option value="Thinking">Thinking (Deeper multi-step reasoning)</option>
+                  </select>
+                </div>
+              </div>
+
               <div class="grid grid-cols-3 gap-3">
                 <div>
                   <label class="block text-xs font-bold text-slate-700 mb-1">Negative Marks</label>
@@ -9050,6 +9150,10 @@ class AdminDashboard {
     document.getElementById('ai-sched-count').value = '5';
     document.getElementById('ai-sched-duration').value = '15';
     document.getElementById('ai-sched-difficulty').value = 'ICAI Exam Standard';
+    const createCatEl = document.getElementById('ai-sched-category');
+    if (createCatEl) createCatEl.value = 'Direct Questions';
+    const createSpeedEl = document.getElementById('ai-sched-speed');
+    if (createSpeedEl) createSpeedEl.value = 'Quick';
     document.getElementById('ai-sched-marks').value = '2.0';
     document.getElementById('ai-sched-neg-marks').value = '0.5';
     document.getElementById('ai-sched-xp').value = '10';
@@ -9116,6 +9220,10 @@ class AdminDashboard {
     document.getElementById('ai-sched-count').value = task.questionCount || 5;
     document.getElementById('ai-sched-duration').value = task.durationMinutes || 15;
     document.getElementById('ai-sched-difficulty').value = task.difficulty || 'ICAI Exam Standard';
+    const editCatEl = document.getElementById('ai-sched-category');
+    if (editCatEl) editCatEl.value = task.questionCategory || 'Direct Questions';
+    const editSpeedEl = document.getElementById('ai-sched-speed');
+    if (editSpeedEl) editSpeedEl.value = task.questionSpeed || 'Quick';
     document.getElementById('ai-sched-marks').value = task.marksPerCorrect ?? 2.0;
     document.getElementById('ai-sched-neg-marks').value = task.negativeMarksPerWrong ?? 0.5;
     document.getElementById('ai-sched-xp').value = task.platformXp ?? 10;
@@ -9203,6 +9311,8 @@ class AdminDashboard {
     const titleTemplate = document.getElementById('ai-sched-title-template')?.value.trim() || '[Subject] Daily Conceptual Sprint';
     const topic = document.getElementById('ai-sched-topic')?.value.trim() || 'Daily Comprehensive Exam Practice';
     const difficulty = document.getElementById('ai-sched-difficulty')?.value || 'ICAI Exam Standard';
+    const questionCategory = document.getElementById('ai-sched-category')?.value || 'Direct Questions';
+    const questionSpeed = document.getElementById('ai-sched-speed')?.value || 'Quick';
     const questionCount = parseInt(document.getElementById('ai-sched-count')?.value || '5', 10);
     const durationMinutes = parseInt(document.getElementById('ai-sched-duration')?.value || '15', 10);
     const marksPerCorrect = parseFloat(document.getElementById('ai-sched-marks')?.value || '2.0');
@@ -9217,6 +9327,9 @@ class AdminDashboard {
     if (document.getElementById('ai-sched-plan-core')?.checked) plans.push('core');
     if (document.getElementById('ai-sched-plan-plus')?.checked) plans.push('plus');
     if (document.getElementById('ai-sched-plan-elite')?.checked) plans.push('elite');
+
+    const existingTask = id ? (this._scheduledTasks || []).find(t => t.id === id) : null;
+    const enabled = existingTask ? (existingTask.enabled !== false) : true;
 
     const payload = {
       id: id || undefined,
@@ -9237,6 +9350,8 @@ class AdminDashboard {
       titleTemplate,
       topic,
       difficulty,
+      questionCategory,
+      questionSpeed,
       questionCount,
       durationMinutes,
       marksPerCorrect,
@@ -9245,7 +9360,7 @@ class AdminDashboard {
       maxAttempts,
       allowedPlans: plans,
       autoPublish,
-      enabled: true
+      enabled
     };
 
     const btn = document.getElementById('btn-save-schedule');
@@ -9271,6 +9386,15 @@ class AdminDashboard {
       const res = await resp.json();
       if (!resp.ok || !res.success) {
         throw new Error(res.error || 'Failed to save scheduled task');
+      }
+
+      if (res.task) {
+        const idx = (this._scheduledTasks || []).findIndex(t => t.id === res.task.id);
+        if (idx >= 0) {
+          this._scheduledTasks[idx] = res.task;
+        } else {
+          this._scheduledTasks.unshift(res.task);
+        }
       }
 
       window.app.showToast('Scheduled task saved successfully!', 'success');
