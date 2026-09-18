@@ -51,8 +51,8 @@ DEFAULT_PROVIDERS = [
         'fallback_model': 'gemini-flash-latest',
         'priority': 1,
         'enabled': True,
-        'purpose': 'generation_validation',
-        'roles': ['generation', 'validation'],
+        'purpose': 'generation',
+        'roles': ['generation'],
         'status': 'healthy'
     },
     {
@@ -63,8 +63,8 @@ DEFAULT_PROVIDERS = [
         'fallback_model': 'gemini-flash-latest',
         'priority': 2,
         'enabled': True,
-        'purpose': 'generation_validation',
-        'roles': ['generation', 'validation'],
+        'purpose': 'generation',
+        'roles': ['generation'],
         'status': 'healthy'
     },
     {
@@ -804,6 +804,11 @@ def call_llm_with_failover(
                 break
             try:
                 print(f"[AI REQUEST START] purpose={purpose} provider={pid} model={current_model}", flush=True)
+                if on_provider_event:
+                    try:
+                        on_provider_event('ai_call_start', pid, current_model, purpose)
+                    except Exception:
+                        pass
                 if prov['provider'] == 'gemini':
                     text, latency = _call_gemini_api(key, current_model, prompt, system_instruction, json_mode, timeout=timeout)
                 elif prov['provider'] == 'openrouter':

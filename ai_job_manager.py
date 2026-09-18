@@ -459,6 +459,11 @@ def _run_generation_job_worker(
 
         # 5. Finalize Test & Job States
         job_record['questionStatuses'] = metrics.get('questionStatuses', job_record.get('questionStatuses', []))
+        job_record['metrics'] = metrics
+        job_record['geminiGenerationCalls'] = metrics.get('geminiGenerationCalls', 0)
+        job_record['validationCalls'] = metrics.get('validationCalls', 0)
+        job_record['validationProvider'] = metrics.get('validationProvider', 'local')
+        job_record['regenerationCount'] = metrics.get('regenerationCount', 0)
 
         if len(questions) == count:
             # Full completion
