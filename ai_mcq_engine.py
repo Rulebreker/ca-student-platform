@@ -347,7 +347,8 @@ def generate_single_mcq(
     previous_concepts: Optional[List[str]] = None,
     data: Optional[Dict[str, Any]] = None,
     slot_number: int = 1,
-    total_count: int = 1
+    total_count: int = 1,
+    on_provider_event: Optional[Any] = None
 ) -> Tuple[Dict[str, Any], str, str]:
     """
     Generate a single candidate MCQ matching category and speed constraints.
@@ -390,7 +391,8 @@ def generate_single_mcq(
         prompt=user_prompt,
         system_instruction=system_instruction,
         json_mode=True,
-        data=data
+        data=data,
+        on_provider_event=on_provider_event
     )
 
     q_data = parse_and_repair_mcq_json(response_text)
@@ -424,7 +426,8 @@ def validate_mcq_independently(
     subject: str,
     topic: str,
     exam_level: str = 'CA Foundation',
-    data: Optional[Dict[str, Any]] = None
+    data: Optional[Dict[str, Any]] = None,
+    on_provider_event: Optional[Any] = None
 ) -> Tuple[bool, str, Optional[Dict[str, Any]], str]:
     """
     Run independent validator failover chain to verify academic and mathematical soundness.
@@ -452,7 +455,8 @@ def validate_mcq_independently(
             prompt=user_prompt,
             system_instruction=VALIDATOR_SYSTEM_PROMPT,
             json_mode=True,
-            data=data
+            data=data,
+            on_provider_event=on_provider_event
         )
         val_data = parse_and_repair_mcq_json(val_response)
         is_valid = bool(val_data.get('isValid', False))
@@ -541,27 +545,87 @@ def generate_exact_mcqs_pipeline(
         'endTime': None
     }
 
+    print(f"[BATCH START] batchId={job_id} total={count} category={question_category} speed={question_speed}", flush=True)
+
     MAX_RETRIES_PER_SLOT = 2  # up to 3 attempts per slot
+    SLOT_MAX_TIMEOUT = 50.0   # Watchdog timeout per question slot
 
     for slot_idx in range(1, count + 1):
+        slot_start_time = time.time()
         slot_status_obj = question_statuses[slot_idx - 1]
         slot_status_obj['status'] = 'generating'
+        slot_status_obj['attempt'] = 1
         slot_saved = False
         last_slot_error = None
+
+        print(f"[QUESTION START] batchId={job_id} questionNumber={slot_idx} attempt=1", flush=True)
 
         chunk_slice = None
         if relevant_chunks:
             chunk_idx = (slot_idx - 1) % len(relevant_chunks)
             chunk_slice = [relevant_chunks[chunk_idx]]
 
+        def _make_on_provider_event(s_idx, s_status_obj):
+            def _handler(evt_type, p_id, p_model, r_after):
+                if evt_type == 'rate_limited':
+                    s_status_obj['status'] = 'rate_limited'
+                    s_status_obj['provider'] = p_id
+                    s_status_obj['error'] = f"429 Quota Exceeded for {p_id}"
+                    print(f"[429 RATE LIMITED] batchId={job_id} questionNumber={s_idx} provider={p_id} model={p_model} retryAfter={r_after or 60.0:.1f}s", flush=True)
+                    if progress_callback:
+                        try:
+                            progress_callback({
+                                'stage': 'rate_limited',
+                                'current': s_idx,
+                                'verifiedCount': len(generated_questions),
+                                'total': count,
+                                'status': f"Q{s_idx}: {p_id.upper()} Quota Exceeded (429) -> Switching provider...",
+                                'progressPct': int(((s_idx - 1) / count) * 85) + 5,
+                                'questionStatuses': list(question_statuses)
+                            })
+                        except Exception:
+                            pass
+                elif evt_type == 'fallback':
+                    s_status_obj['status'] = 'fallback'
+                    s_status_obj['provider'] = p_id
+                    print(f"[FALLBACK PROVIDER] batchId={job_id} questionNumber={s_idx} toProvider={p_id} model={p_model}", flush=True)
+                    if progress_callback:
+                        try:
+                            progress_callback({
+                                'stage': 'fallback',
+                                'current': s_idx,
+                                'verifiedCount': len(generated_questions),
+                                'total': count,
+                                'status': f"Q{s_idx}: Switched to {p_id.upper()} ({p_model}) -> Generating...",
+                                'progressPct': int(((s_idx - 1) / count) * 85) + 5,
+                                'questionStatuses': list(question_statuses)
+                            })
+                        except Exception:
+                            pass
+            return _handler
+
+        slot_prov_event_cb = _make_on_provider_event(slot_idx, slot_status_obj)
+
         for attempt in range(MAX_RETRIES_PER_SLOT + 1):
+            # Check slot watchdog timeout
+            if (time.time() - slot_start_time) > SLOT_MAX_TIMEOUT:
+                last_slot_error = f"Slot watchdog timeout ({SLOT_MAX_TIMEOUT}s) exceeded."
+                print(f"[QUESTION FAILED] batchId={job_id} questionNumber={slot_idx} attempt={attempt+1} error={last_slot_error}", flush=True)
+                break
+
             is_retry = attempt > 0
+            if is_retry:
+                slot_status_obj['status'] = 'retrying'
+                slot_status_obj['attempt'] = attempt + 1
+                print(f"[RETRY] batchId={job_id} questionNumber={slot_idx} attempt={attempt + 1} reason={last_slot_error}", flush=True)
+
             if progress_callback:
                 try:
                     retry_label = f" (Attempt {attempt + 1})" if is_retry else ""
                     progress_callback({
                         'stage': 'generating',
                         'current': slot_idx,
+                        'verifiedCount': len(generated_questions),
                         'total': count,
                         'status': f"Generating question {slot_idx} of {count}{retry_label}...",
                         'progressPct': int(((slot_idx - 1) / count) * 85) + 5,
@@ -583,13 +647,16 @@ def generate_exact_mcqs_pipeline(
                     previous_concepts=concept_summaries,
                     data=data,
                     slot_number=slot_idx,
-                    total_count=count
+                    total_count=count,
+                    on_provider_event=slot_prov_event_cb
                 )
                 metrics['providersUsed'].add(gen_prov)
             except Exception as gen_err:
                 last_slot_error = f"Generation error: {gen_err}"
                 metrics['regenerationAttempts'] += 1
-                time.sleep(min(1.0 * (attempt + 1), 3.0))
+                # If watchdog exceeded, don't sleep
+                if (time.time() - slot_start_time) < SLOT_MAX_TIMEOUT - 3.0:
+                    time.sleep(min(1.0 * (attempt + 1), 2.0))
                 continue
 
             # Step 2: Quality & Category/Speed validation
@@ -625,6 +692,7 @@ def generate_exact_mcqs_pipeline(
                     progress_callback({
                         'stage': 'validating',
                         'current': slot_idx,
+                        'verifiedCount': len(generated_questions),
                         'total': count,
                         'status': f"Validating question {slot_idx} of {count}...",
                         'progressPct': int(((slot_idx - 0.5) / count) * 85) + 5,
@@ -638,7 +706,8 @@ def generate_exact_mcqs_pipeline(
                 subject=subject,
                 topic=topic,
                 exam_level=exam_level,
-                data=data
+                data=data,
+                on_provider_event=slot_prov_event_cb
             )
             metrics['validationProvidersUsed'].add(val_prov)
 
@@ -706,13 +775,13 @@ def generate_exact_mcqs_pipeline(
                 except Exception as cb_err:
                     print(f"[AI_PIPELINE_CB_WARNING] on_question_verified callback error: {cb_err}", flush=True)
 
-            print(f"[AI_PIPELINE_SUCCESS] Successfully generated and verified question {len(generated_questions)}/{count} for slot {slot_idx} (Provider: {gen_prov}, Validator: {val_prov}).", flush=True)
+            print(f"[QUESTION SUCCESS] batchId={job_id} questionNumber={slot_idx} provider={gen_prov} model={gen_model} verifiedTotal={len(generated_questions)}", flush=True)
             break  # Attempt loop ends on success
 
         if not slot_saved:
             slot_status_obj['status'] = 'failed'
             slot_status_obj['error'] = last_slot_error or "Exhausted all retry attempts."
-            print(f"[AI_PIPELINE_SLOT_FAILED] Question slot {slot_idx}/{count} failed after retries: {slot_status_obj['error']}. Continuing to remaining questions...", flush=True)
+            print(f"[QUESTION FAILED] batchId={job_id} questionNumber={slot_idx} error={slot_status_obj['error']}", flush=True)
 
     metrics['generatedCount'] = len(generated_questions)
     metrics['failedCount'] = count - len(generated_questions)
@@ -722,7 +791,7 @@ def generate_exact_mcqs_pipeline(
     metrics['providersUsed'] = list(metrics['providersUsed'])
     metrics['validationProvidersUsed'] = list(metrics['validationProvidersUsed'])
 
-    if len(generated_questions) < count:
-        print(f"[AI_PIPELINE_PARTIAL] Pipeline finished. Successfully verified {len(generated_questions)}/{count} questions ({metrics['failedCount']} failed).", flush=True)
+    final_status = 'COMPLETED' if len(generated_questions) == count else ('PARTIAL' if len(generated_questions) > 0 else 'FAILED')
+    print(f"[BATCH COMPLETE] batchId={job_id} totalGenerated={len(generated_questions)} totalFailed={metrics['failedCount']} duration={metrics['durationSeconds']}s status={final_status}", flush=True)
 
     return generated_questions, metrics

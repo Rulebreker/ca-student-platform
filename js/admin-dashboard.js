@@ -8127,11 +8127,33 @@ class AdminDashboard {
           slotsContainer.classList.remove('hidden');
           slotsGrid.innerHTML = job.questionStatuses.map(qs => {
             let color = 'bg-slate-100 text-slate-600 border-slate-200';
+            let label = qs.status ? qs.status.toUpperCase() : 'PENDING';
             if (qs.status === 'generating') color = 'bg-rose-100 text-rose-800 border-rose-300 animate-pulse';
-            else if (qs.status === 'validating') color = 'bg-amber-100 text-amber-800 border-amber-300';
-            else if (qs.status === 'saved') color = 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold';
-            else if (qs.status === 'failed') color = 'bg-red-100 text-red-800 border-red-300 font-bold';
-            return `<span class="px-2 py-0.5 text-[10px] rounded border ${color}">Q${qs.number}: ${qs.status.toUpperCase()}</span>`;
+            else if (qs.status === 'rate_limited') {
+              color = 'bg-amber-100 text-amber-900 border-amber-400 font-bold animate-pulse';
+              label = '429 LIMIT';
+            }
+            else if (qs.status === 'fallback') {
+              color = 'bg-blue-100 text-blue-900 border-blue-400 font-bold';
+              label = 'FALLBACK';
+            }
+            else if (qs.status === 'retrying') {
+              color = 'bg-orange-100 text-orange-900 border-orange-300 animate-pulse';
+              label = 'RETRYING';
+            }
+            else if (qs.status === 'validating') {
+              color = 'bg-purple-100 text-purple-800 border-purple-300';
+              label = 'VALIDATING';
+            }
+            else if (qs.status === 'saved') {
+              color = 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold';
+              label = 'VERIFIED';
+            }
+            else if (qs.status === 'failed') {
+              color = 'bg-red-100 text-red-800 border-red-300 font-bold';
+              label = 'FAILED';
+            }
+            return `<span class="px-2 py-0.5 text-[10px] rounded border ${color}">Q${qs.number}: ${label}</span>`;
           }).join('');
         }
 
@@ -8140,8 +8162,9 @@ class AdminDashboard {
             badge.innerText = 'GENERATING';
             badge.className = 'px-2.5 py-1 text-xs font-black rounded-lg bg-rose-100 text-rose-800 border border-rose-200';
           }
+          const verified = (typeof job.generatedCount === 'number') ? job.generatedCount : (job.currentQuestionIndex || 0);
           if (progressCounter) {
-            progressCounter.innerText = `${job.currentQuestionIndex || 0} / ${job.totalQuestions || targetCount} Questions Verified`;
+            progressCounter.innerText = `${verified} / ${job.totalQuestions || targetCount} Questions Verified`;
           }
           // Live streaming: show verified questions as they arrive
           if (questionsList && Array.isArray(job.generatedQuestions) && job.generatedQuestions.length > 0) {

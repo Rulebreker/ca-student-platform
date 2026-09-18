@@ -422,8 +422,13 @@ def _run_generation_job_worker(
                 job_record['questionStatuses'] = p_info['questionStatuses']
             if 'progressPct' in p_info:
                 job_record['progressPct'] = p_info['progressPct']
+            if 'verifiedCount' in p_info:
+                job_record['generatedCount'] = p_info['verifiedCount']
+                job_record['currentQuestionIndex'] = p_info['verifiedCount']
+            elif 'current' in p_info:
+                job_record['currentQuestionIndex'] = len(job_record.get('generatedQuestions', []))
             if 'current' in p_info:
-                job_record['currentQuestionIndex'] = p_info['current']
+                job_record['currentSlotIndex'] = p_info['current']
             save_job_record(job_record, data, save_callback, firebase_sync_callback)
 
         # 4. Run MCQ Engine with incremental persistence and recovery

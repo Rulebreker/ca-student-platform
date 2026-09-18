@@ -28,6 +28,16 @@ _provider_failures: Dict[str, int] = {}
 _provider_latencies: Dict[str, float] = {}
 _memory_secrets_cache: Dict[str, str] = {}
 
+class RateLimitError(RuntimeError):
+    """Raised when an AI provider returns HTTP 429 or quota exceeded."""
+    def __init__(self, provider_id: str, model: str, retry_after: float = 60.0, message: str = ""):
+        msg = message or f"Provider '{provider_id}' rate limited (model: {model}). Retry after {retry_after:.1f}s."
+        super().__init__(msg)
+        self.provider_id = provider_id
+        self.model = model
+        self.retry_after = retry_after
+        self.message = msg
+
 # Vault encryption constants (PBKDF2-HMAC-SHA256 authenticated cipher)
 VAULT_SALT = b"ExcellenceCA_AI_Secrets_Vault_Master_Salt_2026"
 VAULT_PASSPHRASE = b"ExcellenceCA_AI_Production_HMAC_Secret_Token_v2"
@@ -58,11 +68,11 @@ DEFAULT_PROVIDERS = [
         'status': 'healthy'
     },
     {
-        'id': 'openrouter',
-        'name': 'OpenRouter (Llama 3.3 70B)',
-        'provider': 'openrouter',
-        'model': 'meta-llama/llama-3.3-70b-instruct',
-        'fallback_model': 'google/gemini-2.0-flash-exp:free',
+        'id': 'groq',
+        'name': 'Groq (Qwen 3.8 27B Fast Inference)',
+        'provider': 'groq',
+        'model': 'qwen/qwen3.8-27b',
+        'fallback_model': 'qwen/qwen3.8-27b',
         'priority': 3,
         'enabled': True,
         'purpose': 'generation_validation',
@@ -70,11 +80,11 @@ DEFAULT_PROVIDERS = [
         'status': 'healthy'
     },
     {
-        'id': 'groq',
-        'name': 'Groq (Qwen 3.8 27B / Llama 3.3 70B)',
-        'provider': 'groq',
-        'model': 'qwen/qwen3.8-27b',
-        'fallback_model': 'llama-3.3-70b-versatile',
+        'id': 'openrouter',
+        'name': 'OpenRouter (Llama 3.3 70B)',
+        'provider': 'openrouter',
+        'model': 'meta-llama/llama-3.3-70b-instruct',
+        'fallback_model': 'meta-llama/llama-3.3-70b-instruct',
         'priority': 4,
         'enabled': True,
         'purpose': 'generation_validation',
@@ -412,16 +422,19 @@ def delete_provider(data: Dict[str, Any], provider_id: str) -> bool:
         return True
     return False
 
-def mark_provider_failure(provider_id: str, error_msg: str, status_code: Optional[int] = None):
+def mark_provider_failure(provider_id: str, error_msg: str, status_code: Optional[int] = None, retry_after: Optional[float] = None):
     """Mark a provider failure and apply exponential/circuit cooldown."""
     _provider_failures[provider_id] = _provider_failures.get(provider_id, 0) + 1
     cooldown = 30.0
-    if status_code == 429 or '429' in str(error_msg):
-        cooldown = 60.0
+    if status_code == 429 or '429' in str(error_msg) or 'RESOURCE_EXHAUSTED' in str(error_msg) or 'quota' in str(error_msg).lower():
+        cooldown = max(float(retry_after or 60.0), 30.0)
+        _provider_cooldowns[provider_id] = time.time() + cooldown
+        print(f"[429 RATE LIMITED] Provider '{provider_id}' quota exhausted: {error_msg}. Cooling down for {cooldown:.1f}s.", flush=True)
+        return
     elif status_code and 500 <= status_code < 600:
         cooldown = 45.0
     _provider_cooldowns[provider_id] = time.time() + cooldown
-    print(f"[AI_GATEWAY_FAIL] Provider '{provider_id}' failed: {error_msg}. Cooling down for {cooldown}s.", flush=True)
+    print(f"[AI_GATEWAY_FAIL] Provider '{provider_id}' failed: {error_msg}. Cooling down for {cooldown:.1f}s.", flush=True)
 
 def mark_provider_success(provider_id: str, latency_ms: float):
     """Mark a provider call success, reset failures, record latency."""
@@ -434,7 +447,7 @@ def mark_provider_success(provider_id: str, latency_ms: float):
 # DIRECT HTTP PROVIDER CLIENTS
 # ----------------------------------------------------------------------
 
-def _call_gemini_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 25.0) -> Tuple[str, float]:
+def _call_gemini_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 18.0) -> Tuple[str, float]:
     start = time.time()
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     
@@ -464,9 +477,44 @@ def _call_gemini_api(api_key: str, model: str, prompt: str, system_instruction: 
     req.add_header('Content-Type', 'application/json')
     req.add_header('User-Agent', USER_AGENT)
 
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        resp_bytes = resp.read()
-        resp_json = json.loads(resp_bytes.decode('utf-8'))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            resp_bytes = resp.read()
+            resp_json = json.loads(resp_bytes.decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        raw_err = ""
+        try:
+            raw_err = e.read().decode('utf-8')
+        except Exception:
+            pass
+        if e.code == 429 or 'RESOURCE_EXHAUSTED' in raw_err or 'Quota exceeded' in raw_err:
+            retry_delay = 60.0
+            retry_header = e.headers.get('Retry-After') if e.headers else None
+            if retry_header:
+                try:
+                    retry_delay = max(float(retry_header), 5.0)
+                except ValueError:
+                    pass
+            if raw_err:
+                m = re.search(r'retry in\s+([\d\.]+)\s*s', raw_err, re.IGNORECASE)
+                if m:
+                    try:
+                        retry_delay = max(float(m.group(1)), 5.0)
+                    except ValueError:
+                        pass
+                m_delay = re.search(r'"retryDelay":\s*"(\d+)s"', raw_err)
+                if m_delay:
+                    try:
+                        retry_delay = max(float(m_delay.group(1)), 5.0)
+                    except ValueError:
+                        pass
+            raise RateLimitError(
+                provider_id='gemini',
+                model=model,
+                retry_after=retry_delay,
+                message=f"Gemini 429 RESOURCE_EXHAUSTED for model {model}. Quota exceeded. Retry in {retry_delay:.1f}s."
+            )
+        raise
         
     latency = (time.time() - start) * 1000.0
     
@@ -477,7 +525,7 @@ def _call_gemini_api(api_key: str, model: str, prompt: str, system_instruction: 
     except (KeyError, IndexError) as e:
         raise ValueError(f"Malformed Gemini response: {resp_json}")
 
-def _call_openrouter_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 25.0) -> Tuple[str, float]:
+def _call_openrouter_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 18.0) -> Tuple[str, float]:
     start = time.time()
     url = "https://openrouter.ai/api/v1/chat/completions"
     
@@ -503,9 +551,31 @@ def _call_openrouter_api(api_key: str, model: str, prompt: str, system_instructi
     req.add_header('X-Title', "ExcellenceCA Automated AI MCQ Studio")
     req.add_header('User-Agent', USER_AGENT)
 
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        resp_bytes = resp.read()
-        resp_json = json.loads(resp_bytes.decode('utf-8'))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            resp_bytes = resp.read()
+            resp_json = json.loads(resp_bytes.decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        raw_err = ""
+        try:
+            raw_err = e.read().decode('utf-8')
+        except Exception:
+            pass
+        if e.code == 429 or 'rate_limit' in raw_err.lower() or 'quota' in raw_err.lower():
+            retry_delay = 60.0
+            retry_header = e.headers.get('Retry-After') if e.headers else None
+            if retry_header:
+                try:
+                    retry_delay = max(float(retry_header), 5.0)
+                except ValueError:
+                    pass
+            raise RateLimitError(
+                provider_id='openrouter',
+                model=model,
+                retry_after=retry_delay,
+                message=f"OpenRouter 429 Rate Limit for model {model}. Retry in {retry_delay:.1f}s."
+            )
+        raise
         
     latency = (time.time() - start) * 1000.0
     
@@ -515,7 +585,7 @@ def _call_openrouter_api(api_key: str, model: str, prompt: str, system_instructi
     except (KeyError, IndexError) as e:
         raise ValueError(f"Malformed OpenRouter response: {resp_json}")
 
-def _call_groq_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 25.0) -> Tuple[str, float]:
+def _call_groq_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 18.0) -> Tuple[str, float]:
     start = time.time()
     url = "https://api.groq.com/openai/v1/chat/completions"
     
@@ -539,9 +609,31 @@ def _call_groq_api(api_key: str, model: str, prompt: str, system_instruction: Op
     req.add_header('Authorization', f"Bearer {api_key}")
     req.add_header('User-Agent', USER_AGENT)
 
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        resp_bytes = resp.read()
-        resp_json = json.loads(resp_bytes.decode('utf-8'))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            resp_bytes = resp.read()
+            resp_json = json.loads(resp_bytes.decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        raw_err = ""
+        try:
+            raw_err = e.read().decode('utf-8')
+        except Exception:
+            pass
+        if e.code == 429 or 'rate_limit' in raw_err.lower() or 'quota' in raw_err.lower():
+            retry_delay = 60.0
+            retry_header = e.headers.get('Retry-After') if e.headers else None
+            if retry_header:
+                try:
+                    retry_delay = max(float(retry_header), 5.0)
+                except ValueError:
+                    pass
+            raise RateLimitError(
+                provider_id='groq',
+                model=model,
+                retry_after=retry_delay,
+                message=f"Groq 429 Rate Limit for model {model}. Retry in {retry_delay:.1f}s."
+            )
+        raise
         
     latency = (time.time() - start) * 1000.0
     
@@ -653,11 +745,14 @@ def call_llm_with_failover(
     json_mode: bool = True,
     data: Optional[Dict[str, Any]] = None,
     preferred_provider: Optional[str] = None,
-    timeout: float = 25.0
+    timeout: float = 18.0,
+    on_provider_event: Optional[Any] = None
 ) -> Tuple[str, str, str]:
     providers = get_registered_providers(data)
     secrets_map = load_secrets()
     now = time.time()
+    gateway_start = now
+    GATEWAY_MAX_TOTAL_TIMEOUT = 45.0
     
     candidates = []
     for p in providers:
@@ -681,14 +776,20 @@ def call_llm_with_failover(
 
     errors = []
     
-    for prov in candidates:
+    for prov_idx, prov in enumerate(candidates):
+        if time.time() - gateway_start > GATEWAY_MAX_TOTAL_TIMEOUT:
+            print(f"[AI_GATEWAY_TIMEOUT] Total failover time exceeded {GATEWAY_MAX_TOTAL_TIMEOUT}s.", flush=True)
+            break
+
         pid = prov['id']
         key = secrets_map.get(pid, '')
         model = prov.get('model', '')
         fallback_model = prov.get('fallback_model', '')
         
+        now = time.time()
         if pid in _provider_cooldowns and _provider_cooldowns[pid] > now and len(candidates) > 1:
-            print(f"[AI_FAILOVER_SKIP] Provider '{pid}' in cooldown. Skipping to next candidate.", flush=True)
+            remaining = _provider_cooldowns[pid] - now
+            print(f"[AI_FAILOVER_SKIP] Provider '{pid}' in cooldown ({remaining:.1f}s remaining). Skipping to next candidate.", flush=True)
             continue
             
         print(f"[AI_GATEWAY_TRY] Attempting '{purpose}' via provider '{pid}' (model: {model})...", flush=True)
@@ -697,8 +798,12 @@ def call_llm_with_failover(
         if fallback_model and fallback_model != model:
             models_to_try.append(fallback_model)
             
+        provider_rate_limited = False
         for current_model in models_to_try:
+            if time.time() - gateway_start > GATEWAY_MAX_TOTAL_TIMEOUT:
+                break
             try:
+                print(f"[AI REQUEST START] purpose={purpose} provider={pid} model={current_model}", flush=True)
                 if prov['provider'] == 'gemini':
                     text, latency = _call_gemini_api(key, current_model, prompt, system_instruction, json_mode, timeout=timeout)
                 elif prov['provider'] == 'openrouter':
@@ -709,8 +814,23 @@ def call_llm_with_failover(
                     raise ValueError(f"Unknown provider engine: {prov['provider']}")
 
                 mark_provider_success(pid, latency)
+                print(f"[AI RESPONSE RECEIVED] purpose={purpose} provider={pid} model={current_model} duration={latency:.1f}ms", flush=True)
                 print(f"[AI_GATEWAY_SUCCESS] Provider '{pid}' (model: {current_model}) responded in {latency:.1f}ms.", flush=True)
                 return text, pid, current_model
+
+            except RateLimitError as rle:
+                err_str = str(rle)
+                mark_provider_failure(pid, err_str, status_code=429, retry_after=rle.retry_after)
+                errors.append(f"[{pid}/{current_model}]: {err_str}")
+                print(f"[429 RATE LIMITED] Provider '{pid}' model '{current_model}' quota exhausted. Retry after {rle.retry_after:.1f}s. Breaking to next candidate provider...", flush=True)
+                if on_provider_event:
+                    try:
+                        on_provider_event('rate_limited', pid, current_model, rle.retry_after)
+                    except Exception:
+                        pass
+                provider_rate_limited = True
+                # Critical: Break out of inner model loop immediately on 429 quota exhaustion
+                break
 
             except Exception as e:
                 err_str = str(e)
@@ -718,6 +838,18 @@ def call_llm_with_failover(
                 mark_provider_failure(pid, err_str, status_code)
                 errors.append(f"[{pid}/{current_model}]: {err_str}")
                 print(f"[AI_GATEWAY_RETRY] Failed {pid}/{current_model}: {err_str}. Cascading to fallback...", flush=True)
+
+        if provider_rate_limited:
+            # Check if there is a next provider to fallback to
+            next_candidates = [c for c in candidates[prov_idx + 1:] if _provider_cooldowns.get(c['id'], 0) <= time.time()]
+            if next_candidates:
+                next_prov = next_candidates[0]
+                print(f"[FALLBACK PROVIDER] Provider '{pid}' was rate limited. Immediately switching to fallback provider '{next_prov['id']}' ({next_prov.get('model')}).", flush=True)
+                if on_provider_event:
+                    try:
+                        on_provider_event('fallback', next_prov['id'], next_prov.get('model'), None)
+                    except Exception:
+                        pass
                 
     raise RuntimeError(f"All AI providers failed for '{purpose}'. Errors: " + " | ".join(errors))
 
