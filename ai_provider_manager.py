@@ -192,24 +192,12 @@ DEFAULT_PROVIDERS = [
         'status': 'healthy'
     },
     {
-        'id': 'groq',
-        'name': 'Groq (Qwen 3.8 27B Fast Inference)',
-        'provider': 'groq',
-        'model': 'qwen/qwen3.8-27b',
-        'fallback_model': 'qwen/qwen3.8-27b',
-        'priority': 7,
-        'enabled': True,
-        'purpose': 'validation',
-        'roles': ['validation'],
-        'status': 'healthy'
-    },
-    {
         'id': 'openrouter',
         'name': 'OpenRouter (Llama 3.3 70B)',
         'provider': 'openrouter',
         'model': 'meta-llama/llama-3.3-70b-instruct',
         'fallback_model': 'meta-llama/llama-3.3-70b-instruct',
-        'priority': 8,
+        'priority': 7,
         'enabled': True,
         'purpose': 'validation',
         'roles': ['validation'],
@@ -221,10 +209,22 @@ DEFAULT_PROVIDERS = [
         'provider': 'mistral',
         'model': 'mistral-ocr-latest',
         'fallback_model': 'local-fallback',
-        'priority': 9,
+        'priority': 8,
         'enabled': True,
         'purpose': 'ocr',
         'roles': ['ocr'],
+        'status': 'healthy'
+    },
+    {
+        'id': 'groq',
+        'name': 'Groq (Qwen 3.8 27B Fast Inference)',
+        'provider': 'groq',
+        'model': 'qwen/qwen3.8-27b',
+        'fallback_model': 'qwen/qwen3.8-27b',
+        'priority': 9,
+        'enabled': True,
+        'purpose': 'validation',
+        'roles': ['validation'],
         'status': 'healthy'
     }
 ]
@@ -467,9 +467,21 @@ def get_registered_providers(data: Optional[Dict[str, Any]] = None) -> List[Dict
                     p['roles'] = [r for r in p['roles'] if r != 'generation']
                 if p.get('purpose') in ('generation', 'generation_validation'):
                     p['purpose'] = 'validation'
-                    
-        return sorted(list(merged_map.values()), key=lambda x: x.get('priority', 99))
-    return sorted(base, key=lambda x: x.get('priority', 99))
+            if p.get('provider') == 'groq' or p.get('id') == 'groq':
+                if p.get('priority', 0) < 9:
+                    p['priority'] = 9
+
+        def _prov_sort(prov_dict):
+            is_groq = (prov_dict.get('provider') == 'groq' or prov_dict.get('id') == 'groq')
+            return (1 if is_groq else 0, prov_dict.get('priority', 99))
+
+        return sorted(list(merged_map.values()), key=_prov_sort)
+
+    def _base_sort(prov_dict):
+        is_groq = (prov_dict.get('provider') == 'groq' or prov_dict.get('id') == 'groq')
+        return (1 if is_groq else 0, prov_dict.get('priority', 99))
+
+    return sorted(base, key=_base_sort)
 
 def get_sanitized_providers(data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Return provider configurations safe for frontend display (masked keys, real health)."""
@@ -970,14 +982,15 @@ def call_llm_with_failover(
     if not candidates:
         raise RuntimeError(f"No configured or enabled AI providers available for purpose '{purpose}'. Please configure API keys in Admin Settings.")
 
-    # Canonical priority: Preferred provider -> Gemini keys by priority (1 to 6) -> Others
+    # Canonical priority: Preferred provider -> Gemini keys by priority (1 to 6) -> OpenRouter -> Groq strictly LAST
     def _sort_key(prov):
         if preferred_provider and prov['id'] == preferred_provider:
             return (-1, 0)
         p_id = prov['id']
         family = get_provider_family(p_id, prov.get('provider', ''))
-        family_rank = 0 if 'gemini' in family else ({'groq': 2, 'openrouter': 3}.get(family, 99))
-        prov_priority = prov.get('priority', 50)
+        is_groq = (family == 'groq' or prov.get('provider') == 'groq' or p_id == 'groq')
+        family_rank = 99 if is_groq else (0 if 'gemini' in family else ({'openrouter': 1, 'mistral': 2}.get(family, 10)))
+        prov_priority = 999 if is_groq else prov.get('priority', 50)
         return (family_rank, prov_priority)
 
     candidates.sort(key=_sort_key)

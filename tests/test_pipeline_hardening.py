@@ -196,47 +196,47 @@ class TestPipelineHardening(unittest.TestCase):
             self.assertEqual(len(gemini_calls), 2)
         print("PASS: Scenario 8 - Timeout rotates immediately to next Gemini key")
 
-    # 9. Groq is preferred over OpenRouter for validation
-    def test_09_groq_preferred_over_openrouter(self):
+    # 9. OpenRouter is preferred over Groq for validation (Groq is strictly LAST fallback)
+    def test_09_openrouter_preferred_over_groq(self):
         call_order = []
         def mock_groq(*args, **kwargs):
             call_order.append('groq')
-            return json.dumps({'isValid': True, 'reason': 'Valid'}), 50.0
+            return "unexpected", 10.0
         def mock_or(*args, **kwargs):
             call_order.append('openrouter')
-            return "unexpected", 10.0
-
-        test_data = {
-            'ai_providers': [
-                {'id': 'openrouter', 'provider': 'openrouter', 'priority': 8, 'enabled': True, 'roles': ['validation']},
-                {'id': 'groq', 'provider': 'groq', 'priority': 7, 'enabled': True, 'roles': ['validation']}
-            ]
-        }
-        with patch('ai_provider_manager._call_groq_api', side_effect=mock_groq):
-            with patch('ai_provider_manager._call_openrouter_api', side_effect=mock_or):
-                text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='validation', prompt='test', data=test_data)
-                self.assertEqual(pid, 'groq')
-                self.assertEqual(call_order, ['groq'])
-        print("PASS: Scenario 9 - Groq is canonically preferred over OpenRouter for validation")
-
-    # 10. OpenRouter is used when Groq is unavailable for validation
-    def test_10_openrouter_used_when_gemini_and_groq_fail(self):
-        def mock_groq(*args, **kwargs):
-            raise RateLimitError('groq', 'qwen/qwen3.8-27b', 60.0)
-        def mock_or(*args, **kwargs):
             return json.dumps({'isValid': True, 'reason': 'Valid'}), 50.0
 
         test_data = {
             'ai_providers': [
-                {'id': 'groq', 'provider': 'groq', 'priority': 7, 'enabled': True, 'roles': ['validation']},
-                {'id': 'openrouter', 'provider': 'openrouter', 'priority': 8, 'enabled': True, 'roles': ['validation']}
+                {'id': 'openrouter', 'provider': 'openrouter', 'priority': 7, 'enabled': True, 'roles': ['validation']},
+                {'id': 'groq', 'provider': 'groq', 'priority': 9, 'enabled': True, 'roles': ['validation']}
             ]
         }
         with patch('ai_provider_manager._call_groq_api', side_effect=mock_groq):
             with patch('ai_provider_manager._call_openrouter_api', side_effect=mock_or):
                 text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='validation', prompt='test', data=test_data)
                 self.assertEqual(pid, 'openrouter')
-        print("PASS: Scenario 10 - OpenRouter is used when Groq is unavailable for validation")
+                self.assertEqual(call_order, ['openrouter'])
+        print("PASS: Scenario 9 - OpenRouter is preferred over Groq (Groq is strictly last)")
+
+    # 10. Groq is used as fallback when OpenRouter fails for validation
+    def test_10_groq_used_as_fallback_when_openrouter_fails(self):
+        def mock_or(*args, **kwargs):
+            raise RateLimitError('openrouter', 'meta-llama/llama-3.3-70b-instruct', 60.0)
+        def mock_groq(*args, **kwargs):
+            return json.dumps({'isValid': True, 'reason': 'Valid'}), 50.0
+
+        test_data = {
+            'ai_providers': [
+                {'id': 'openrouter', 'provider': 'openrouter', 'priority': 7, 'enabled': True, 'roles': ['validation']},
+                {'id': 'groq', 'provider': 'groq', 'priority': 9, 'enabled': True, 'roles': ['validation']}
+            ]
+        }
+        with patch('ai_provider_manager._call_openrouter_api', side_effect=mock_or):
+            with patch('ai_provider_manager._call_groq_api', side_effect=mock_groq):
+                text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='validation', prompt='test', data=test_data)
+                self.assertEqual(pid, 'groq')
+        print("PASS: Scenario 10 - Groq is used as fallback when OpenRouter fails")
 
     # 11. All providers exhausted fails gracefully without infinite loop
     def test_11_all_providers_exhausted(self):

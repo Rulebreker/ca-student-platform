@@ -28,7 +28,9 @@ STORAGE_BASE = '/tmp' if IS_SERVERLESS else BASE_DIR
 
 PRIVATE_STORAGE_DIR = os.path.join(STORAGE_BASE, 'private_storage')
 PRIVATE_IMAGES_DIR = os.path.join(PRIVATE_STORAGE_DIR, 'images')
-DATA_STORE_FILE = os.path.join(STORAGE_BASE, 'backend_data.json')
+# Decouple runtime persistence from git-tracked root backend_data.json:
+# In serverless environments, use /tmp/backend_data.json; in local dev, use private_storage/backend_data.json (gitignored).
+DATA_STORE_FILE = os.path.join('/tmp', 'backend_data.json') if IS_SERVERLESS else os.path.join(PRIVATE_STORAGE_DIR, 'backend_data.json')
 
 try:
     os.makedirs(PRIVATE_STORAGE_DIR, exist_ok=True)
@@ -1292,7 +1294,7 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
 
 def load_backend_data(refresh_collections=None):
     with _backend_data_lock:
-        if IS_SERVERLESS and not os.path.exists(DATA_STORE_FILE):
+        if not os.path.exists(DATA_STORE_FILE):
             bundled_seed = os.path.join(BASE_DIR, 'backend_data.json')
             if os.path.exists(bundled_seed):
                 try:
@@ -3437,9 +3439,13 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 content_length = int(self.headers.get('Content-Length', 0))
                 body = self.rfile.read(content_length) if content_length > 0 else b'{}'
                 req_data = json.loads(body.decode('utf-8'))
+                task_input = req_data.get('task') if ('task' in req_data and isinstance(req_data['task'], dict)) else req_data
+                if not task_input or not isinstance(task_input, dict) or not (task_input.get('title') or task_input.get('name') or task_input.get('subjectName')):
+                    self.send_json(400, {'success': False, 'error': 'Invalid task payload: title and subject are required.', 'code': 400})
+                    return
                 
                 data = load_backend_data(refresh_collections=['ai_scheduled_tasks'])
-                task = ai_scheduler.save_scheduled_task(req_data, data)
+                task = ai_scheduler.save_scheduled_task(task_input, data)
                 save_backend_data(data)
                 sync_to_firebase(f"ai_scheduled_tasks/{task['id']}", task, method='PUT', sync=True)
                 self.send_json(200, {'success': True, 'task': task})
@@ -4871,9 +4877,11 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 data['users'] = users_dict
                 save_backend_data(data)
 
+                user_for_fb = dict(new_user)
+                sync_to_firebase(f"users/{user_id}", user_for_fb, method='PUT', sync=True)
+
                 sanitized = dict(new_user)
                 sanitized.pop('password', None)
-                sync_to_firebase(f"users/{user_id}", sanitized, method='PUT')
 
                 self.send_json(200, {
                     'success': True,
@@ -6230,7 +6238,7 @@ def run_server(port=PORT):
     httpd = None
     for attempt in range(retries):
         try:
-            httpd = socketserver.ThreadingTCPServer(('127.0.0.1', port), ExcellenceCAHandler)
+            httpd = socketserver.ThreadingTCPServer(('0.0.0.0', port), ExcellenceCAHandler)
             break
         except OSError as e:
             if attempt < retries - 1:
