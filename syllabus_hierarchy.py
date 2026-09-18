@@ -6,6 +6,8 @@ Provides canonical IDs, names, and chapter structures for:
 - CA Final
 """
 
+import re
+import time
 from typing import Dict, Any, List, Optional
 
 EXAM_LEVELS = [
@@ -444,4 +446,614 @@ def get_all_subjects_flat() -> List[Dict[str, Any]]:
             'icon': s.get('icon', 'book')
         })
     return res
+
+
+# =====================================================================
+# AUTHORITATIVE CHAPTER METADATA REGISTRY
+# Primary knowledge & syllabus grounding for direct ChatGPT-style MCQ generation
+# =====================================================================
+CHAPTER_METADATA_REGISTRY: Dict[str, Dict[str, Any]] = {
+    # -----------------------------------------------------------------
+    # Business Economics (CA Foundation - Paper 3)
+    # -----------------------------------------------------------------
+    'ch-fnd-eco-1': {
+        'chapterId': 'ch-fnd-eco-1',
+        'chapterName': 'Introduction to Business Economics',
+        'chapterNumber': 1,
+        'subject': 'Business Economics',
+        'subjectId': 'sub-3',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Nature, scope, and fundamental decision-making principles of Business Economics under ICAI syllabus.',
+        'allowedTopics': [
+            'Meaning and Definition of Business Economics',
+            'Differences between Microeconomics and Macroeconomics',
+            'Nature of Business Economics (Science, Art, Pragmatic, Normative, Positive)',
+            'Scope of Business Economics in Operational and Environmental Decisions',
+            'Basic Economic Problems: What, How, and For Whom to Produce',
+            'Role and Function of Business Economists in Business Decision Making'
+        ],
+        'allowedConcepts': [
+            'Scarcity and choice principle',
+            'Opportunity cost and alternative foregone',
+            'Normative economics vs positive economics',
+            'Microeconomic analysis vs Macroeconomic aggregates',
+            'Capitalist, socialist, and mixed economic systems',
+            'Pragmatic decision-making under uncertainty'
+        ]
+    },
+    'ch-fnd-eco-2': {
+        'chapterId': 'ch-fnd-eco-2',
+        'chapterName': 'Theory of Demand and Supply',
+        'chapterNumber': 2,
+        'subject': 'Business Economics',
+        'subjectId': 'sub-3',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Consumer behavior, demand theory, price/income/cross elasticity, indifference curve analysis, supply theory, and demand forecasting.',
+        'allowedTopics': [
+            'Law of Demand, Demand Schedule, and Determinants of Demand',
+            'Movement along Demand Curve vs Shift in Demand Curve',
+            'Elasticity of Demand: Price, Income, Cross, and Advertisement Elasticity',
+            'Methods of Measuring Price Elasticity: Point, Arc, Total Outlay Method',
+            'Marginal Utility Analysis and Law of Diminishing Marginal Utility',
+            'Indifference Curve Analysis: Properties, Budget Line, Consumer Equilibrium',
+            'Consumer Surplus and Marshallian vs Hicksian measurement',
+            'Law of Supply, Determinants of Supply, and Elasticity of Supply',
+            'Demand Forecasting: Survey, Delphi, Statistical, and Trend Projection Methods'
+        ],
+        'allowedConcepts': [
+            'Giffen goods and Veblen effect (conspicuous consumption)',
+            'Price elasticity formula Ep = (% change in Q) / (% change in P)',
+            'Marginal Rate of Substitution (MRSxy) diminishing principle',
+            'Consumer equilibrium tangency condition: MRSxy = Px / Py',
+            'Consumer surplus = Total Utility - Total Expenditure (Area under demand curve above price)',
+            'Cross elasticity positive for substitutes, negative for complements',
+            'Income elasticity positive for normal goods, negative for inferior goods',
+            'Supply elasticity and shift factors'
+        ]
+    },
+    'ch-fnd-eco-3': {
+        'chapterId': 'ch-fnd-eco-3',
+        'chapterName': 'Theory of Production and Cost',
+        'chapterNumber': 3,
+        'subject': 'Business Economics',
+        'subjectId': 'sub-3',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Production functions, short-run laws of returns, long-run returns to scale, and short-run/long-run cost theory.',
+        'allowedTopics': [
+            'Production Function and Factors of Production (Land, Labour, Capital, Enterprise)',
+            'Short Run Law: Law of Variable Proportions (Three Stages of Production)',
+            'Long Run Law: Laws of Returns to Scale and Cobb-Douglas Production Function',
+            'Internal and External Economies and Diseconomies of Scale',
+            'Economic Cost vs Accounting Cost, Opportunity Cost, Explicit vs Implicit Cost',
+            'Short Run Cost Curves: TFC, TVC, TC, AFC, AVC, ATC, and MC',
+            'Long Run Average Cost Curve (Planning Curve / Envelope Curve)'
+        ],
+        'allowedConcepts': [
+            'Relationship between Total Product (TP), Marginal Product (MP), and Average Product (AP)',
+            'Stage II of production as economic rationality stage',
+            'Cobb-Douglas production function homogeneous of degree 1 (constant returns)',
+            'Marginal Cost formula MC = d(TC)/dQ or TC(n) - TC(n-1)',
+            'U-shaped nature of Average Cost curves due to law of variable proportions',
+            'Envelope curve (LAC) tangent to lowest points of short run SAC curves'
+        ]
+    },
+    'ch-fnd-eco-4': {
+        'chapterId': 'ch-fnd-eco-4',
+        'chapterName': 'Price Determination in Different Markets',
+        'chapterNumber': 4,
+        'subject': 'Business Economics',
+        'subjectId': 'sub-3',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Market structures, price and output equilibrium under perfect competition, monopoly, monopolistic competition, and oligopoly.',
+        'allowedTopics': [
+            'Classification of Markets based on Competition, Area, and Time',
+            'Total, Average, and Marginal Revenue relationships',
+            'Conditions for Firm Equilibrium (MR = MC and MC cuts MR from below)',
+            'Price and Output Determination under Perfect Competition (Short Run and Long Run)',
+            'Shut-down condition (Price < AVC) vs Break-even point (Price = ATC)',
+            'Monopoly: Equilibrium, Deadweight Loss, and Price Discrimination (1st, 2nd, 3rd Degree)',
+            'Monopolistic Competition: Product Differentiation, Selling Costs, Excess Capacity',
+            'Oligopoly: Kinked Demand Curve (Paul Sweezy), Cartels, Price Leadership'
+        ],
+        'allowedConcepts': [
+            'Perfect competition horizontal demand curve (Price = AR = MR)',
+            'First, second, and third degree price discrimination conditions',
+            'Paul Sweezy kinked demand curve explaining price rigidity',
+            'Excess capacity theorem under monopolistic competition',
+            'Monopoly markup and Lerner Index of monopoly power'
+        ]
+    },
+    'ch-fnd-eco-5': {
+        'chapterId': 'ch-fnd-eco-5',
+        'chapterName': 'Determination of National Income',
+        'chapterNumber': 5,
+        'subject': 'Business Economics',
+        'subjectId': 'sub-3',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Macroeconomic aggregates, measurement of national income, circular flow models, and Keynesian income determination.',
+        'allowedTopics': [
+            'National Income Aggregates: GDP, GNP, NDP, NNP at Market Price and Factor Cost',
+            'Nominal GDP vs Real GDP and GDP Deflator',
+            'Circular Flow of Income in 2-Sector, 3-Sector, and 4-Sector Open Economies',
+            'Measurement Methods: Value Added (Product), Income Method, Expenditure Method',
+            'Keynesian Determination of National Income: Aggregate Demand and Aggregate Supply',
+            'Consumption Function, Marginal Propensity to Consume (MPC), Savings Function (MPS)',
+            'Investment Multiplier and Foreign Trade Multiplier',
+            'Inflationary Gap and Deflationary Gap'
+        ],
+        'allowedConcepts': [
+            'NNP at Factor Cost is National Income',
+            'GDP Deflator = (Nominal GDP / Real GDP) * 100',
+            'Value Added = Value of Output - Intermediate Consumption',
+            'Keynesian multiplier formula K = 1 / (1 - MPC) = 1 / MPS',
+            'MPC + MPS = 1 relationship',
+            'Inflationary gap: excess of aggregate demand over full-employment output'
+        ]
+    },
+    'ch-fnd-eco-6': {
+        'chapterId': 'ch-fnd-eco-6',
+        'chapterName': 'Business Cycles',
+        'chapterNumber': 6,
+        'subject': 'Business Economics',
+        'subjectId': 'sub-3',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Phases, features, theories, and indicators of cyclical economic fluctuations.',
+        'allowedTopics': [
+            'Phases of Business Cycles: Expansion, Peak, Contraction/Recession, Trough/Depression',
+            'Characteristics and Synchronized Nature of Business Cycles',
+            'Theories of Business Cycles: Schumpeter Innovation, Hawtrey Monetary, Hayek Over-investment, Pigou Psychological, Keynesian',
+            'Economic Indicators: Leading Indicators, Lagging Indicators, Coincident Indicators'
+        ],
+        'allowedConcepts': [
+            'Schumpeter innovations causing clusters of investment',
+            'Hawtrey monetary expansion and contraction of bank credit',
+            'Leading indicators predicting turning points before occurrence',
+            'Coincident indicators moving simultaneously with aggregate activity'
+        ]
+    },
+    'ch-fnd-eco-7': {
+        'chapterId': 'ch-fnd-eco-7',
+        'chapterName': 'Public Finance',
+        'chapterNumber': 7,
+        'subject': 'Business Economics',
+        'subjectId': 'sub-3',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Role of government, market failures, public goods, fiscal policy instruments, and government deficits.',
+        'allowedTopics': [
+            'Richard Musgrave Three Fiscal Functions: Allocation, Distribution, Stabilization',
+            'Market Failure Causes: Market Power, Incomplete Information, Externalities, Public Goods',
+            'Public Goods, Pure Public Goods, Non-Rivalry, Non-Excludability, Free Rider Problem',
+            'Fiscal Policy Objectives, Instruments: Taxes, Government Spending, Public Debt',
+            'Fiscal Deficit, Revenue Deficit, Primary Deficit Definitions and Measurement'
+        ],
+        'allowedConcepts': [
+            'Allocation function addressing public goods and externalities',
+            'Positive vs Negative externalities and Pigouvian corrective taxes/subsidies',
+            'Free rider problem leading to market failure in public goods provision',
+            'Fiscal Deficit = Total Expenditure - (Revenue Receipts + Non-debt Capital Receipts)',
+            'Primary Deficit = Fiscal Deficit - Net Interest Payments'
+        ]
+    },
+    'ch-fnd-eco-8': {
+        'chapterId': 'ch-fnd-eco-8',
+        'chapterName': 'Money Market',
+        'chapterNumber': 8,
+        'subject': 'Business Economics',
+        'subjectId': 'sub-3',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Concept of money, demand and supply of money, monetary policy instruments, and RBI operations.',
+        'allowedTopics': [
+            'Functions and Characteristics of Money (Medium of Exchange, Store of Value, Unit of Account)',
+            'Demand for Money: Classical Fisher Equation, Cambridge Cash Balance, Keynesian Liquidity Preference',
+            'Three Motives for Holding Money: Transactions, Precautionary, Speculative Motive',
+            'Measures of Money Supply: M1, M2, M3, M4 (Reserve Bank of India Monetary Aggregates)',
+            'Monetary Policy Framework, Quantitative Tools (Repo, Reverse Repo, CRR, SLR, MSF, OMO)',
+            'Qualitative / Selective Credit Controls (Margin requirements, moral suasion)'
+        ],
+        'allowedConcepts': [
+            'Keynesian Liquidity Trap: interest rate elasticity becomes infinite at minimum floor',
+            'M1 = Currency with public + Demand deposits + Other deposits with RBI (Narrow Money)',
+            'M3 = M1 + Time deposits with banking system (Broad Money)',
+            'Money multiplier formula m = (1 + c) / (c + r)',
+            'Cash Reserve Ratio (CRR) vs Statutory Liquidity Ratio (SLR) mechanics'
+        ]
+    },
+    'ch-fnd-eco-9': {
+        'chapterId': 'ch-fnd-eco-9',
+        'chapterName': 'International Trade',
+        'chapterNumber': 9,
+        'subject': 'Business Economics',
+        'subjectId': 'sub-3',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Theories of international trade, trade policy instruments, WTO framework, and foreign exchange regimes.',
+        'allowedTopics': [
+            'Theories of Trade: Adam Smith Absolute Advantage, David Ricardo Comparative Advantage, Heckscher-Ohlin Factor Endowment',
+            'Trade Policy Instruments: Tariffs (Specific, Ad Valorem, Compound) and Non-Tariff Measures (Quotas, Anti-Dumping, Subsidies)',
+            'Trade Negotiations, WTO Agreements, Regional Trade Agreements (RTAs)',
+            'Exchange Rate Regimes: Fixed, Floating, Managed Float, Currency Appreciation/Depreciation',
+            'Foreign Capital Flows: FDI vs FPI differences and impacts'
+        ],
+        'allowedConcepts': [
+            'Comparative Advantage determined by opportunity cost ratios',
+            'Heckscher-Ohlin theorem: capital-abundant nation exports capital-intensive goods',
+            'Anti-dumping duty levied when goods exported at price below normal value',
+            'Nominal Exchange Rate vs Real Exchange Rate (RER)'
+        ]
+    },
+    'ch-fnd-eco-10': {
+        'chapterId': 'ch-fnd-eco-10',
+        'chapterName': 'Indian Economy',
+        'chapterNumber': 10,
+        'subject': 'Business Economics',
+        'subjectId': 'sub-3',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Structure, sectors, policies, and contemporary dynamics of the Indian economy.',
+        'allowedTopics': [
+            'Structural Composition of Indian Economy: Agriculture, Industry, and Services Trends',
+            'Agriculture: Productivity, Minimum Support Price (MSP), Agri-Credit, Food Security',
+            'Industry: Industrial Policies, Ease of Doing Business, Make in India, MSME Classification',
+            'Services Sector: IT-BPM, Financial Services, Contribution to Exports and Employment',
+            'Planning in India: Five Year Plans transition to NITI Aayog'
+        ],
+        'allowedConcepts': [
+            'Economic Reforms 1991: Liberalisation, Privatisation, and Globalisation (LPG)',
+            'MSME revised definition criteria based on Investment and Annual Turnover',
+            'Demographic dividend in Indian working-age population',
+            'Current Account Deficit (CAD) vs Fiscal Deficit twin deficit challenge'
+        ]
+    },
+
+    # -----------------------------------------------------------------
+    # Accounting (CA Foundation - Paper 1)
+    # -----------------------------------------------------------------
+    'ch-fnd-acc-1': {
+        'chapterId': 'ch-fnd-acc-1',
+        'chapterName': 'Theoretical Framework',
+        'chapterNumber': 1,
+        'subject': 'Accounting',
+        'subjectId': 'sub-1',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Fundamental accounting concepts, principles, conventions, policies, capital vs revenue classification, and accounting standards.',
+        'allowedTopics': [
+            'Meaning and Scope of Accounting, Objectives, and Users of Financial Statements',
+            'Accounting Concepts: Going Concern, Accrual, Consistency, Money Measurement, Periodicity',
+            'Accounting Conventions: Prudence (Conservatism), Materiality, Substance Over Form',
+            'Capital and Revenue Expenditures and Receipts',
+            'Contingent Assets and Contingent Liabilities (AS 29 / Ind AS 37)',
+            'Accounting Policies: Selection, Changes, and Disclosure (AS 1)'
+        ],
+        'allowedConcepts': [
+            'Accrual basis vs Cash basis of accounting',
+            'Prudence principle: recognize all prospective losses but do not anticipate gains',
+            'Capital expenditure results in enduring benefit to the business',
+            'Contingent liability disclosed in notes to accounts, not recognized in balance sheet',
+            'Fundamental accounting assumptions: Going concern, Consistency, Accrual'
+        ]
+    },
+    'ch-fnd-acc-2': {
+        'chapterId': 'ch-fnd-acc-2',
+        'chapterName': 'Accounting Process',
+        'chapterNumber': 2,
+        'subject': 'Accounting',
+        'subjectId': 'sub-1',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Journal entries, ledger posting, subsidiary books, trial balance, and rectification of accounting errors.',
+        'allowedTopics': [
+            'Rules of Debit and Credit: Traditional (Golden Rules) vs Modern (Accounting Equation Approach)',
+            'Recording Transactions in Books of Original Entry (Journal)',
+            'Ledger Posting and Balancing of Ledger Accounts',
+            'Subsidiary Books: Cash Book, Purchases Book, Sales Book, Return Books, Journal Proper',
+            'Trial Balance Preparation, Objectives, and Limitations',
+            'Rectification of Errors: Errors of Omission, Commission, Principle, and Compensating Errors',
+            'Suspense Account Creation and Rectification after Trial Balance'
+        ],
+        'allowedConcepts': [
+            'Golden rules: Debit the receiver / Credit the giver; Debit what comes in / Credit what goes out; Debit all expenses / Credit all incomes',
+            'Error of principle does not affect trial balance agreement',
+            'Rectification before vs after trial balance preparation',
+            'Petty cash book imprest system'
+        ]
+    },
+    'ch-fnd-acc-3': {
+        'chapterId': 'ch-fnd-acc-3',
+        'chapterName': 'Bank Reconciliation Statement (BRS)',
+        'chapterNumber': 3,
+        'subject': 'Accounting',
+        'subjectId': 'sub-1',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Reconciliation of bank balance as per Cash Book with balance as per Bank Pass Book.',
+        'allowedTopics': [
+            'Need and Purpose of Bank Reconciliation Statement',
+            'Causes of Differences: Timing Differences, Direct Transactions by Bank, Errors in Cash Book or Pass Book',
+            'Preparation of BRS without adjusting Cash Book balance',
+            'Preparation of Adjusted Cash Book before preparing BRS',
+            'Overdraft balances reconciliation (favourable vs unfavourable)'
+        ],
+        'allowedConcepts': [
+            'Cheques issued but not presented for payment',
+            'Cheques deposited into bank but not yet cleared/collected',
+            'Direct credit into bank by customers, interest credited by bank',
+            'Bank charges and direct debits not recorded in cash book',
+            'Adjusted cash book records only errors and omissions in customer cash book before BRS'
+        ]
+    },
+    'ch-fnd-acc-4': {
+        'chapterId': 'ch-fnd-acc-4',
+        'chapterName': 'Inventories',
+        'chapterNumber': 4,
+        'subject': 'Accounting',
+        'subjectId': 'sub-1',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Inventory valuation principles under ICAI AS 2, cost formulas, and inventory systems.',
+        'allowedTopics': [
+            'Meaning of Inventory and Applicability of AS 2 (Valuation of Inventories)',
+            'Basis of Inventory Valuation: Lower of Cost and Net Realizable Value (NRV)',
+            'Components of Cost of Inventory: Costs of Purchase, Costs of Conversion, Other Costs',
+            'Inventory Systems: Periodic Inventory System vs Perpetual Inventory System',
+            'Cost Formulas: Specific Identification, FIFO (First-In-First-Out), Weighted Average Price'
+        ],
+        'allowedConcepts': [
+            'Lower of Cost and Net Realizable Value (NRV) rule under AS 2',
+            'NRV = Estimated Selling Price less Estimated Cost of Completion and Selling Costs',
+            'LIFO is prohibited under ICAI AS 2 and Ind AS 2',
+            'Abnormal waste excluded from inventory cost and recognized as expense'
+        ]
+    },
+    'ch-fnd-acc-5': {
+        'chapterId': 'ch-fnd-acc-5',
+        'chapterName': 'Depreciation and Amortisation',
+        'chapterNumber': 5,
+        'subject': 'Accounting',
+        'subjectId': 'sub-1',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Methods of depreciation, change in method, disposal of depreciable assets under AS 10.',
+        'allowedTopics': [
+            'Concept and Factors Determining Depreciation (Cost, Residual Value, Useful Life)',
+            'Methods of Depreciation: Straight Line Method (SLM), Written Down Value Method (WDV)',
+            'Production Unit Method, Sum-of-the-Years-Digits Method, Depletion Method',
+            'Accounting Treatment: Provision for Depreciation Account vs Asset Account',
+            'Disposal of Asset and Preparation of Asset Disposal Account',
+            'Accounting for Change in Depreciation Method (Change in Accounting Estimate under AS 10)'
+        ],
+        'allowedConcepts': [
+            'Depreciation is systematic allocation of depreciable amount over useful life',
+            'SLM Depreciation = (Cost - Residual Value) / Useful Life',
+            'WDV depreciation rate formula r = 1 - (s/c)^(1/n)',
+            'Change in depreciation method treated prospectively as change in accounting estimate under revised AS 10'
+        ]
+    },
+
+    # -----------------------------------------------------------------
+    # Business Law (CA Foundation - Paper 2)
+    # -----------------------------------------------------------------
+    'ch-fnd-law-1': {
+        'chapterId': 'ch-fnd-law-1',
+        'chapterName': 'Indian Regulatory Framework',
+        'chapterNumber': 1,
+        'subject': 'Business Law',
+        'subjectId': 'sub-2',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Overview of Indian legal framework, law-making process, hierarchy of courts, and regulatory bodies.',
+        'allowedTopics': [
+            'Sources of Indian Law (Constitution, Statutes, Precedents, Customs)',
+            'How a Bill Becomes an Act (Parliamentary Legislative Process)',
+            'Structure and Hierarchy of Indian Judicial System (Supreme Court, High Courts, District/Subordinate Courts)',
+            'Key Regulatory Bodies in India (MCA, SEBI, RBI, CCI, IBBI)'
+        ],
+        'allowedConcepts': [
+            'Stare decisis and doctrine of binding precedent',
+            'Primary legislation (Acts) vs Subordinate/Delegated legislation (Rules, Regulations)',
+            'Civil law vs Criminal law distinctions',
+            'Appellate jurisdiction and powers of Supreme Court under Constitution'
+        ]
+    },
+    'ch-fnd-law-2': {
+        'chapterId': 'ch-fnd-law-2',
+        'chapterName': 'The Indian Contract Act, 1872',
+        'chapterNumber': 2,
+        'subject': 'Business Law',
+        'subjectId': 'sub-2',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Nature of contract, offer and acceptance, consideration, capacity to contract, free consent, legality of object, void agreements, performance, and breach.',
+        'allowedTopics': [
+            'Essential Elements of a Valid Contract (Section 10)',
+            'Offer/Proposal and Acceptance: Rules, Communication, and Revocation (Sections 3-9)',
+            'Consideration: Rules, Quid Pro Quo, Exceptions to No Consideration No Contract (Section 25)',
+            'Capacity of Parties: Minor agreements, Persons of Unsound Mind, Disqualified Persons (Section 11)',
+            'Free Consent: Coercion, Undue Influence, Fraud, Misrepresentation, and Mistake (Sections 13-22)',
+            'Legality of Object and Consideration, Void Agreements (Sections 23-30)',
+            'Contingent Contracts and Quasi Contracts (Sections 31-36, 68-72)',
+            'Performance of Contracts, Discharge of Contract, and Remedies for Breach of Contract (Sections 73-75)'
+        ],
+        'allowedConcepts': [
+            'Agreement void ab initio: Mohori Bibee v. Dharmodas Ghose (Minor contract)',
+            'Privity of contract and exceptions (Trust, Family settlement)',
+            'Coercion (Sec 15) vs Undue Influence (Sec 16)',
+            'Fraud (Sec 17) vs Misrepresentation (Sec 18)',
+            'Liquidated damages vs Penalty under Indian Law (Section 74 - reasonable compensation)',
+            'Hadley v. Baxendale rule on ordinary vs special damages'
+        ]
+    },
+    'ch-fnd-law-3': {
+        'chapterId': 'ch-fnd-law-3',
+        'chapterName': 'The Sale of Goods Act, 1930',
+        'chapterNumber': 3,
+        'subject': 'Business Law',
+        'subjectId': 'sub-2',
+        'examLevel': 'CA Foundation',
+        'examLevelId': 'foundation',
+        'chapterDescription': 'Formation of contract of sale, conditions and warranties, transfer of ownership, and unpaid seller rights.',
+        'allowedTopics': [
+            'Contract of Sale of Goods, Sale vs Agreement to Sell, Subject Matter of Contract',
+            'Conditions and Warranties: Express and Implied Conditions, Implied Warranties (Sections 11-17)',
+            'Doctrine of Caveat Emptor and Exceptions to Caveat Emptor',
+            'Transfer of Ownership and Title: Passing of Property, Risk Follows Ownership (Sections 18-26)',
+            'Transfer of Title by Non-Owners (Nemo Dat Quod Non Habet and Exceptions)',
+            'Rights of Unpaid Seller: Right of Lien, Stoppage in Transit, Resale (Sections 45-54)'
+        ],
+        'allowedConcepts': [
+            'Condition goes to the root of contract, breach allows repudiation; Warranty breach allows damages only',
+            'Caveat Emptor: Let the buyer beware',
+            'Nemo dat quod non habet rule and mercantile agent exception',
+            'Unpaid seller lien vs stoppage in transit (transit requires seller parted with possession and buyer insolvent)'
+        ]
+    }
+}
+
+
+def get_authoritative_chapter_metadata(
+    chapter_id: Optional[str] = None,
+    chapter_name: Optional[str] = None,
+    subject: Optional[str] = None,
+    exam_level: Optional[str] = None,
+    data: Optional[Dict[str, Any]] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Resolve authoritative chapter metadata from canonical registry or platform database.
+    Guarantees that generation prompts receive strict syllabus taxonomy, allowed topics,
+    and core concepts.
+    Returns None if chapter_id or chapter cannot be resolved (triggering CHAPTER_METADATA_MISSING).
+    """
+    clean_ch_id = str(chapter_id or '').strip()
+    clean_ch_name = str(chapter_name or '').strip().lower()
+    clean_sub = str(subject or '').strip().lower()
+    clean_lvl = str(exam_level or '').strip().lower()
+
+    # 1. Direct registry lookup by canonical chapterId
+    if clean_ch_id and clean_ch_id in CHAPTER_METADATA_REGISTRY:
+        meta = dict(CHAPTER_METADATA_REGISTRY[clean_ch_id])
+        if exam_level:
+            meta['examLevel'] = exam_level
+        if subject:
+            meta['subject'] = subject
+        return meta
+
+    # 2. Check in data['subjects'] if dynamic chapters exist in platform store
+    if data and isinstance(data, dict):
+        subs = data.get('subjects', [])
+        for s in subs:
+            if not isinstance(s, dict):
+                continue
+            s_name = s.get('name', '')
+            s_id = s.get('id', '')
+            for ch in s.get('chapters', []):
+                if not isinstance(ch, dict):
+                    continue
+                if (clean_ch_id and ch.get('id') == clean_ch_id) or \
+                   (clean_ch_name and ch.get('name', '').strip().lower() == clean_ch_name):
+                    return {
+                        'chapterId': ch.get('id') or clean_ch_id or f"ch-{int(time.time()*1000)}",
+                        'chapterName': ch.get('name') or chapter_name or 'General',
+                        'chapterNumber': ch.get('number', 1),
+                        'subject': s_name or subject or 'Accounting',
+                        'subjectId': s_id,
+                        'examLevel': s.get('level') or exam_level or 'CA Foundation',
+                        'examLevelId': s.get('levelId') or 'foundation',
+                        'chapterDescription': ch.get('description') or f"Syllabus scope and conceptual guidelines for {ch.get('name')}.",
+                        'allowedTopics': ch.get('allowedTopics') or [ch.get('name') or 'General Topics'],
+                        'allowedConcepts': ch.get('allowedConcepts') or [ch.get('name') or 'Core Principles']
+                    }
+
+    # 3. Lookup across CANONICAL_SUBJECTS chapters
+    for s in CANONICAL_SUBJECTS:
+        s_name = s.get('name', '')
+        s_id = s.get('id', '')
+        s_lvl = s.get('level', 'CA Foundation')
+        s_lvl_id = s.get('levelId', 'foundation')
+
+        # If subject was provided, check compatibility
+        if clean_sub and clean_sub not in s_name.lower() and s_name.lower() not in clean_sub:
+            # Check if this subject contains the requested chapter_id
+            ch_ids = [ch['id'] for ch in s.get('chapters', [])]
+            if clean_ch_id and clean_ch_id not in ch_ids:
+                continue
+
+        for ch in s.get('chapters', []):
+            ch_id = ch.get('id', '')
+            ch_name = ch.get('name', '')
+            matched = False
+
+            if clean_ch_id and ch_id.lower() == clean_ch_id.lower():
+                matched = True
+            elif clean_ch_name:
+                if clean_ch_name == ch_name.lower() or clean_ch_name in ch_name.lower() or ch_name.lower() in clean_ch_name:
+                    matched = True
+                else:
+                    cand_tokens = {w[:5] for w in re.findall(r'\b[a-zA-Z]{4,}\b', clean_ch_name)}
+                    ch_tokens = {w[:5] for w in re.findall(r'\b[a-zA-Z]{4,}\b', ch_name.lower())}
+                    if cand_tokens and ch_tokens and cand_tokens.intersection(ch_tokens):
+                        matched = True
+
+            if matched:
+                # If present in registry under canonical ID, return rich registry record
+                if ch_id in CHAPTER_METADATA_REGISTRY:
+                    meta = dict(CHAPTER_METADATA_REGISTRY[ch_id])
+                    return meta
+
+                # Synthesize canonical metadata
+                return {
+                    'chapterId': ch_id,
+                    'chapterName': ch_name,
+                    'chapterNumber': ch.get('number', 1),
+                    'subject': s_name,
+                    'subjectId': s_id,
+                    'examLevel': s_lvl,
+                    'examLevelId': s_lvl_id,
+                    'chapterDescription': f"Authoritative ICAI syllabus study scope for Chapter {ch.get('number')}: {ch_name}.",
+                    'allowedTopics': [
+                        f"Core principles and statutory definitions of {ch_name}",
+                        f"Conceptual applications and rules under {ch_name}",
+                        f"Standard classifications and provisions of {ch_name}"
+                    ],
+                    'allowedConcepts': [
+                        f"Theoretical framework of {ch_name}",
+                        f"Practical and regulatory requirements of {ch_name}",
+                        f"Analytical problem solving for {ch_name}"
+                    ]
+                }
+
+    # 4. Fallback to first chapter of subject if subject is valid but no chapter specified
+    if not clean_ch_id and not clean_ch_name and clean_sub:
+        for s in CANONICAL_SUBJECTS:
+            s_name = s.get('name', '')
+            if clean_sub in s_name.lower() or s_name.lower() in clean_sub:
+                chs = s.get('chapters', [])
+                if chs:
+                    first_ch = chs[0]
+                    first_ch_id = first_ch.get('id', '')
+                    if first_ch_id in CHAPTER_METADATA_REGISTRY:
+                        return dict(CHAPTER_METADATA_REGISTRY[first_ch_id])
+                    return {
+                        'chapterId': first_ch_id,
+                        'chapterName': first_ch.get('name', ''),
+                        'chapterNumber': first_ch.get('number', 1),
+                        'subject': s_name,
+                        'subjectId': s.get('id', ''),
+                        'examLevel': s.get('level', 'CA Foundation'),
+                        'examLevelId': s.get('levelId', 'foundation'),
+                        'chapterDescription': f"Authoritative ICAI syllabus study scope for {first_ch.get('name')}.",
+                        'allowedTopics': [f"Core principles of {first_ch.get('name')}"],
+                        'allowedConcepts': [f"Key concepts of {first_ch.get('name')}"]
+                    }
+
+    # 5. If neither chapter_id nor chapter_name matched any canonical chapter
+    return None
+
 

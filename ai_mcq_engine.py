@@ -6,6 +6,7 @@ from typing import Dict, Any, List, Optional, Tuple, Set
 
 import ai_provider_manager
 import ai_document_indexer
+import syllabus_hierarchy
 
 # ----------------- Duplicate Detection -----------------
 
@@ -175,16 +176,20 @@ MANDATORY RULES:
 def build_generation_user_prompt(
     subject: str,
     exam_level: str,
-    topic: str,
-    difficulty: str,
-    question_category: str,
-    question_speed: str,
-    context: str,
-    previous_concepts_summary: str,
-    slot_number: int,
-    total_count: int,
+    topic: str = '',
+    difficulty: str = 'ICAI Exam Standard',
+    question_category: str = 'Direct Questions',
+    question_speed: str = 'Quick',
+    context: str = '',
+    previous_concepts_summary: str = '',
+    slot_number: int = 1,
+    total_count: int = 1,
     rejected_questions: Optional[List[str]] = None,
-    attempt_number: int = 1
+    attempt_number: int = 1,
+    chapter_metadata: Optional[Dict[str, Any]] = None,
+    chapter_name: str = '',
+    chapter_id: str = '',
+    admin_description: str = ''
 ) -> str:
     focal_angles = [
         "Core definitions, essential terminology, and statutory meanings",
@@ -209,7 +214,7 @@ STRICT PROHIBITION (PREVIOUS ATTEMPT REJECTED AS DUPLICATE):
 The following question(s) were ALREADY proposed and REJECTED because they duplicated existing questions:
 {items}
 You MUST NOT generate or rephrase questions testing those exact facts.
-Select a completely DIFFERENT sentence, rule, or concept from the context below.
+Select a completely DIFFERENT concept, section, or formula from this chapter's syllabus.
 """
 
     prev_clause = ""
@@ -220,21 +225,55 @@ QUESTIONS ALREADY GENERATED IN THIS EXAM SET (DO NOT DUPLICATE):
 You MUST generate a question testing a DIFFERENT concept or provision than all of the above.
 """
 
-    return f"""Subject: {subject}
-Exam Level: {exam_level}
-Topic / Chapter: {topic}
-Difficulty Level: {difficulty}
-Question Category: {question_category}
-Question Speed: {question_speed}
+    # Resolve chapter syllabus information from chapter_metadata if present
+    ch_id = chapter_id
+    ch_name = chapter_name or topic or 'General'
+    ch_desc = f"Authoritative ICAI syllabus coverage for {ch_name}."
+    allowed_topics_str = f"- {ch_name}"
+    allowed_concepts_str = f"- Core principles and provisions of {ch_name}"
+
+    if chapter_metadata and isinstance(chapter_metadata, dict):
+        ch_id = chapter_metadata.get('chapterId') or ch_id
+        ch_name = chapter_metadata.get('chapterName') or ch_name
+        ch_desc = chapter_metadata.get('chapterDescription') or ch_desc
+        t_list = chapter_metadata.get('allowedTopics') or []
+        c_list = chapter_metadata.get('allowedConcepts') or []
+        if t_list:
+            allowed_topics_str = "\n".join([f"- {t}" for t in t_list[:6]])
+        if c_list:
+            allowed_concepts_str = "\n".join([f"- {c}" for c in c_list[:6]])
+
+    guidance_clause = ""
+    if admin_description and admin_description.strip():
+        guidance_clause = f"\nAdministrative Focus Guidance:\n\"\"\"{admin_description.strip()[:400]}\"\"\"\n"
+
+    # Legacy context fallback (only if non-empty and not the default stub)
+    legacy_context_clause = ""
+    if context and context.strip() and not context.startswith("Standard ICAI syllabus concepts"):
+        legacy_context_clause = f"\nReference Notes:\n\"\"\"\n{context.strip()[:1200]}\n\"\"\"\n"
+
+    return f"""Exam Level: {exam_level}
+Subject: {subject}
+Authoritative Chapter: {ch_name}{f' (ID: {ch_id})' if ch_id else ''}
+Chapter Scope: {ch_desc}
+
+Allowed Syllabus Topics for this Chapter:
+{allowed_topics_str}
+
+Core Conceptual Focus:
+{allowed_concepts_str}
+{guidance_clause}{legacy_context_clause}
 Question Slot: {slot_number} of {total_count} (Attempt: {attempt_number})
 Focal Angle for this Slot: {slot_angle}
-
-Source Material Context (Extracted from Syllabus Documents):
-\"\"\"
-{context}
-\"\"\"
+Category: {question_category}
+Target Speed: {question_speed}
+Difficulty: {difficulty}
 {prev_clause}{rejected_clause}
-Task: Create exactly 1 original CA-style MCQ matching category '{question_category}', speed '{question_speed}', and angle '{slot_angle}'.
+Task: Using your expert knowledge of the ICAI syllabus and statutory reasoning, formulate exactly 1 original, challenging CA-style MCQ testing '{ch_name}'.
+Rules:
+- Derive all question logic, scenarios, and options from authoritative syllabus principles.
+- Do NOT copy or paraphrase any prompt guidance verbatim.
+- Respond with ONLY the required JSON object.
 
 Respond with ONLY this JSON object:
 {{
@@ -546,7 +585,7 @@ def validate_mcq_locally_deterministic(
 
 def generate_single_mcq(
     subject: str,
-    topic: str,
+    topic: str = '',
     exam_level: str = 'CA Foundation',
     difficulty: str = 'ICAI Exam Standard',
     question_category: str = 'Direct Questions',
@@ -560,20 +599,39 @@ def generate_single_mcq(
     rejected_questions: Optional[List[str]] = None,
     attempt_number: int = 1,
     job_id: Optional[str] = None,
-    question_number: Optional[int] = None
+    question_number: Optional[int] = None,
+    chapter_metadata: Optional[Dict[str, Any]] = None,
+    chapter: str = '',
+    chapter_id: str = '',
+    admin_description: str = ''
 ) -> Tuple[Dict[str, Any], str, str]:
     """
-    Generate a single candidate MCQ matching category and speed constraints.
+    Generate a single candidate MCQ matching category, speed, and chapter syllabus constraints.
     Returns (parsed_json_dict, provider_id, model_name).
     """
-    context_text = f"Standard ICAI syllabus concepts for {subject} - {topic}"
+    # 1. Resolve chapter metadata if not explicitly provided
+    if not chapter_metadata:
+        chapter_metadata = syllabus_hierarchy.get_authoritative_chapter_metadata(
+            chapter_id=chapter_id,
+            chapter_name=chapter or topic,
+            subject=subject,
+            exam_level=exam_level,
+            data=data
+        )
+
+    if chapter_metadata:
+        chapter_id = chapter_metadata.get('chapterId', chapter_id)
+        chapter = chapter_metadata.get('chapterName', chapter)
+        subject = chapter_metadata.get('subject', subject)
+        exam_level = chapter_metadata.get('examLevel', exam_level)
+
+    # 2. Legacy context handling (if any caller still passes context_chunks)
+    context_text = ""
     source_doc_id = None
     source_page = None
-
     if context_chunks:
         selected_chunk = context_chunks[0]
-        raw_text = selected_chunk.get('text', context_text)
-        # On retries, slice a shifted window into long text to give the LLM alternative sentences
+        raw_text = selected_chunk.get('text', '')
         if len(raw_text) > 1200 and attempt_number > 1:
             offset = ((attempt_number - 1) * 450) % max(1, len(raw_text) - 900)
             context_text = raw_text[offset:offset + 2500]
@@ -605,7 +663,11 @@ def generate_single_mcq(
         slot_number=slot_number,
         total_count=total_count,
         rejected_questions=rejected_questions,
-        attempt_number=attempt_number
+        attempt_number=attempt_number,
+        chapter_metadata=chapter_metadata,
+        chapter_name=chapter,
+        chapter_id=chapter_id,
+        admin_description=admin_description
     )
 
     # Mild temperature boost on retry breaks token-greedy repetitive duplicate generation
@@ -647,6 +709,10 @@ def generate_single_mcq(
     q_data['category'] = question_category
     q_data['difficulty'] = difficulty
     q_data['estimatedThinkingLevel'] = question_speed
+    if chapter_id:
+        q_data['chapterId'] = chapter_id
+    if chapter:
+        q_data['chapter'] = chapter
     q_data['sourceDocId'] = source_doc_id
     q_data['sourcePage'] = source_page
 
@@ -741,8 +807,8 @@ def validate_mcq_independently(
 
 def generate_exact_mcqs_pipeline(
     subject: str,
-    topic: str,
-    count: int,
+    topic: str = '',
+    count: int = 5,
     exam_level: str = 'CA Foundation',
     difficulty: str = 'ICAI Exam Standard',
     question_category: str = 'Direct Questions',
@@ -760,30 +826,17 @@ def generate_exact_mcqs_pipeline(
     chapter: str = '',
     chapter_id: str = '',
     on_question_verified: Optional[Any] = None,
-    admin_description: str = ''
+    admin_description: str = '',
+    chapter_metadata: Optional[Dict[str, Any]] = None
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
-    Resilient generation pipeline executing an independent question slot lifecycle.
+    Resilient knowledge-based generation pipeline executing an independent question slot lifecycle.
+    Decoupled from PDF/RAG chunk retrieval. Grounded strictly in authoritative chapter metadata.
     Guarantees that a single failing question NEVER freezes or blocks the remaining batch.
     Terminates in strictly bounded time with complete failure isolation.
     """
     if existing_questions is None:
         existing_questions = []
-    if source_documents is None:
-        source_documents = []
-
-    # Retrieve relevant source chunks strictly matching chapter if specified
-    relevant_chunks = ai_document_indexer.retrieve_relevant_chunks(
-        documents=source_documents,
-        query_topic=topic or chapter,
-        subject=subject,
-        subject_id=subject_id,
-        exam_level=exam_level,
-        exam_level_id=exam_level_id,
-        chapter=chapter,
-        chapter_id=chapter_id,
-        max_chunks=8
-    )
 
     generated_questions: List[Dict[str, Any]] = []
     concept_summaries: List[str] = []
@@ -817,26 +870,33 @@ def generate_exact_mcqs_pipeline(
         'endTime': None
     }
 
-    # Strict Chapter Lock: If chapter/chapter_id requested and source documents exist for subject,
-    # never silently fall back to other chapters of the subject; fail fast with NO_VALID_CHAPTER_CONTEXT.
-    if (chapter or chapter_id) and source_documents:
-        subject_docs = [
-            d for d in source_documents
-            if d.get('subject', '').lower() == subject.lower() or (subject_id and d.get('subjectId') == subject_id)
-        ]
-        if subject_docs and not relevant_chunks:
-            err_msg = f"NO_VALID_CHAPTER_CONTEXT: No indexed documents found matching chapter '{chapter or chapter_id}' for subject '{subject}'."
-            print(f"[CHAPTER_LOCK_ERROR] {err_msg}", flush=True)
-            for s in question_statuses:
-                s['status'] = 'failed'
-                s['error'] = err_msg
-            metrics['failedCount'] = count
-            metrics['endTime'] = time.time()
-            metrics['durationSeconds'] = round(metrics['endTime'] - metrics['startTime'], 1)
-            metrics['error'] = err_msg
-            return [], metrics
+    # 1. Authoritative Chapter Metadata Resolution & Fail-Fast
+    resolved_ch_meta = chapter_metadata or syllabus_hierarchy.get_authoritative_chapter_metadata(
+        chapter_id=chapter_id,
+        chapter_name=chapter or topic,
+        subject=subject,
+        exam_level=exam_level,
+        data=data
+    )
 
-    print(f"[BATCH START] batchId={job_id} total={count} category={question_category} speed={question_speed}", flush=True)
+    if not resolved_ch_meta:
+        err_msg = f"CHAPTER_METADATA_MISSING: Authoritative syllabus metadata is missing or could not be resolved for chapterId='{chapter_id}', chapter='{chapter}', subject='{subject}'."
+        print(f"[CHAPTER_METADATA_ERROR] {err_msg}", flush=True)
+        for s in question_statuses:
+            s['status'] = 'failed'
+            s['error'] = err_msg
+        metrics['failedCount'] = count
+        metrics['endTime'] = time.time()
+        metrics['durationSeconds'] = round(metrics['endTime'] - metrics['startTime'], 1)
+        metrics['error'] = err_msg
+        return [], metrics
+
+    canonical_ch_id = resolved_ch_meta['chapterId']
+    canonical_ch_name = resolved_ch_meta['chapterName']
+    canonical_subject = resolved_ch_meta.get('subject', subject)
+    canonical_exam_level = resolved_ch_meta.get('examLevel', exam_level)
+
+    print(f"[BATCH START] batchId={job_id} total={count} chapter='{canonical_ch_name}' ({canonical_ch_id}) category={question_category} speed={question_speed}", flush=True)
 
     MAX_RETRIES_PER_SLOT = 2  # up to 3 attempts per slot
     SLOT_MAX_TIMEOUT = 50.0   # Watchdog timeout per question slot
@@ -851,11 +911,6 @@ def generate_exact_mcqs_pipeline(
 
         print(f"[QUESTION_START] batchId={job_id} questionNumber={slot_idx} attempt=1 concurrentActiveRequests=1", flush=True)
         print(f"[QUESTION START] batchId={job_id} questionNumber={slot_idx} attempt=1", flush=True)
-
-        chunk_slice = None
-        if relevant_chunks:
-            chunk_idx = (slot_idx - 1) % len(relevant_chunks)
-            chunk_slice = [relevant_chunks[chunk_idx]]
 
         slot_gemini_called = [False]
         def _make_on_provider_event(s_idx, s_status_obj):
@@ -904,12 +959,6 @@ def generate_exact_mcqs_pipeline(
         slot_prov_event_cb = _make_on_provider_event(slot_idx, slot_status_obj)
 
         for attempt in range(MAX_RETRIES_PER_SLOT + 1):
-            # Rotate chunk index across attempts so retries receive alternative context
-            chunk_slice = None
-            if relevant_chunks:
-                chunk_idx = ((slot_idx - 1) + attempt) % len(relevant_chunks)
-                chunk_slice = [relevant_chunks[chunk_idx]]
-
             # Check slot watchdog timeout
             elapsed = time.time() - slot_start_time
             if elapsed > SLOT_MAX_TIMEOUT:
@@ -945,13 +994,15 @@ def generate_exact_mcqs_pipeline(
                 # Provide all generated questions in batch as well as rejected attempts
                 batch_prev_stems = [q.get('text') for q in generated_questions if q.get('text')]
                 q_candidate, gen_prov, gen_model = generate_single_mcq(
-                    subject=subject,
+                    subject=canonical_subject,
                     topic=topic,
-                    exam_level=exam_level,
+                    exam_level=canonical_exam_level,
                     difficulty=difficulty,
                     question_category=question_category,
                     question_speed=question_speed,
-                    context_chunks=chunk_slice,
+                    chapter_metadata=resolved_ch_meta,
+                    chapter=canonical_ch_name,
+                    chapter_id=canonical_ch_id,
                     previous_concepts=batch_prev_stems,
                     data=data,
                     slot_number=slot_idx,
@@ -960,7 +1011,8 @@ def generate_exact_mcqs_pipeline(
                     rejected_questions=list(slot_rejected_stems),
                     attempt_number=attempt + 1,
                     job_id=job_id,
-                    question_number=slot_idx
+                    question_number=slot_idx,
+                    admin_description=admin_description
                 )
                 gen_duration = (time.time() - gen_start_time) * 1000.0
                 print(f"[QUESTION_GENERATED] batchId={job_id} questionNumber={slot_idx} attempt={attempt+1} provider={gen_prov} model={gen_model} duration={gen_duration:.1f}ms", flush=True)
@@ -995,9 +1047,9 @@ def generate_exact_mcqs_pipeline(
             val_start_time = time.time()
             is_valid, val_reason, suggested_fix, val_prov = validate_mcq_independently(
                 q_data=q_candidate,
-                subject=subject,
+                subject=canonical_subject,
                 topic=topic,
-                exam_level=exam_level,
+                exam_level=canonical_exam_level,
                 difficulty=difficulty,
                 question_category=question_category,
                 question_speed=question_speed,
@@ -1005,8 +1057,8 @@ def generate_exact_mcqs_pipeline(
                 current_batch_questions=generated_questions,
                 data=data,
                 on_provider_event=slot_prov_event_cb,
-                chapter=chapter,
-                chapter_id=chapter_id,
+                chapter=canonical_ch_name,
+                chapter_id=canonical_ch_id,
                 admin_description=admin_description
             )
             val_duration = (time.time() - val_start_time) * 1000.0
@@ -1070,6 +1122,8 @@ def generate_exact_mcqs_pipeline(
                 'category': question_category,
                 'difficulty': difficulty,
                 'estimatedThinkingLevel': question_speed,
+                'chapter': canonical_ch_name,
+                'chapterId': canonical_ch_id,
                 'isDraft': False,
                 'aiSuggestedAnswer': c_ans,
                 'isDuplicate': False,

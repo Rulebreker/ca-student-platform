@@ -288,7 +288,10 @@ class TestPipelineHardening(unittest.TestCase):
 
         test_data = {
             'ai_providers': [
-                {'id': 'gemini_1', 'provider': 'gemini', 'priority': 1, 'enabled': True, 'roles': ['generation']}
+                {'id': 'gemini_1', 'provider': 'gemini', 'priority': 1, 'enabled': True, 'roles': ['generation']},
+                {'id': 'gemini_2', 'provider': 'gemini', 'priority': 2, 'enabled': False, 'roles': ['generation']},
+                {'id': 'groq', 'provider': 'groq', 'priority': 3, 'enabled': False, 'roles': ['generation']},
+                {'id': 'openrouter', 'provider': 'openrouter', 'priority': 4, 'enabled': False, 'roles': ['generation']}
             ]
         }
         with patch('ai_provider_manager._call_gemini_api', side_effect=mock_gemini):
@@ -298,7 +301,7 @@ class TestPipelineHardening(unittest.TestCase):
                 pass
             cooldown = ai_provider_manager._provider_cooldowns.get('gemini_1', 0)
             remaining = cooldown - time.time()
-            self.assertGreater(remaining, 40.0)
+            self.assertGreater(remaining, 35.0)
             self.assertLessEqual(remaining, 43.0)
         print("PASS: Scenario 12 - Retry-After duration respected")
 

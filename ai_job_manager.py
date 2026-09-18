@@ -9,6 +9,7 @@ from typing import Dict, Any, List, Optional, Tuple
 import ai_provider_manager
 import ai_document_indexer
 import ai_mcq_engine
+import syllabus_hierarchy
 
 # Active jobs in memory cache
 _active_jobs: Dict[str, Dict[str, Any]] = {}
@@ -320,7 +321,25 @@ def _run_generation_job_worker(
         question_speed = str(params.get('questionSpeed') or job_record.get('questionSpeed') or 'Quick').strip()
         admin_description = str(params.get('description') or params.get('adminDescription') or '').strip()
 
-        sub_id = params.get('subjectId')
+        # Resolve Authoritative Chapter Metadata
+        chapter_metadata = syllabus_hierarchy.get_authoritative_chapter_metadata(
+            chapter_id=chapter_id,
+            chapter_name=chapter or params.get('topic', ''),
+            subject=params.get('subject', ''),
+            exam_level=params.get('examLevel', ''),
+            data=data
+        )
+        if chapter_metadata:
+            chapter = chapter_metadata.get('chapterName', chapter)
+            chapter_id = chapter_metadata.get('chapterId', chapter_id)
+            if chapter_metadata.get('subjectId'):
+                sub_id = chapter_metadata['subjectId']
+            if chapter_metadata.get('subject') and not params.get('subject'):
+                params['subject'] = chapter_metadata['subject']
+            if chapter_metadata.get('examLevel') and not params.get('examLevel'):
+                params['examLevel'] = chapter_metadata['examLevel']
+
+        sub_id = params.get('subjectId') or sub_id
         if not sub_id:
             sub_map = {
                 'Accounting': 'sub-1',
@@ -454,7 +473,8 @@ def _run_generation_job_worker(
             chapter=chapter,
             chapter_id=chapter_id,
             on_question_verified=_on_question_verified_cb,
-            admin_description=admin_description
+            admin_description=admin_description,
+            chapter_metadata=chapter_metadata
         )
 
         completed_iso = datetime.now(timezone.utc).isoformat()
