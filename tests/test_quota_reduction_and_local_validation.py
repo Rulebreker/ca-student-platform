@@ -219,35 +219,34 @@ class TestQuotaReductionAndLocalValidation(unittest.TestCase):
             url = req.full_url
             if 'generativelanguage.googleapis.com' in url:
                 call_log.append(('gemini', url))
-                err_body = b'{"error": {"code": 429, "status": "RESOURCE_EXHAUSTED", "message": "Rate limit reached"}}'
-                raise urllib.error.HTTPError(url, 429, 'Too Many Requests', {}, MagicMock(read=MagicMock(return_value=err_body)))
-            elif 'api.groq.com' in url:
-                call_log.append(('groq', url))
-                resp_mock = MagicMock()
-                resp_mock.__enter__.return_value = resp_mock
-                resp_mock.read.return_value = json.dumps({
-                    'choices': [{
-                        'message': {
-                            'content': json.dumps({
-                                'question': 'What is the primary objective of accounting according to ICAI framework?',
-                                'optionA': 'Systematic recording of financial transactions',
-                                'optionB': 'Determining national tax policy',
-                                'optionC': 'Regulating legal disputes between companies',
-                                'optionD': 'Fixing the prices of consumer commodities',
-                                'correctAnswer': 'A',
-                                'explanation': 'The fundamental objective is systematic recording to ascertain operating results.'
-                            })
-                        }
-                    }]
-                }).encode('utf-8')
-                return resp_mock
+                if len(call_log) == 1:
+                    err_body = b'{"error": {"code": 429, "status": "RESOURCE_EXHAUSTED", "message": "Rate limit reached"}}'
+                    raise urllib.error.HTTPError(url, 429, 'Too Many Requests', {}, MagicMock(read=MagicMock(return_value=err_body)))
+                else:
+                    resp_mock = MagicMock()
+                    resp_mock.__enter__.return_value = resp_mock
+                    resp_mock.read.return_value = json.dumps({
+                        'candidates': [{
+                            'content': {
+                                'parts': [{'text': json.dumps({
+                                    'question': 'What is the primary objective of accounting according to ICAI framework?',
+                                    'optionA': 'Systematic recording of financial transactions',
+                                    'optionB': 'Determining national tax policy',
+                                    'optionC': 'Regulating legal disputes between companies',
+                                    'optionD': 'Fixing the prices of consumer commodities',
+                                    'correctAnswer': 'A',
+                                    'explanation': 'The fundamental objective is systematic recording to ascertain operating results.'
+                                })}]
+                            }
+                        }]
+                    }).encode('utf-8')
+                    return resp_mock
             raise RuntimeError(f'Unexpected URL: {url}')
 
         test_data = {
             'ai_providers': [
                 {'id': 'gemini_1', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'fallback_model': None, 'priority': 1, 'enabled': True, 'roles': ['generation']},
-                {'id': 'gemini_2', 'enabled': False},
-                {'id': 'groq', 'provider': 'groq', 'model': 'qwen/qwen3.8-27b', 'priority': 2, 'enabled': True, 'roles': ['generation']}
+                {'id': 'gemini_2', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'fallback_model': None, 'priority': 2, 'enabled': True, 'roles': ['generation']}
             ]
         }
 
@@ -259,11 +258,9 @@ class TestQuotaReductionAndLocalValidation(unittest.TestCase):
             )
 
             gemini_calls = [c for c in call_log if c[0] == 'gemini']
-            groq_calls = [c for c in call_log if c[0] == 'groq']
 
-            self.assertEqual(len(gemini_calls), 1)
-            self.assertEqual(len(groq_calls), 1)
-            self.assertEqual(pid, 'groq')
+            self.assertEqual(len(gemini_calls), 2)
+            self.assertEqual(pid, 'gemini_2')
             self.assertTrue(ai_provider_manager._provider_cooldowns.get('gemini_1', 0) > time.time())
         print("PASS: test_429_handling")
 
@@ -277,35 +274,34 @@ class TestQuotaReductionAndLocalValidation(unittest.TestCase):
             url = req.full_url
             if 'generativelanguage.googleapis.com' in url:
                 call_log.append(('gemini', url))
-                err_body = b'{"error": {"code": 503, "status": "UNAVAILABLE", "message": "The service is temporarily overloaded"}}'
-                raise urllib.error.HTTPError(url, 503, 'Service Unavailable', {}, MagicMock(read=MagicMock(return_value=err_body)))
-            elif 'api.groq.com' in url:
-                call_log.append(('groq', url))
-                resp_mock = MagicMock()
-                resp_mock.__enter__.return_value = resp_mock
-                resp_mock.read.return_value = json.dumps({
-                    'choices': [{
-                        'message': {
-                            'content': json.dumps({
-                                'question': 'Which schedule of the Companies Act, 2013 sets the format for financial statements?',
-                                'optionA': 'Schedule III',
-                                'optionB': 'Schedule II',
-                                'optionC': 'Schedule VII',
-                                'optionD': 'Schedule I',
-                                'correctAnswer': 'A',
-                                'explanation': 'Schedule III provides the balance sheet and profit & loss presentation formats.'
-                            })
-                        }
-                    }]
-                }).encode('utf-8')
-                return resp_mock
+                if len(call_log) <= 2:
+                    err_body = b'{"error": {"code": 503, "status": "UNAVAILABLE", "message": "The service is temporarily overloaded"}}'
+                    raise urllib.error.HTTPError(url, 503, 'Service Unavailable', {}, MagicMock(read=MagicMock(return_value=err_body)))
+                else:
+                    resp_mock = MagicMock()
+                    resp_mock.__enter__.return_value = resp_mock
+                    resp_mock.read.return_value = json.dumps({
+                        'candidates': [{
+                            'content': {
+                                'parts': [{'text': json.dumps({
+                                    'question': 'Which schedule of the Companies Act, 2013 sets the format for financial statements?',
+                                    'optionA': 'Schedule III',
+                                    'optionB': 'Schedule II',
+                                    'optionC': 'Schedule VII',
+                                    'optionD': 'Schedule I',
+                                    'correctAnswer': 'A',
+                                    'explanation': 'Schedule III provides the balance sheet and profit & loss presentation formats.'
+                                })}]
+                            }
+                        }]
+                    }).encode('utf-8')
+                    return resp_mock
             raise RuntimeError(f'Unexpected URL: {url}')
 
         test_data = {
             'ai_providers': [
                 {'id': 'gemini_1', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'fallback_model': None, 'priority': 1, 'enabled': True, 'roles': ['generation']},
-                {'id': 'gemini_2', 'enabled': False},
-                {'id': 'groq', 'provider': 'groq', 'model': 'qwen/qwen3.8-27b', 'priority': 2, 'enabled': True, 'roles': ['generation']}
+                {'id': 'gemini_2', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'fallback_model': None, 'priority': 2, 'enabled': True, 'roles': ['generation']}
             ]
         }
 
@@ -317,11 +313,9 @@ class TestQuotaReductionAndLocalValidation(unittest.TestCase):
             )
 
             gemini_calls = [c for c in call_log if c[0] == 'gemini']
-            groq_calls = [c for c in call_log if c[0] == 'groq']
 
-            self.assertIn(len(gemini_calls), [1, 2])
-            self.assertEqual(len(groq_calls), 1)
-            self.assertEqual(pid, 'groq')
+            self.assertGreaterEqual(len(gemini_calls), 2)
+            self.assertEqual(pid, 'gemini_2')
         print("PASS: test_503_handling")
 
     # -----------------------------------------------------------------

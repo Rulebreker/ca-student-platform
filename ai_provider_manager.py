@@ -42,8 +42,12 @@ _last_provider_call_time: Dict[str, float] = {}
 _pacing_lock = threading.Lock()
 
 PROVIDER_FAMILIES = {
-    'gemini_1': 'gemini',
-    'gemini_2': 'gemini',
+    'gemini_1': 'gemini_1',
+    'gemini_2': 'gemini_2',
+    'gemini_3': 'gemini_3',
+    'gemini_4': 'gemini_4',
+    'gemini_5': 'gemini_5',
+    'gemini_6': 'gemini_6',
     'groq': 'groq',
     'openrouter': 'openrouter',
     'mistral_ocr': 'mistral'
@@ -56,7 +60,7 @@ def get_provider_family(provider_id: str, provider_engine: str = '') -> str:
         return provider_engine
     p_lower = str(provider_id).lower()
     if 'gemini' in p_lower:
-        return 'gemini'
+        return p_lower
     if 'groq' in p_lower:
         return 'groq'
     if 'openrouter' in p_lower:
@@ -117,7 +121,7 @@ VAULT_PASSPHRASE = b"ExcellenceCA_AI_Production_HMAC_Secret_Token_v2"
 DEFAULT_PROVIDERS = [
     {
         'id': 'gemini_1',
-        'name': 'Google Gemini (Account 1 - Primary)',
+        'name': 'Google Gemini (Key 1)',
         'provider': 'gemini',
         'model': 'gemini-3-flash-preview',
         'fallback_model': 'gemini-flash-latest',
@@ -129,11 +133,59 @@ DEFAULT_PROVIDERS = [
     },
     {
         'id': 'gemini_2',
-        'name': 'Google Gemini (Account 2 - Secondary)',
+        'name': 'Google Gemini (Key 2)',
         'provider': 'gemini',
         'model': 'gemini-3-flash-preview',
         'fallback_model': 'gemini-flash-latest',
         'priority': 2,
+        'enabled': True,
+        'purpose': 'generation',
+        'roles': ['generation'],
+        'status': 'healthy'
+    },
+    {
+        'id': 'gemini_3',
+        'name': 'Google Gemini (Key 3)',
+        'provider': 'gemini',
+        'model': 'gemini-3-flash-preview',
+        'fallback_model': 'gemini-flash-latest',
+        'priority': 3,
+        'enabled': True,
+        'purpose': 'generation',
+        'roles': ['generation'],
+        'status': 'healthy'
+    },
+    {
+        'id': 'gemini_4',
+        'name': 'Google Gemini (Key 4)',
+        'provider': 'gemini',
+        'model': 'gemini-3-flash-preview',
+        'fallback_model': 'gemini-flash-latest',
+        'priority': 4,
+        'enabled': True,
+        'purpose': 'generation',
+        'roles': ['generation'],
+        'status': 'healthy'
+    },
+    {
+        'id': 'gemini_5',
+        'name': 'Google Gemini (Key 5)',
+        'provider': 'gemini',
+        'model': 'gemini-3-flash-preview',
+        'fallback_model': 'gemini-flash-latest',
+        'priority': 5,
+        'enabled': True,
+        'purpose': 'generation',
+        'roles': ['generation'],
+        'status': 'healthy'
+    },
+    {
+        'id': 'gemini_6',
+        'name': 'Google Gemini (Key 6)',
+        'provider': 'gemini',
+        'model': 'gemini-3-flash-preview',
+        'fallback_model': 'gemini-flash-latest',
+        'priority': 6,
         'enabled': True,
         'purpose': 'generation',
         'roles': ['generation'],
@@ -145,10 +197,10 @@ DEFAULT_PROVIDERS = [
         'provider': 'groq',
         'model': 'qwen/qwen3.8-27b',
         'fallback_model': 'qwen/qwen3.8-27b',
-        'priority': 3,
+        'priority': 7,
         'enabled': True,
-        'purpose': 'generation_validation',
-        'roles': ['generation', 'validation'],
+        'purpose': 'validation',
+        'roles': ['validation'],
         'status': 'healthy'
     },
     {
@@ -157,10 +209,10 @@ DEFAULT_PROVIDERS = [
         'provider': 'openrouter',
         'model': 'meta-llama/llama-3.3-70b-instruct',
         'fallback_model': 'meta-llama/llama-3.3-70b-instruct',
-        'priority': 4,
+        'priority': 8,
         'enabled': True,
-        'purpose': 'generation_validation',
-        'roles': ['generation', 'validation'],
+        'purpose': 'validation',
+        'roles': ['validation'],
         'status': 'healthy'
     },
     {
@@ -169,7 +221,7 @@ DEFAULT_PROVIDERS = [
         'provider': 'mistral',
         'model': 'mistral-ocr-latest',
         'fallback_model': 'local-fallback',
-        'priority': 5,
+        'priority': 9,
         'enabled': True,
         'purpose': 'ocr',
         'roles': ['ocr'],
@@ -239,7 +291,11 @@ def load_secrets() -> Dict[str, str]:
     raw = {}
     
     # 1. Environment variables
-    env_keys = ['GEMINI_API_KEY_1', 'GEMINI_API_KEY_2', 'MISTRAL_API_KEY', 'OPENROUTER_API_KEY', 'GROQ_API_KEY']
+    env_keys = [
+        'GEMINI_API_KEY_1', 'GEMINI_API_KEY_2', 'GEMINI_API_KEY_3',
+        'GEMINI_API_KEY_4', 'GEMINI_API_KEY_5', 'GEMINI_API_KEY_6',
+        'MISTRAL_API_KEY', 'OPENROUTER_API_KEY', 'GROQ_API_KEY'
+    ]
     for env_k in env_keys:
         val = os.environ.get(env_k)
         if val:
@@ -284,6 +340,10 @@ def load_secrets() -> Dict[str, str]:
     mapping = {
         'gemini_1': ['GEMINI_API_KEY_1', 'gemini_1', 'gemini1'],
         'gemini_2': ['GEMINI_API_KEY_2', 'gemini_2', 'gemini2'],
+        'gemini_3': ['GEMINI_API_KEY_3', 'gemini_3', 'gemini3'],
+        'gemini_4': ['GEMINI_API_KEY_4', 'gemini_4', 'gemini4'],
+        'gemini_5': ['GEMINI_API_KEY_5', 'gemini_5', 'gemini5'],
+        'gemini_6': ['GEMINI_API_KEY_6', 'gemini_6', 'gemini6'],
         'mistral': ['MISTRAL_API_KEY', 'mistral', 'mistral_ocr'],
         'mistral_ocr': ['MISTRAL_API_KEY', 'mistral_ocr', 'mistral'],
         'openrouter': ['OPENROUTER_API_KEY', 'openrouter'],
@@ -316,6 +376,10 @@ def save_provider_credential(provider_id: str, api_key: str, sync_firebase: bool
     mapping = {
         'gemini_1': ['GEMINI_API_KEY_1'],
         'gemini_2': ['GEMINI_API_KEY_2'],
+        'gemini_3': ['GEMINI_API_KEY_3'],
+        'gemini_4': ['GEMINI_API_KEY_4'],
+        'gemini_5': ['GEMINI_API_KEY_5'],
+        'gemini_6': ['GEMINI_API_KEY_6'],
         'mistral_ocr': ['MISTRAL_API_KEY'],
         'mistral': ['MISTRAL_API_KEY'],
         'openrouter': ['OPENROUTER_API_KEY'],
@@ -395,6 +459,14 @@ def get_registered_providers(data: Optional[Dict[str, Any]] = None) -> List[Dict
                     merged_map[pid].update(p)
                 else:
                     merged_map[pid] = dict(p)
+
+        # Architectural guarantee: Groq and OpenRouter are strictly excluded from generation role
+        for p in merged_map.values():
+            if p.get('provider') in ('groq', 'openrouter') or p.get('id') in ('groq', 'openrouter'):
+                if 'generation' in p.get('roles', []):
+                    p['roles'] = [r for r in p['roles'] if r != 'generation']
+                if p.get('purpose') in ('generation', 'generation_validation'):
+                    p['purpose'] = 'validation'
                     
         return sorted(list(merged_map.values()), key=lambda x: x.get('priority', 99))
     return sorted(base, key=lambda x: x.get('priority', 99))
@@ -545,11 +617,32 @@ def mark_provider_success(provider_id: str, latency_ms: float):
     if family in _family_cooldowns:
         del _family_cooldowns[family]
 
+def get_earliest_gemini_cooldown_remaining() -> float:
+    """Return the minimum seconds remaining until at least one configured Gemini key finishes cooldown."""
+    now = time.time()
+    gemini_pids = ['gemini_1', 'gemini_2', 'gemini_3', 'gemini_4', 'gemini_5', 'gemini_6']
+    secrets_map = load_secrets()
+    active_gemini = [p for p in gemini_pids if secrets_map.get(p)]
+    if not active_gemini:
+        return 0.0
+
+    remaining_times = []
+    for pid in active_gemini:
+        cd = _provider_cooldowns.get(pid, 0)
+        fam = get_provider_family(pid)
+        f_cd = _family_cooldowns.get(fam, 0)
+        eff_cd = max(cd, f_cd)
+        if eff_cd <= now:
+            return 0.0  # At least one Gemini key is healthy and available right now
+        remaining_times.append(eff_cd - now)
+
+    return min(remaining_times) if remaining_times else 0.0
+
 # ----------------------------------------------------------------------
 # DIRECT HTTP PROVIDER CLIENTS
 # ----------------------------------------------------------------------
 
-def _call_gemini_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 18.0, temperature: Optional[float] = None) -> Tuple[str, float]:
+def _call_gemini_api(api_key: str, model: str, prompt: str, system_instruction: Optional[str] = None, json_mode: bool = False, timeout: float = 12.0, temperature: Optional[float] = None) -> Tuple[str, float]:
     start = time.time()
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     
@@ -847,7 +940,7 @@ def call_llm_with_failover(
     json_mode: bool = True,
     data: Optional[Dict[str, Any]] = None,
     preferred_provider: Optional[str] = None,
-    timeout: float = 18.0,
+    timeout: float = 12.0,
     on_provider_event: Optional[Any] = None,
     temperature: Optional[float] = None,
     job_id: Optional[str] = None,
@@ -867,6 +960,8 @@ def call_llm_with_failover(
             continue
         if purpose not in p.get('roles', []):
             continue
+        if purpose == 'generation' and (p.get('provider') != 'gemini' or pid.startswith('groq') or pid.startswith('openrouter')):
+            continue  # HARD ENFORCEMENT: Gemini only for generation (zero Groq / zero OpenRouter)
         key = secrets_map.get(pid)
         if not key:
             continue
@@ -875,13 +970,13 @@ def call_llm_with_failover(
     if not candidates:
         raise RuntimeError(f"No configured or enabled AI providers available for purpose '{purpose}'. Please configure API keys in Admin Settings.")
 
-    # Canonical priority: Gemini (family rank 1) -> Groq (family rank 2) -> OpenRouter (family rank 3)
+    # Canonical priority: Preferred provider -> Gemini keys by priority (1 to 6) -> Others
     def _sort_key(prov):
         if preferred_provider and prov['id'] == preferred_provider:
             return (-1, 0)
         p_id = prov['id']
         family = get_provider_family(p_id, prov.get('provider', ''))
-        family_rank = {'gemini': 1, 'groq': 2, 'openrouter': 3}.get(family, 99)
+        family_rank = 0 if 'gemini' in family else ({'groq': 2, 'openrouter': 3}.get(family, 99))
         prov_priority = prov.get('priority', 50)
         return (family_rank, prov_priority)
 
@@ -973,12 +1068,19 @@ def call_llm_with_failover(
                 except Exception as e:
                     err_str = str(e)
                     status_code = getattr(e, 'code', None)
+                    is_timeout = any(code in err_str.lower() for code in ['timed out', 'timeout', 'timeouterror'])
+                    if is_timeout:
+                        mark_provider_failure(pid, f"Timeout after {timeout:.1f}s", status_code=504)
+                        errors.append(f"[{pid}/{current_model}]: Timeout after {timeout:.1f}s")
+                        print(f"[TIMEOUT_ROTATE] Provider '{pid}' timed out after {timeout:.1f}s. Marking cooldown and rotating to next Gemini key immediately.", flush=True)
+                        break
+
                     is_transient = (
                         (status_code and 500 <= status_code < 600) or
-                        any(code in err_str for code in ['500', '502', '503', '504', 'timed out', 'timeout', 'ConnectionResetError', 'RemoteDisconnected'])
+                        any(code in err_str for code in ['500', '502', '503', 'ConnectionResetError', 'RemoteDisconnected'])
                     )
                     if is_transient and transient_attempt < max_transient_retries:
-                        backoff = 1.5 + random.uniform(0.3, 0.7)
+                        backoff = 1.0 + random.uniform(0.2, 0.5)
                         print(f"[TRANSIENT_RETRY] provider={pid} model={current_model} error={err_str}. Retrying in {backoff:.2f}s...", flush=True)
                         time.sleep(backoff)
                         continue

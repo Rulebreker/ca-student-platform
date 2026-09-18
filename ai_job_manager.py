@@ -62,11 +62,9 @@ def save_job_record(
 def get_job_status(job_id: str, data: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """
     Retrieve job status by ID, checking memory cache, data store, and cloud sync.
+    Synchronizes memory cache with DB/Firebase data so polling always reflects fresh state.
     """
-    with _jobs_lock:
-        job = _active_jobs.get(job_id)
-        if job:
-            return dict(job)
+    db_job = None
     if data and isinstance(data, dict):
         jobs = data.get('ai_generation_jobs', [])
         if isinstance(jobs, dict):
@@ -75,24 +73,39 @@ def get_job_status(job_id: str, data: Optional[Dict[str, Any]] = None) -> Option
             jobs = []
         for j in jobs:
             if isinstance(j, dict) and j.get('id') == job_id:
-                with _jobs_lock:
-                    _active_jobs[job_id] = dict(j)
-                return dict(j)
+                db_job = dict(j)
+                break
+
+    with _jobs_lock:
+        mem_job = _active_jobs.get(job_id)
+        if mem_job and db_job:
+            db_count = db_job.get('generatedCount', 0)
+            mem_count = mem_job.get('generatedCount', 0)
+            db_status = db_job.get('status', '')
+            mem_status = mem_job.get('status', '')
+
+            if (db_count > mem_count) or (db_status in ['COMPLETED', 'FAILED'] and mem_status not in ['COMPLETED', 'FAILED']) or (db_job.get('progressPct', 0) > mem_job.get('progressPct', 0)):
+                _active_jobs[job_id] = dict(db_job)
+                return dict(db_job)
+            return dict(mem_job)
+        elif mem_job:
+            return dict(mem_job)
+        elif db_job:
+            _active_jobs[job_id] = dict(db_job)
+            return dict(db_job)
+
     return None
 
 def get_active_generation_job(data: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """
     Retrieve the most recent active generation job (QUEUED, PROCESSING, GENERATING)
     created within the last 15 minutes to restore UI on page refresh.
+    Synchronizes memory cache with freshest DB/Firebase records.
     """
     now_ts = time.time()
     active_statuses = {'QUEUED', 'PROCESSING', 'GENERATING'}
-    
-    with _jobs_lock:
-        for j in sorted(_active_jobs.values(), key=lambda x: x.get('createdTs', 0), reverse=True):
-            if j.get('status') in active_statuses and (now_ts - j.get('createdTs', 0)) < 900:
-                return dict(j)
 
+    db_jobs = {}
     if data and isinstance(data, dict):
         try:
             jobs = data.get('ai_generation_jobs', [])
@@ -100,13 +113,36 @@ def get_active_generation_job(data: Optional[Dict[str, Any]] = None) -> Optional
                 jobs = list(jobs.values())
             elif not isinstance(jobs, list):
                 jobs = []
-            for j in sorted(jobs, key=lambda x: (isinstance(x, dict) and x.get('createdTs', 0)) or 0, reverse=True):
-                if isinstance(j, dict) and j.get('status') in active_statuses and (now_ts - j.get('createdTs', 0)) < 900:
-                    with _jobs_lock:
-                        _active_jobs[j['id']] = dict(j)
-                    return dict(j)
+            for j in jobs:
+                if isinstance(j, dict) and j.get('id'):
+                    db_jobs[j['id']] = dict(j)
         except Exception:
             pass
+
+    with _jobs_lock:
+        for j_id, db_j in db_jobs.items():
+            if j_id in _active_jobs:
+                mem_j = _active_jobs[j_id]
+                if (db_j.get('generatedCount', 0) > mem_j.get('generatedCount', 0) or
+                    db_j.get('progressPct', 0) > mem_j.get('progressPct', 0) or
+                    db_j.get('status') in ['COMPLETED', 'FAILED']):
+                    _active_jobs[j_id] = dict(db_j)
+            else:
+                _active_jobs[j_id] = dict(db_j)
+
+        all_candidates = list(_active_jobs.values())
+
+    sorted_candidates = sorted(
+        all_candidates,
+        key=lambda x: (x.get('createdTs', 0) or 0),
+        reverse=True
+    )
+
+    for j in sorted_candidates:
+        c_ts = j.get('createdTs', 0)
+        if j.get('status') in active_statuses and (now_ts - c_ts) < 900:
+            return dict(j)
+
     return None
 
 def create_generation_job(
@@ -276,10 +312,10 @@ def run_generation_job_synchronous(
     _run_generation_job_worker(job_id, params, data, save_callback, firebase_sync_callback)
 
     final_job = get_job_status(job_id, data) or {}
-    if final_job.get('status') in ['COMPLETED', 'PARTIAL', 'PARTIALLY_COMPLETED']:
+    if final_job.get('status') == 'COMPLETED':
         return True, None, final_job.get('result')
     else:
-        err = final_job.get('error') or "Generation job failed to complete."
+        err = final_job.get('error') or "Generation job failed to complete exact requested question count."
         return False, err, None
 
 execute_ai_generation_job_sync = run_generation_job_synchronous
@@ -488,7 +524,7 @@ def _run_generation_job_worker(
         job_record['regenerationCount'] = metrics.get('regenerationCount', 0)
 
         if len(questions) == count:
-            # Full completion
+            # Full completion: exactly requested count generated and verified
             test_record['totalQuestions'] = len(questions)
             test_record['maximumMarks'] = round(len(questions) * marks_per_correct, 2)
             test_record['isPublished'] = auto_publish
@@ -506,38 +542,23 @@ def _run_generation_job_worker(
                 'metrics': metrics,
                 'job': dict(job_record)
             }
-
-        elif len(questions) > 0:
-            # Partial completion: some MCQs generated safely
-            test_record['totalQuestions'] = len(questions)
-            test_record['maximumMarks'] = round(len(questions) * marks_per_correct, 2)
-            test_record['isPublished'] = auto_publish
-            test_record['status'] = 'Published' if auto_publish else 'Draft'
-            test_record['updatedAt'] = completed_iso
-
-            job_record['status'] = 'PARTIAL'
-            job_record['progressPct'] = 100
-            job_record['currentStage'] = f"Partially Completed: {len(questions)} of {count} MCQs generated & hosted."
-            job_record['generatedCount'] = len(questions)
-            job_record['failedCount'] = count - len(questions)
-            job_record['result'] = {
-                'test': test_record,
-                'questions': questions,
-                'metrics': metrics,
-                'job': dict(job_record)
-            }
+            if firebase_sync_callback:
+                firebase_sync_callback(f"tests/{test_id}", test_record, method='PUT', sync=False)
 
         else:
-            # Complete failure: 0 questions produced
-            # Purge empty test from DB so no empty test is displayed
+            # Incomplete generation: Partial tests must NEVER be published or hosted
+            # Purge partial/incomplete test from DB and Firebase so no partial test appears in student/admin lists
             data['tests'] = [t for t in data.get('tests', []) if t.get('id') != test_id]
             if firebase_sync_callback:
                 firebase_sync_callback(f"tests/{test_id}", None, method='DELETE', sync=True)
 
             job_record['status'] = 'FAILED'
-            job_record['error'] = 'Failed to generate valid questions after maximum attempts.'
-            job_record['currentStage'] = 'Failed: No valid questions generated.'
-            job_record['failedCount'] = count
+            job_record['error'] = f"Incomplete generation: only {len(questions)} of {count} questions verified. Partial tests are never hosted or published."
+            job_record['currentStage'] = f"Failed: Only {len(questions)} of {count} questions verified."
+            job_record['generatedCount'] = len(questions)
+            job_record['failedCount'] = count - len(questions)
+            job_record['progressPct'] = int((len(questions) / count) * 100) if count > 0 else 0
+            job_record['result'] = None
 
         # 6. Telemetry Log
         if 'ai_generation_logs' not in data:

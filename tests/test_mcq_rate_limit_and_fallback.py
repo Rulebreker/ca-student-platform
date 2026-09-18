@@ -55,23 +55,26 @@ class TestMcqRateLimitAndFallback(unittest.TestCase):
             url = req.full_url
             if 'generativelanguage.googleapis.com' in url:
                 call_log.append(('gemini', url))
-                err_body = b'{"error": {"code": 429, "status": "RESOURCE_EXHAUSTED", "message": "Quota exceeded"}}'
-                raise urllib.error.HTTPError(url, 429, 'Too Many Requests', {}, MagicMock(read=MagicMock(return_value=err_body)))
-            elif 'api.groq.com' in url:
-                call_log.append(('groq', url))
-                resp_mock = MagicMock()
-                resp_mock.__enter__.return_value = resp_mock
-                resp_mock.read.return_value = json.dumps({
-                    'choices': [{'message': {'content': '{"question": "What is depreciation?", "optionA": "Allocation of cost", "optionB": "Cash reserve", "optionC": "Revaluation", "optionD": "Profit", "correctOption": "A", "explanation": "Depreciation is cost allocation."}'}}]
-                }).encode('utf-8')
-                return resp_mock
+                if len(call_log) == 1:
+                    err_body = b'{"error": {"code": 429, "status": "RESOURCE_EXHAUSTED", "message": "Quota exceeded"}}'
+                    raise urllib.error.HTTPError(url, 429, 'Too Many Requests', {}, MagicMock(read=MagicMock(return_value=err_body)))
+                else:
+                    resp_mock = MagicMock()
+                    resp_mock.__enter__.return_value = resp_mock
+                    resp_mock.read.return_value = json.dumps({
+                        'candidates': [{
+                            'content': {
+                                'parts': [{'text': '{"question": "What is depreciation?", "optionA": "Allocation of cost", "optionB": "Cash reserve", "optionC": "Revaluation", "optionD": "Profit", "correctAnswer": "A", "explanation": "Depreciation is cost allocation."}'}]
+                            }
+                        }]
+                    }).encode('utf-8')
+                    return resp_mock
             raise RuntimeError(f'Unexpected URL: {url}')
 
         test_data = {
             'ai_providers': [
                 {'id': 'gemini_1', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'fallback_model': 'gemini-flash-latest', 'priority': 1, 'enabled': True, 'roles': ['generation']},
-                {'id': 'gemini_2', 'enabled': False},
-                {'id': 'groq', 'provider': 'groq', 'model': 'qwen/qwen3.8-27b', 'fallback_model': 'qwen/qwen3.8-27b', 'priority': 2, 'enabled': True, 'roles': ['generation']}
+                {'id': 'gemini_2', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'fallback_model': 'gemini-flash-latest', 'priority': 2, 'enabled': True, 'roles': ['generation']}
             ]
         }
 
@@ -83,12 +86,9 @@ class TestMcqRateLimitAndFallback(unittest.TestCase):
             )
 
             gemini_calls = [c for c in call_log if c[0] == 'gemini']
-            self.assertEqual(len(gemini_calls), 1, f'Gemini should only be called once, got: {gemini_calls}')
-            
-            groq_calls = [c for c in call_log if c[0] == 'groq']
-            self.assertEqual(len(groq_calls), 1)
-            self.assertEqual(pid, 'groq')
-            self.assertEqual(model, 'qwen/qwen3.8-27b')
+            self.assertEqual(len(gemini_calls), 2, f'Gemini_1 should fail with 429 and Gemini_2 should succeed, got: {gemini_calls}')
+            self.assertEqual(pid, 'gemini_2')
+            self.assertEqual(model, 'gemini-3-flash-preview')
             self.assertTrue(ai_provider_manager._provider_cooldowns.get('gemini_1', 0) > time.time())
         print('PASS: test_immediate_fallback_on_429_without_retrying_same_provider_models')
 
@@ -99,35 +99,37 @@ class TestMcqRateLimitAndFallback(unittest.TestCase):
             url = req.full_url
             if 'generativelanguage.googleapis.com' in url:
                 call_log.append(('gemini', url))
-                err_body = b'{"error": {"code": 429, "status": "RESOURCE_EXHAUSTED"}}'
-                raise urllib.error.HTTPError(url, 429, 'Too Many Requests', {}, MagicMock(read=MagicMock(return_value=err_body)))
-            elif 'api.groq.com' in url:
-                call_log.append(('groq', url))
                 resp_mock = MagicMock()
                 resp_mock.__enter__.return_value = resp_mock
                 resp_mock.read.return_value = json.dumps({
-                    'choices': [{'message': {'content': '{"question": "What is accounting?", "optionA": "Process", "optionB": "Tax", "optionC": "Law", "optionD": "Math", "correctOption": "A", "explanation": "Accounting is an information process."}'}}]
+                    'candidates': [{
+                        'content': {
+                            'parts': [{'text': '{"question": "What is accounting?", "optionA": "Process", "optionB": "Tax", "optionC": "Law", "optionD": "Math", "correctAnswer": "A", "explanation": "Accounting is an information process."}'}]
+                        }
+                    }]
                 }).encode('utf-8')
                 return resp_mock
             raise RuntimeError(f'Unexpected URL: {url}')
 
+        # Put gemini_1 into cooldown explicitly
+        ai_provider_manager._provider_cooldowns['gemini_1'] = time.time() + 60.0
+
         test_data = {
             'ai_providers': [
                 {'id': 'gemini_1', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'fallback_model': 'gemini-flash-latest', 'priority': 1, 'enabled': True, 'roles': ['generation']},
-                {'id': 'gemini_2', 'enabled': False},
-                {'id': 'groq', 'provider': 'groq', 'model': 'qwen/qwen3.8-27b', 'fallback_model': 'qwen/qwen3.8-27b', 'priority': 2, 'enabled': True, 'roles': ['generation']}
+                {'id': 'gemini_2', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'fallback_model': 'gemini-flash-latest', 'priority': 2, 'enabled': True, 'roles': ['generation']}
             ]
         }
 
         with patch('urllib.request.urlopen', side_effect=mock_urlopen):
             t1, p1, m1 = ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='Q1', data=test_data)
-            self.assertEqual(p1, 'groq')
+            self.assertEqual(p1, 'gemini_2')
 
             two_t2, p2, m2 = ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='Q2', data=test_data)
-            self.assertEqual(p2, 'groq')
+            self.assertEqual(p2, 'gemini_2')
 
-            gemini_calls = [c for c in call_log if c[0] == 'gemini']
-            self.assertEqual(len(gemini_calls), 1, 'Gemini should not be called again on Q2 due to active cooldown!')
+            # gemini_1 should never have been called because it was in cooldown
+            self.assertEqual(len(call_log), 2)
         print('PASS: test_cooldown_persists_across_batch_questions')
 
     def test_pipeline_with_gemini_429_generates_mcqs_and_reports_verified_count(self):
@@ -157,9 +159,9 @@ class TestMcqRateLimitAndFallback(unittest.TestCase):
             on_event = kwargs.get('on_provider_event')
             if on_event:
                 on_event('rate_limited', 'gemini_1', 'gemini-3-flash-preview', 13.0)
-                on_event('fallback', 'groq', 'qwen/qwen3.8-27b', None)
+                on_event('fallback', 'gemini_2', 'gemini-3-flash-preview', None)
             res = dict(mock_mcq_1 if gen_counter[0] % 2 == 1 else mock_mcq_2)
-            return res, 'groq', 'qwen/qwen3.8-27b'
+            return res, 'gemini_2', 'gemini-3-flash-preview'
 
         progress_events = []
         def on_prog(p):
@@ -178,7 +180,7 @@ class TestMcqRateLimitAndFallback(unittest.TestCase):
                 self.assertEqual(len(qs), 2)
                 self.assertEqual(metrics['generatedCount'], 2)
                 self.assertEqual(metrics['failedCount'], 0)
-                self.assertIn('groq', metrics['providersUsed'])
+                self.assertIn('gemini_2', metrics['providersUsed'])
 
                 stages = [e.get('stage') for e in progress_events]
                 self.assertIn('rate_limited', stages)

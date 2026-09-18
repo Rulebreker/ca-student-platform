@@ -603,7 +603,9 @@ def generate_single_mcq(
     chapter_metadata: Optional[Dict[str, Any]] = None,
     chapter: str = '',
     chapter_id: str = '',
-    admin_description: str = ''
+    admin_description: str = '',
+    preferred_provider: Optional[str] = None,
+    temperature: Optional[float] = None
 ) -> Tuple[Dict[str, Any], str, str]:
     """
     Generate a single candidate MCQ matching category, speed, and chapter syllabus constraints.
@@ -670,10 +672,8 @@ def generate_single_mcq(
         admin_description=admin_description
     )
 
-    # Mild temperature boost on retry breaks token-greedy repetitive duplicate generation
-    retry_temp = None
-    if attempt_number > 1:
-        retry_temp = min(0.35 + 0.15 * (attempt_number - 1), 0.65)
+    # Safe temperature variation per specification: 0.7 + ((attempt - 1) % 3) * 0.1
+    calculated_temp = temperature if temperature is not None else round(0.7 + ((attempt_number - 1) % 3) * 0.1, 2)
 
     response_text, provider_id, model_name = ai_provider_manager.call_llm_with_failover(
         purpose='generation',
@@ -681,8 +681,9 @@ def generate_single_mcq(
         system_instruction=system_instruction,
         json_mode=True,
         data=data,
+        preferred_provider=preferred_provider,
         on_provider_event=on_provider_event,
-        temperature=retry_temp,
+        temperature=calculated_temp,
         job_id=job_id,
         question_number=question_number or slot_number,
         attempt=attempt_number
@@ -898,26 +899,105 @@ def generate_exact_mcqs_pipeline(
 
     print(f"[BATCH START] batchId={job_id} total={count} chapter='{canonical_ch_name}' ({canonical_ch_id}) category={question_category} speed={question_speed}", flush=True)
 
-    MAX_RETRIES_PER_SLOT = 2  # up to 3 attempts per slot
-    SLOT_MAX_TIMEOUT = 50.0   # Watchdog timeout per question slot
+    MAX_ATTEMPTS_PER_SLOT = 15
+    BATCH_MAX_TIMEOUT = 360.0  # 6-minute total safety watchdog
+    key_rotation_cursor = 0
+    slot_attempts: Dict[int, int] = {}
+    slot_rejected_stems_map: Dict[int, List[str]] = {}
 
-    for slot_idx in range(1, count + 1):
-        slot_start_time = time.time()
+    PROMPT_ANGLES = [
+        "Standard comprehensive coverage across authoritative syllabus",
+        "Practical application, calculations, numerical parameters, or scenario problem-solving",
+        "Exceptions, proviso, statutory limits, prerequisites, or threshold conditions",
+        "Statutory definitions, legislative intent, regulatory scope, and applicability"
+    ]
+
+    while len(generated_questions) < count:
+        if time.time() - metrics['startTime'] > BATCH_MAX_TIMEOUT:
+            print(f"[BATCH_TIMEOUT] Exceeded maximum batch duration ({BATCH_MAX_TIMEOUT}s).", flush=True)
+            break
+
+        slot_idx = len(generated_questions) + 1
         slot_status_obj = question_statuses[slot_idx - 1]
-        slot_status_obj['status'] = 'generating'
-        slot_status_obj['attempt'] = 1
-        slot_saved = False
-        last_slot_error = None
+        
+        slot_attempts[slot_idx] = slot_attempts.get(slot_idx, 0) + 1
+        attempt = slot_attempts[slot_idx]
 
-        print(f"[QUESTION_START] batchId={job_id} questionNumber={slot_idx} attempt=1 concurrentActiveRequests=1", flush=True)
-        print(f"[QUESTION START] batchId={job_id} questionNumber={slot_idx} attempt=1", flush=True)
+        if attempt > MAX_ATTEMPTS_PER_SLOT:
+            err_limit = f"Exceeded maximum repair attempts ({MAX_ATTEMPTS_PER_SLOT}) on Question {slot_idx}."
+            print(f"[SLOT_EXHAUSTED] {err_limit}", flush=True)
+            slot_status_obj['status'] = 'failed'
+            slot_status_obj['error'] = err_limit
+            break
 
-        slot_gemini_called = [False]
+        if slot_idx not in slot_rejected_stems_map:
+            slot_rejected_stems_map[slot_idx] = []
+        slot_rejected_stems = slot_rejected_stems_map[slot_idx]
+
+        # Key rotation across all 6 Gemini keys (1 to 6)
+        preferred_gemini = f"gemini_{(key_rotation_cursor % 6) + 1}"
+        key_rotation_cursor += 1
+
+        # Temperature variation formula: 0.7 + ((attempt - 1) % 3) * 0.1 -> 0.7, 0.8, 0.9
+        slot_temperature = round(0.7 + ((attempt - 1) % 3) * 0.1, 2)
+
+        # Prompt focal angle variation
+        selected_angle = PROMPT_ANGLES[(attempt - 1) % len(PROMPT_ANGLES)]
+
+        is_retry = attempt > 1
+        if is_retry:
+            slot_status_obj['status'] = 'retrying'
+            slot_status_obj['attempt'] = attempt
+            print(f"[RETRY] batchId={job_id} questionNumber={slot_idx} attempt={attempt} provider={preferred_gemini} temp={slot_temperature} angle='{selected_angle}'", flush=True)
+        else:
+            slot_status_obj['status'] = 'generating'
+            slot_status_obj['attempt'] = 1
+            print(f"[QUESTION_START] batchId={job_id} questionNumber={slot_idx} attempt=1 concurrentActiveRequests=1 provider={preferred_gemini}", flush=True)
+            print(f"[QUESTION START] batchId={job_id} questionNumber={slot_idx} attempt=1", flush=True)
+
+        verified_c = len(generated_questions)
+        prog_pct = min(95, int((verified_c / count) * 85) + 5)
+        if progress_callback:
+            try:
+                retry_label = f" (Attempt {attempt})" if is_retry else ""
+                progress_callback({
+                    'stage': 'retrying' if is_retry else 'generating',
+                    'current': slot_idx,
+                    'verifiedCount': verified_c,
+                    'total': count,
+                    'status': f"Generating question {slot_idx} of {count}{retry_label}...",
+                    'progressPct': prog_pct,
+                    'questionStatuses': list(question_statuses)
+                })
+            except Exception:
+                pass
+
+        # Cooldown check: if all Gemini keys are cooling down, wait for the earliest key
+        cd_wait = ai_provider_manager.get_earliest_gemini_cooldown_remaining()
+        if cd_wait > 0:
+            print(f"[ALL_KEYS_COOLDOWN] All Gemini keys cooling down. Waiting {cd_wait:.1f}s for earliest key...", flush=True)
+            slot_status_obj['status'] = 'cooling_down'
+            slot_status_obj['error'] = f"All Gemini keys cooling down. Waiting {int(cd_wait)}s..."
+            if progress_callback:
+                try:
+                    progress_callback({
+                        'stage': 'cooling_down',
+                        'current': slot_idx,
+                        'verifiedCount': len(generated_questions),
+                        'total': count,
+                        'status': f"All Gemini keys in cooldown. Waiting {int(cd_wait)}s before retrying Q{slot_idx}...",
+                        'progressPct': prog_pct,
+                        'questionStatuses': list(question_statuses)
+                    })
+                except Exception:
+                    pass
+            time.sleep(min(cd_wait + 0.5, 30.0))
+
+        # Real-time event handler
         def _make_on_provider_event(s_idx, s_status_obj):
             def _handler(evt_type, p_id, p_model, r_after):
                 if evt_type == 'ai_call_start' and p_id and 'gemini' in str(p_id).lower() and r_after == 'generation':
                     metrics['geminiGenerationCalls'] += 1
-                    slot_gemini_called[0] = True
                 elif evt_type == 'rate_limited':
                     s_status_obj['status'] = 'rate_limited'
                     s_status_obj['provider'] = p_id
@@ -930,8 +1010,8 @@ def generate_exact_mcqs_pipeline(
                                 'current': s_idx,
                                 'verifiedCount': len(generated_questions),
                                 'total': count,
-                                'status': f"Q{s_idx}: {p_id.upper()} Quota Exceeded (429) -> Switching provider...",
-                                'progressPct': int(((s_idx - 1) / count) * 85) + 5,
+                                'status': f"Q{s_idx}: {p_id.upper()} Quota Exceeded (429) -> Rotating key...",
+                                'progressPct': prog_pct,
                                 'questionStatuses': list(question_statuses)
                             })
                         except Exception:
@@ -947,236 +1027,185 @@ def generate_exact_mcqs_pipeline(
                                 'current': s_idx,
                                 'verifiedCount': len(generated_questions),
                                 'total': count,
-                                'status': f"Q{s_idx}: Switched to {p_id.upper()} ({p_model}) -> Generating...",
-                                'progressPct': int(((s_idx - 1) / count) * 85) + 5,
+                                'status': f"Q{s_idx}: Rotated to {p_id.upper()} ({p_model}) -> Generating...",
+                                'progressPct': prog_pct,
                                 'questionStatuses': list(question_statuses)
                             })
                         except Exception:
                             pass
             return _handler
 
-        slot_rejected_stems: List[str] = []
         slot_prov_event_cb = _make_on_provider_event(slot_idx, slot_status_obj)
 
-        for attempt in range(MAX_RETRIES_PER_SLOT + 1):
-            # Check slot watchdog timeout
-            elapsed = time.time() - slot_start_time
-            if elapsed > SLOT_MAX_TIMEOUT:
-                last_slot_error = f"Slot watchdog timeout ({SLOT_MAX_TIMEOUT}s) exceeded."
-                print(f"[QUESTION_TIMEOUT] batchId={job_id} questionNumber={slot_idx} elapsed={elapsed:.1f}s timeout={SLOT_MAX_TIMEOUT:.1f}s", flush=True)
-                print(f"[QUESTION FAILED] batchId={job_id} questionNumber={slot_idx} attempt={attempt+1} error={last_slot_error}", flush=True)
-                break
-
-            is_retry = attempt > 0
-            if is_retry:
-                slot_status_obj['status'] = 'retrying'
-                slot_status_obj['attempt'] = attempt + 1
-                print(f"[RETRY] batchId={job_id} questionNumber={slot_idx} attempt={attempt + 1} reason={last_slot_error}", flush=True)
-
-            if progress_callback:
-                try:
-                    retry_label = f" (Attempt {attempt + 1})" if is_retry else ""
-                    progress_callback({
-                        'stage': 'generating',
-                        'current': slot_idx,
-                        'verifiedCount': len(generated_questions),
-                        'total': count,
-                        'status': f"Generating question {slot_idx} of {count}{retry_label}...",
-                        'progressPct': int(((slot_idx - 1) / count) * 85) + 5,
-                        'questionStatuses': list(question_statuses)
-                    })
-                except Exception:
-                    pass
-
-            # Step 1: Generate single MCQ via failover
-            gen_start_time = time.time()
-            try:
-                # Provide all generated questions in batch as well as rejected attempts
-                batch_prev_stems = [q.get('text') for q in generated_questions if q.get('text')]
-                q_candidate, gen_prov, gen_model = generate_single_mcq(
-                    subject=canonical_subject,
-                    topic=topic,
-                    exam_level=canonical_exam_level,
-                    difficulty=difficulty,
-                    question_category=question_category,
-                    question_speed=question_speed,
-                    chapter_metadata=resolved_ch_meta,
-                    chapter=canonical_ch_name,
-                    chapter_id=canonical_ch_id,
-                    previous_concepts=batch_prev_stems,
-                    data=data,
-                    slot_number=slot_idx,
-                    total_count=count,
-                    on_provider_event=slot_prov_event_cb,
-                    rejected_questions=list(slot_rejected_stems),
-                    attempt_number=attempt + 1,
-                    job_id=job_id,
-                    question_number=slot_idx,
-                    admin_description=admin_description
-                )
-                gen_duration = (time.time() - gen_start_time) * 1000.0
-                print(f"[QUESTION_GENERATED] batchId={job_id} questionNumber={slot_idx} attempt={attempt+1} provider={gen_prov} model={gen_model} duration={gen_duration:.1f}ms", flush=True)
-                metrics['providersUsed'].add(gen_prov)
-                if not slot_gemini_called[0] and gen_prov and 'gemini' in str(gen_prov).lower():
-                    metrics['geminiGenerationCalls'] += 1
-            except Exception as gen_err:
-                last_slot_error = f"Generation error: {gen_err}"
-                metrics['regenerationAttempts'] += 1
-                metrics['regenerationCount'] = metrics['regenerationAttempts']
-                # If watchdog exceeded, don't sleep
-                if (time.time() - slot_start_time) < SLOT_MAX_TIMEOUT - 3.0:
-                    time.sleep(min(1.0 * (attempt + 1), 2.0))
-                continue
-
-            # Step 2: Independent Validation (Local deterministic first, secondary AI only if required)
-            slot_status_obj['status'] = 'validating'
-            if progress_callback:
-                try:
-                    progress_callback({
-                        'stage': 'validating',
-                        'current': slot_idx,
-                        'verifiedCount': len(generated_questions),
-                        'total': count,
-                        'status': f"Validating question {slot_idx} of {count}...",
-                        'progressPct': int(((slot_idx - 0.5) / count) * 85) + 5,
-                        'questionStatuses': list(question_statuses)
-                    })
-                except Exception:
-                    pass
-
-            val_start_time = time.time()
-            is_valid, val_reason, suggested_fix, val_prov = validate_mcq_independently(
-                q_data=q_candidate,
+        # Step 1: Generate candidate MCQ via Gemini multi-key failover
+        gen_start_time = time.time()
+        try:
+            batch_prev_stems = [q.get('text') for q in generated_questions if q.get('text')]
+            q_candidate, gen_prov, gen_model = generate_single_mcq(
                 subject=canonical_subject,
                 topic=topic,
                 exam_level=canonical_exam_level,
                 difficulty=difficulty,
                 question_category=question_category,
                 question_speed=question_speed,
-                existing_questions=existing_questions,
-                current_batch_questions=generated_questions,
-                data=data,
-                on_provider_event=slot_prov_event_cb,
+                chapter_metadata=resolved_ch_meta,
                 chapter=canonical_ch_name,
                 chapter_id=canonical_ch_id,
-                admin_description=admin_description
+                previous_concepts=batch_prev_stems,
+                data=data,
+                slot_number=slot_idx,
+                total_count=count,
+                on_provider_event=slot_prov_event_cb,
+                rejected_questions=list(slot_rejected_stems),
+                attempt_number=attempt,
+                job_id=job_id,
+                question_number=slot_idx,
+                admin_description=admin_description,
+                preferred_provider=preferred_gemini,
+                temperature=slot_temperature
             )
-            val_duration = (time.time() - val_start_time) * 1000.0
-            metrics['validationCalls'] += 1
-            metrics['validationProvider'] = val_prov
-            metrics['validationProvidersUsed'].add(val_prov)
+            gen_duration = (time.time() - gen_start_time) * 1000.0
+            print(f"[QUESTION_GENERATED] batchId={job_id} questionNumber={slot_idx} attempt={attempt} provider={gen_prov} model={gen_model} duration={gen_duration:.1f}ms", flush=True)
+            metrics['providersUsed'].add(gen_prov)
+            metrics['geminiGenerationCalls'] += 1
+        except Exception as gen_err:
+            clean_err = f"Generation error: {gen_err}"
+            slot_status_obj['status'] = 'retrying'
+            slot_status_obj['error'] = clean_err
+            metrics['regenerationAttempts'] += 1
+            metrics['regenerationCount'] = metrics['regenerationAttempts']
+            print(f"[QUESTION_RETRY] batchId={job_id} questionNumber={slot_idx} attempt={attempt} error={clean_err}", flush=True)
+            # Stay on the same slot_idx and retry
+            continue
 
-            if not is_valid:
-                clean_err = str(val_reason).strip()
-                if clean_err.startswith("Validation rejected: "):
-                    clean_err = clean_err[len("Validation rejected: "):].strip()
-                if clean_err.startswith("Duplicate check: "):
-                    clean_err = "Duplicate: " + clean_err[len("Duplicate check: "):].strip()
-                last_slot_error = clean_err
+        # Step 2: Validate independently (Local deterministic validation)
+        slot_status_obj['status'] = 'validating'
+        if progress_callback:
+            try:
+                progress_callback({
+                    'stage': 'validating',
+                    'current': slot_idx,
+                    'verifiedCount': len(generated_questions),
+                    'total': count,
+                    'status': f"Validating question {slot_idx} of {count}...",
+                    'progressPct': min(95, int(((len(generated_questions) + 0.5) / count) * 85) + 5),
+                    'questionStatuses': list(question_statuses)
+                })
+            except Exception:
+                pass
 
-                cand_stem = str(q_candidate.get('question') or q_candidate.get('text') or '').strip()
-                if cand_stem and cand_stem not in slot_rejected_stems:
-                    slot_rejected_stems.append(cand_stem)
+        val_start_time = time.time()
+        is_valid, val_reason, suggested_fix, val_prov = validate_mcq_independently(
+            q_data=q_candidate,
+            subject=canonical_subject,
+            topic=topic,
+            exam_level=canonical_exam_level,
+            difficulty=difficulty,
+            question_category=question_category,
+            question_speed=question_speed,
+            existing_questions=existing_questions,
+            current_batch_questions=generated_questions,
+            data=data,
+            on_provider_event=slot_prov_event_cb,
+            chapter=canonical_ch_name,
+            chapter_id=canonical_ch_id,
+            admin_description=admin_description
+        )
+        val_duration = (time.time() - val_start_time) * 1000.0
+        metrics['validationCalls'] += 1
+        metrics['validationProvider'] = val_prov
+        metrics['validationProvidersUsed'].add(val_prov)
 
-                print(f"[VALIDATION_FAILED] batchId={job_id} questionNumber={slot_idx} attempt={attempt+1} validator={val_prov} reason={clean_err}", flush=True)
-
-                if 'duplicate' in val_reason.lower():
-                    metrics['rejectedDuplicates'] += 1
-                else:
-                    metrics['rejectedValidation'] += 1
-                metrics['regenerationAttempts'] += 1
-                metrics['regenerationCount'] = metrics['regenerationAttempts']
-                continue
-
-            print(f"[VALIDATION_PASSED] batchId={job_id} questionNumber={slot_idx} validator={val_prov} checksCount=8 duration={val_duration:.1f}ms", flush=True)
-
-            # Apply fix if suggested by validator
-            final_q = q_candidate
-            if suggested_fix and isinstance(suggested_fix, dict):
-                for k in ['question', 'text', 'optionA', 'optionB', 'optionC', 'optionD', 'correctAnswer', 'correctOption', 'explanation']:
-                    if suggested_fix.get(k):
-                        final_q[k] = suggested_fix[k]
-
-            # Step 5: Construct production-ready Question record
-            q_text = final_q.get('question') or final_q.get('text')
-            c_ans = (final_q.get('correctAnswer') or final_q.get('correctOption', 'A')).strip().upper()
-            now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-
-            q_record = {
-                'id': f"q-ai-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}",
-                'testId': test_id or "tst-ai-pending",
-                'number': len(generated_questions) + 1,
-                'text': q_text,
-                'questionType': 'text',
-                'questionImage': None,
-                'optionA': final_q['optionA'],
-                'optionB': final_q['optionB'],
-                'optionC': final_q['optionC'],
-                'optionD': final_q['optionD'],
-                'optionTypes': {'A': 'text', 'B': 'text', 'C': 'text', 'D': 'text'},
-                'optionImages': {'A': None, 'B': None, 'C': None, 'D': None},
-                'correctOption': c_ans,
-                'marks': float(marks_per_correct),
-                'negativeMarks': float(negative_marks),
-                'explanation': final_q.get('explanation', ''),
-                'category': question_category,
-                'difficulty': difficulty,
-                'estimatedThinkingLevel': question_speed,
-                'chapter': canonical_ch_name,
-                'chapterId': canonical_ch_id,
-                'isDraft': False,
-                'aiSuggestedAnswer': c_ans,
-                'isDuplicate': False,
-                'aiGenerated': True,
-                'aiJobId': job_id or f"job-{int(time.time()*1000)}",
-                'sourceDocId': final_q.get('sourceDocId'),
-                'sourcePage': final_q.get('sourcePage'),
-                'providerUsed': gen_prov,
-                'modelUsed': gen_model,
-                'validationProvider': val_prov,
-                'createdAt': now_iso,
-                'updatedAt': now_iso
-            }
-
-            generated_questions.append(q_record)
-            concept_summaries.append(q_text[:120])
-            slot_saved = True
-            slot_status_obj['status'] = 'saved'
-            slot_status_obj['provider'] = gen_prov
-
-            if on_question_verified:
-                try:
-                    on_question_verified(q_record, generated_questions, len(generated_questions), count)
-                except Exception as cb_err:
-                    print(f"[AI_PIPELINE_CB_WARNING] on_question_verified callback error: {cb_err}", flush=True)
-
-            print(f"[QUESTION_VERIFIED] batchId={job_id} questionNumber={slot_idx} provider={gen_prov} model={gen_model} verifiedTotal={len(generated_questions)}/{count}", flush=True)
-            print(f"[QUESTION SUCCESS] batchId={job_id} questionNumber={slot_idx} provider={gen_prov} model={gen_model} verifiedTotal={len(generated_questions)}", flush=True)
-            break  # Attempt loop ends on success
-
-        if not slot_saved:
-            slot_status_obj['status'] = 'failed'
-            clean_err = last_slot_error or "Exhausted all retry attempts."
+        if not is_valid:
+            clean_err = str(val_reason).strip()
             if clean_err.startswith("Validation rejected: "):
                 clean_err = clean_err[len("Validation rejected: "):].strip()
             if clean_err.startswith("Duplicate check: "):
                 clean_err = "Duplicate: " + clean_err[len("Duplicate check: "):].strip()
+
+            # Record rejected stem to explicitly forbid it on next attempt for this slot
+            cand_stem = str(q_candidate.get('question') or q_candidate.get('text') or '').strip()
+            if cand_stem and cand_stem not in slot_rejected_stems:
+                slot_rejected_stems.append(cand_stem)
+
+            print(f"[VALIDATION_FAILED] batchId={job_id} questionNumber={slot_idx} attempt={attempt} validator={val_prov} reason={clean_err}", flush=True)
+
+            if 'duplicate' in val_reason.lower():
+                metrics['rejectedDuplicates'] += 1
+            else:
+                metrics['rejectedValidation'] += 1
+            metrics['regenerationAttempts'] += 1
+            metrics['regenerationCount'] = metrics['regenerationAttempts']
+            slot_status_obj['status'] = 'retrying'
             slot_status_obj['error'] = clean_err
-            print(f"[QUESTION_FAILED] batchId={job_id} questionNumber={slot_idx} attempt={attempt+1} error={clean_err}", flush=True)
-            print(f"[QUESTION FAILED] batchId={job_id} questionNumber={slot_idx} error={clean_err}", flush=True)
-            if progress_callback:
-                try:
-                    progress_callback({
-                        'stage': 'failed',
-                        'current': slot_idx,
-                        'verifiedCount': len(generated_questions),
-                        'total': count,
-                        'status': f"Q{slot_idx} FAILED — {clean_err}",
-                        'progressPct': int((slot_idx / count) * 85) + 5,
-                        'questionStatuses': list(question_statuses)
-                    })
-                except Exception:
-                    pass
+            # Stay on the same slot_idx and retry
+            continue
+
+        print(f"[VALIDATION_PASSED] batchId={job_id} questionNumber={slot_idx} validator={val_prov} checksCount=8 duration={val_duration:.1f}ms", flush=True)
+
+        # Apply fix if suggested by validator
+        final_q = q_candidate
+        if suggested_fix and isinstance(suggested_fix, dict):
+            for k in ['question', 'text', 'optionA', 'optionB', 'optionC', 'optionD', 'correctAnswer', 'correctOption', 'explanation']:
+                if suggested_fix.get(k):
+                    final_q[k] = suggested_fix[k]
+
+        # Step 3: Construct production-ready Question record
+        q_text = final_q.get('question') or final_q.get('text')
+        c_ans = (final_q.get('correctAnswer') or final_q.get('correctOption', 'A')).strip().upper()
+        now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
+        q_record = {
+            'id': f"q-ai-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}",
+            'testId': test_id or "tst-ai-pending",
+            'number': len(generated_questions) + 1,
+            'text': q_text,
+            'questionType': 'text',
+            'questionImage': None,
+            'optionA': final_q['optionA'],
+            'optionB': final_q['optionB'],
+            'optionC': final_q['optionC'],
+            'optionD': final_q['optionD'],
+            'optionTypes': {'A': 'text', 'B': 'text', 'C': 'text', 'D': 'text'},
+            'optionImages': {'A': None, 'B': None, 'C': None, 'D': None},
+            'correctOption': c_ans,
+            'marks': float(marks_per_correct),
+            'negativeMarks': float(negative_marks),
+            'explanation': final_q.get('explanation', ''),
+            'category': question_category,
+            'difficulty': difficulty,
+            'estimatedThinkingLevel': question_speed,
+            'chapter': canonical_ch_name,
+            'chapterId': canonical_ch_id,
+            'isDraft': False,
+            'aiSuggestedAnswer': c_ans,
+            'isDuplicate': False,
+            'aiGenerated': True,
+            'aiJobId': job_id or f"job-{int(time.time()*1000)}",
+            'sourceDocId': final_q.get('sourceDocId'),
+            'sourcePage': final_q.get('sourcePage'),
+            'providerUsed': gen_prov,
+            'modelUsed': gen_model,
+            'validationProvider': val_prov,
+            'createdAt': now_iso,
+            'updatedAt': now_iso
+        }
+
+        # Save question and advance to next slot
+        generated_questions.append(q_record)
+        concept_summaries.append(q_text[:120])
+        slot_status_obj['status'] = 'saved'
+        slot_status_obj['provider'] = gen_prov
+        slot_status_obj['error'] = None
+
+        if on_question_verified:
+            try:
+                on_question_verified(q_record, generated_questions, len(generated_questions), count)
+            except Exception as cb_err:
+                print(f"[AI_PIPELINE_CB_WARNING] on_question_verified callback error: {cb_err}", flush=True)
+
+        print(f"[QUESTION_VERIFIED] batchId={job_id} questionNumber={slot_idx} provider={gen_prov} model={gen_model} verifiedTotal={len(generated_questions)}/{count}", flush=True)
+        print(f"[QUESTION SUCCESS] batchId={job_id} questionNumber={slot_idx} provider={gen_prov} model={gen_model} verifiedTotal={len(generated_questions)}", flush=True)
 
     metrics['generatedCount'] = len(generated_questions)
     metrics['failedCount'] = count - len(generated_questions)
@@ -1187,7 +1216,7 @@ def generate_exact_mcqs_pipeline(
     metrics['providersUsed'] = list(metrics['providersUsed'])
     metrics['validationProvidersUsed'] = list(metrics['validationProvidersUsed'])
 
-    final_status = 'COMPLETED' if len(generated_questions) == count else ('PARTIAL' if len(generated_questions) > 0 else 'FAILED')
+    final_status = 'COMPLETED' if len(generated_questions) == count else 'FAILED'
     print(f"[BATCH_COMPLETED] batchId={job_id} total={count} verified={len(generated_questions)} failed={metrics['failedCount']} totalDuration={metrics['durationSeconds']}s providersUsed={list(metrics['providersUsed'])}", flush=True)
     print(f"[BATCH COMPLETE] batchId={job_id} totalGenerated={len(generated_questions)} totalFailed={metrics['failedCount']} duration={metrics['durationSeconds']}s status={final_status}", flush=True)
 

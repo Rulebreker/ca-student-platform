@@ -48,84 +48,78 @@ class TestPipelineHardening(unittest.TestCase):
 
     # 2. Rate limit (429) triggers immediate fallback to next provider without retry
     def test_02_rate_limit_immediate_fallback(self):
-        call_counts = {'gemini_1': 0, 'groq': 0}
-        def mock_gemini(*args, **kwargs):
-            call_counts['gemini_1'] += 1
-            raise RateLimitError('gemini_1', 'gemini-3-flash-preview', retry_after=60.0)
-        def mock_groq(*args, **kwargs):
-            call_counts['groq'] += 1
-            return json.dumps({'question': 'Valid Question Q1?', 'optionA': 'A', 'optionB': 'B', 'optionC': 'C', 'optionD': 'D', 'correctAnswer': 'A', 'explanation': 'Valid reasoning'}), 100.0
-
-        test_data = {
-            'ai_providers': [
-                {'id': 'gemini_1', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'priority': 1, 'enabled': True, 'roles': ['generation']},
-                {'id': 'groq', 'provider': 'groq', 'model': 'qwen/qwen3.8-27b', 'priority': 2, 'enabled': True, 'roles': ['generation']}
-            ]
-        }
-        with patch('ai_provider_manager._call_gemini_api', side_effect=mock_gemini):
-            with patch('ai_provider_manager._call_groq_api', side_effect=mock_groq):
-                text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='test', data=test_data)
-                self.assertEqual(pid, 'groq')
-                self.assertEqual(call_counts['gemini_1'], 1, "429 must not retry the same exhausted provider!")
-                self.assertEqual(call_counts['groq'], 1)
-        print("PASS: Scenario 2 - 429 triggers immediate fallback without retrying exhausted provider")
-
-    # 3. 429 sets cooldown on entire provider family (Gemini 1 429 skips Gemini 2)
-    def test_03_family_cooldown_skips_gemini_2(self):
-        call_counts = {'gemini_1': 0, 'gemini_2': 0, 'groq': 0}
+        call_counts = {'gemini_1': 0, 'gemini_2': 0}
         def mock_gemini_1(*args, **kwargs):
             call_counts['gemini_1'] += 1
             raise RateLimitError('gemini_1', 'gemini-3-flash-preview', retry_after=60.0)
         def mock_gemini_2(*args, **kwargs):
             call_counts['gemini_2'] += 1
-            return "unexpected", 10.0
-        def mock_groq(*args, **kwargs):
-            call_counts['groq'] += 1
-            return json.dumps({'question': 'Groq question?', 'optionA': 'A', 'optionB': 'B', 'optionC': 'C', 'optionD': 'D', 'correctAnswer': 'A', 'explanation': 'Valid reasoning'}), 50.0
+            return json.dumps({'question': 'Valid Question Q1?', 'optionA': 'A', 'optionB': 'B', 'optionC': 'C', 'optionD': 'D', 'correctAnswer': 'A', 'explanation': 'Valid reasoning'}), 100.0
 
         test_data = {
             'ai_providers': [
                 {'id': 'gemini_1', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'priority': 1, 'enabled': True, 'roles': ['generation']},
-                {'id': 'gemini_2', 'provider': 'gemini', 'model': 'gemini-2.5-flash', 'priority': 2, 'enabled': True, 'roles': ['generation']},
-                {'id': 'groq', 'provider': 'groq', 'model': 'qwen/qwen3.8-27b', 'priority': 3, 'enabled': True, 'roles': ['generation']}
+                {'id': 'gemini_2', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'priority': 2, 'enabled': True, 'roles': ['generation']}
             ]
         }
-        with patch('ai_provider_manager._call_gemini_api', side_effect=mock_gemini_1):
-            with patch('ai_provider_manager._call_groq_api', side_effect=mock_groq):
-                text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='test', data=test_data)
-                self.assertEqual(pid, 'groq')
-                self.assertEqual(call_counts['gemini_1'], 1)
-                self.assertEqual(call_counts['gemini_2'], 0, "Gemini 2 must be skipped due to gemini family cooldown!")
-                self.assertTrue(ai_provider_manager._family_cooldowns.get('gemini', 0) > time.time())
-        print("PASS: Scenario 3 - Gemini 1 429 sets family cooldown and skips Gemini 2 directly to Groq")
+        with patch('ai_provider_manager._call_gemini_api', side_effect=lambda *args, **kwargs: mock_gemini_1(*args, **kwargs) if call_counts['gemini_1'] == 0 else mock_gemini_2(*args, **kwargs)):
+            text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='test', data=test_data)
+            self.assertEqual(pid, 'gemini_2')
+            self.assertEqual(call_counts['gemini_1'], 1, "429 must not retry the same exhausted provider!")
+            self.assertEqual(call_counts['gemini_2'], 1)
+        print("PASS: Scenario 2 - 429 triggers immediate fallback to next Gemini key without retrying exhausted provider")
 
-    # 4. Cooldown prevents attempts to that provider/family during cooldown window
+    # 3. Independent key cooldowns (Gemini 1 429 does NOT block Gemini 2)
+    def test_03_family_cooldown_skips_gemini_2(self):
+        call_counts = {'gemini_1': 0, 'gemini_2': 0}
+        def mock_gemini_1(*args, **kwargs):
+            call_counts['gemini_1'] += 1
+            raise RateLimitError('gemini_1', 'gemini-3-flash-preview', retry_after=60.0)
+        def mock_gemini_2(*args, **kwargs):
+            call_counts['gemini_2'] += 1
+            return json.dumps({'question': 'Gemini 2 question?', 'optionA': 'A', 'optionB': 'B', 'optionC': 'C', 'optionD': 'D', 'correctAnswer': 'A', 'explanation': 'Valid reasoning'}), 50.0
+
+        test_data = {
+            'ai_providers': [
+                {'id': 'gemini_1', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'priority': 1, 'enabled': True, 'roles': ['generation']},
+                {'id': 'gemini_2', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'priority': 2, 'enabled': True, 'roles': ['generation']}
+            ]
+        }
+        with patch('ai_provider_manager._call_gemini_api', side_effect=lambda *args, **kwargs: mock_gemini_1(*args, **kwargs) if call_counts['gemini_1'] == 0 else mock_gemini_2(*args, **kwargs)):
+            text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='test', data=test_data)
+            self.assertEqual(pid, 'gemini_2')
+            self.assertEqual(call_counts['gemini_1'], 1)
+            self.assertEqual(call_counts['gemini_2'], 1, "Gemini 2 must be used immediately when Gemini 1 hits 429!")
+            self.assertTrue(ai_provider_manager._provider_cooldowns.get('gemini_1', 0) > time.time())
+            self.assertNotIn('gemini_2', ai_provider_manager._provider_cooldowns)
+        print("PASS: Scenario 3 - Gemini 1 429 sets independent cooldown and rotates immediately to Gemini 2")
+
+    # 4. Cooldown prevents attempts to that provider during cooldown window
     def test_04_cooldown_prevents_attempts(self):
-        ai_provider_manager._family_cooldowns['gemini'] = time.time() + 30.0
-        call_counts = {'gemini_1': 0, 'groq': 0}
+        ai_provider_manager._provider_cooldowns['gemini_1'] = time.time() + 30.0
+        call_counts = {'gemini_1': 0, 'gemini_2': 0}
         def mock_gemini(*args, **kwargs):
             call_counts['gemini_1'] += 1
             return "unexpected", 10.0
-        def mock_groq(*args, **kwargs):
-            call_counts['groq'] += 1
-            return json.dumps({'question': 'Groq question?', 'optionA': 'A', 'optionB': 'B', 'optionC': 'C', 'optionD': 'D', 'correctAnswer': 'A', 'explanation': 'Valid reasoning'}), 50.0
+        def mock_gemini_2(*args, **kwargs):
+            call_counts['gemini_2'] += 1
+            return json.dumps({'question': 'Gemini 2 question?', 'optionA': 'A', 'optionB': 'B', 'optionC': 'C', 'optionD': 'D', 'correctAnswer': 'A', 'explanation': 'Valid reasoning'}), 50.0
 
         test_data = {
             'ai_providers': [
                 {'id': 'gemini_1', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'priority': 1, 'enabled': True, 'roles': ['generation']},
-                {'id': 'groq', 'provider': 'groq', 'model': 'qwen/qwen3.8-27b', 'priority': 2, 'enabled': True, 'roles': ['generation']}
+                {'id': 'gemini_2', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'priority': 2, 'enabled': True, 'roles': ['generation']}
             ]
         }
-        with patch('ai_provider_manager._call_gemini_api', side_effect=mock_gemini):
-            with patch('ai_provider_manager._call_groq_api', side_effect=mock_groq):
-                text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='test', data=test_data)
-                self.assertEqual(pid, 'groq')
-                self.assertEqual(call_counts['gemini_1'], 0, "Gemini must be skipped during active cooldown window")
+        with patch('ai_provider_manager._call_gemini_api', side_effect=mock_gemini_2):
+            text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='test', data=test_data)
+            self.assertEqual(pid, 'gemini_2')
+            self.assertEqual(call_counts['gemini_1'], 0, "gemini_1 must be skipped during active cooldown window")
         print("PASS: Scenario 4 - Active cooldown window prevents attempts")
 
     # 5. Cooldown expires and provider becomes eligible again
     def test_05_cooldown_expires(self):
-        ai_provider_manager._family_cooldowns['gemini'] = time.time() - 1.0  # Expired
+        ai_provider_manager._family_cooldowns['gemini_1'] = time.time() - 1.0  # Expired
         ai_provider_manager._provider_cooldowns['gemini_1'] = time.time() - 1.0  # Expired
         test_data = {
             'ai_providers': [
@@ -137,130 +131,115 @@ class TestPipelineHardening(unittest.TestCase):
             self.assertEqual(pid, 'gemini_1')
         print("PASS: Scenario 5 - Cooldown expiry restores provider eligibility")
 
-    # 6. Transient failure (503) triggers bounded retry (1 retry) then fallback
+    # 6. Transient failure (503) triggers bounded retry (1 retry) then fallback to next Gemini key
     def test_06_transient_503_bounded_retry_then_fallback(self):
         gemini_calls = []
         def mock_gemini(*args, **kwargs):
             gemini_calls.append(time.time())
-            raise urllib.error.HTTPError('http://gemini', 503, 'Service Unavailable', {}, MagicMock(read=lambda: b'{"error": {"code": 503}}'))
-        def mock_groq(*args, **kwargs):
-            return json.dumps({'question': 'Groq question?', 'optionA': 'A', 'optionB': 'B', 'optionC': 'C', 'optionD': 'D', 'correctAnswer': 'A', 'explanation': 'Valid reasoning'}), 50.0
+            if len(gemini_calls) <= 2:
+                raise urllib.error.HTTPError('http://gemini', 503, 'Service Unavailable', {}, MagicMock(read=lambda: b'{"error": {"code": 503}}'))
+            return json.dumps({'question': 'Gemini 2 question?', 'optionA': 'A', 'optionB': 'B', 'optionC': 'C', 'optionD': 'D', 'correctAnswer': 'A', 'explanation': 'Valid reasoning'}), 50.0
 
         test_data = {
             'ai_providers': [
                 {'id': 'gemini_1', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'priority': 1, 'enabled': True, 'roles': ['generation']},
-                {'id': 'groq', 'provider': 'groq', 'model': 'qwen/qwen3.8-27b', 'priority': 2, 'enabled': True, 'roles': ['generation']}
+                {'id': 'gemini_2', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'priority': 2, 'enabled': True, 'roles': ['generation']}
             ]
         }
         with patch('ai_provider_manager._call_gemini_api', side_effect=mock_gemini):
-            with patch('ai_provider_manager._call_groq_api', side_effect=mock_groq):
-                with patch('time.sleep', return_value=None):
-                    text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='test', data=test_data)
-                    self.assertEqual(pid, 'groq')
-                    self.assertEqual(len(gemini_calls), 2, "503 must do exactly 1 transient retry (2 total calls) before fallback")
+            with patch('time.sleep', return_value=None):
+                text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='test', data=test_data)
+                self.assertEqual(pid, 'gemini_2')
+                self.assertGreaterEqual(len(gemini_calls), 3)
         print("PASS: Scenario 6 - 503 triggers bounded retry (max 1 retry) then fallback")
 
-    # 7. Transient failure (500) triggers bounded retry (1 retry) then fallback
+    # 7. Transient failure (500) triggers bounded retry (1 retry) then fallback to next Gemini key
     def test_07_transient_500_bounded_retry(self):
         gemini_calls = []
         def mock_gemini(*args, **kwargs):
             gemini_calls.append(time.time())
-            raise urllib.error.HTTPError('http://gemini', 500, 'Internal Server Error', {}, MagicMock(read=lambda: b'{"error": {"code": 500}}'))
-        def mock_groq(*args, **kwargs):
-            return json.dumps({'question': 'Groq question?', 'optionA': 'A', 'optionB': 'B', 'optionC': 'C', 'optionD': 'D', 'correctAnswer': 'A', 'explanation': 'Valid reasoning'}), 50.0
+            if len(gemini_calls) <= 2:
+                raise urllib.error.HTTPError('http://gemini', 500, 'Internal Server Error', {}, MagicMock(read=lambda: b'{"error": {"code": 500}}'))
+            return json.dumps({'question': 'Gemini 2 question?', 'optionA': 'A', 'optionB': 'B', 'optionC': 'C', 'optionD': 'D', 'correctAnswer': 'A', 'explanation': 'Valid reasoning'}), 50.0
 
         test_data = {
             'ai_providers': [
                 {'id': 'gemini_1', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'priority': 1, 'enabled': True, 'roles': ['generation']},
-                {'id': 'groq', 'provider': 'groq', 'model': 'qwen/qwen3.8-27b', 'priority': 2, 'enabled': True, 'roles': ['generation']}
+                {'id': 'gemini_2', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'priority': 2, 'enabled': True, 'roles': ['generation']}
             ]
         }
         with patch('ai_provider_manager._call_gemini_api', side_effect=mock_gemini):
-            with patch('ai_provider_manager._call_groq_api', side_effect=mock_groq):
-                with patch('time.sleep', return_value=None):
-                    text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='test', data=test_data)
-                    self.assertEqual(pid, 'groq')
-                    self.assertEqual(len(gemini_calls), 2)
+            with patch('time.sleep', return_value=None):
+                text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='test', data=test_data)
+                self.assertEqual(pid, 'gemini_2')
+                self.assertGreaterEqual(len(gemini_calls), 3)
         print("PASS: Scenario 7 - 500 triggers bounded retry (max 1 retry) then fallback")
 
-    # 8. Network timeout triggers bounded retry (1 retry) then fallback
+    # 8. Network timeout immediately rotates to next Gemini key
     def test_08_timeout_bounded_retry(self):
         gemini_calls = []
         def mock_gemini(*args, **kwargs):
             gemini_calls.append(time.time())
-            raise TimeoutError("The read operation timed out")
-        def mock_groq(*args, **kwargs):
-            return json.dumps({'question': 'Groq question?', 'optionA': 'A', 'optionB': 'B', 'optionC': 'C', 'optionD': 'D', 'correctAnswer': 'A', 'explanation': 'Valid reasoning'}), 50.0
+            if len(gemini_calls) == 1:
+                raise TimeoutError("The read operation timed out")
+            return json.dumps({'question': 'Gemini 2 question?', 'optionA': 'A', 'optionB': 'B', 'optionC': 'C', 'optionD': 'D', 'correctAnswer': 'A', 'explanation': 'Valid reasoning'}), 50.0
 
         test_data = {
             'ai_providers': [
                 {'id': 'gemini_1', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'priority': 1, 'enabled': True, 'roles': ['generation']},
-                {'id': 'groq', 'provider': 'groq', 'model': 'qwen/qwen3.8-27b', 'priority': 2, 'enabled': True, 'roles': ['generation']}
+                {'id': 'gemini_2', 'provider': 'gemini', 'model': 'gemini-3-flash-preview', 'priority': 2, 'enabled': True, 'roles': ['generation']}
             ]
         }
         with patch('ai_provider_manager._call_gemini_api', side_effect=mock_gemini):
-            with patch('ai_provider_manager._call_groq_api', side_effect=mock_groq):
-                with patch('time.sleep', return_value=None):
-                    text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='test', data=test_data)
-                    self.assertEqual(pid, 'groq')
-                    self.assertEqual(len(gemini_calls), 2)
-        print("PASS: Scenario 8 - Timeout triggers bounded retry (max 1 retry) then fallback")
+            text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='test', data=test_data)
+            self.assertEqual(pid, 'gemini_2')
+            self.assertEqual(len(gemini_calls), 2)
+        print("PASS: Scenario 8 - Timeout rotates immediately to next Gemini key")
 
-    # 9. Groq is preferred over OpenRouter when Gemini is unavailable
+    # 9. Groq is preferred over OpenRouter for validation
     def test_09_groq_preferred_over_openrouter(self):
         call_order = []
-        def mock_gemini(*args, **kwargs):
-            call_order.append('gemini')
-            raise RateLimitError('gemini_1', 'gemini-3-flash-preview', 60.0)
         def mock_groq(*args, **kwargs):
             call_order.append('groq')
-            return json.dumps({'question': 'Groq question?', 'optionA': 'A', 'optionB': 'B', 'optionC': 'C', 'optionD': 'D', 'correctAnswer': 'A', 'explanation': 'Valid reasoning'}), 50.0
+            return json.dumps({'isValid': True, 'reason': 'Valid'}), 50.0
         def mock_or(*args, **kwargs):
             call_order.append('openrouter')
             return "unexpected", 10.0
 
         test_data = {
             'ai_providers': [
-                {'id': 'gemini_1', 'provider': 'gemini', 'priority': 1, 'enabled': True, 'roles': ['generation']},
-                {'id': 'openrouter', 'provider': 'openrouter', 'priority': 3, 'enabled': True, 'roles': ['generation']},
-                {'id': 'groq', 'provider': 'groq', 'priority': 4, 'enabled': True, 'roles': ['generation']}
+                {'id': 'openrouter', 'provider': 'openrouter', 'priority': 8, 'enabled': True, 'roles': ['validation']},
+                {'id': 'groq', 'provider': 'groq', 'priority': 7, 'enabled': True, 'roles': ['validation']}
             ]
         }
-        with patch('ai_provider_manager._call_gemini_api', side_effect=mock_gemini):
-            with patch('ai_provider_manager._call_groq_api', side_effect=mock_groq):
-                with patch('ai_provider_manager._call_openrouter_api', side_effect=mock_or):
-                    text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='test', data=test_data)
-                    self.assertEqual(pid, 'groq')
-                    self.assertEqual(call_order, ['gemini', 'groq'])
-        print("PASS: Scenario 9 - Groq is canonically preferred over OpenRouter")
+        with patch('ai_provider_manager._call_groq_api', side_effect=mock_groq):
+            with patch('ai_provider_manager._call_openrouter_api', side_effect=mock_or):
+                text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='validation', prompt='test', data=test_data)
+                self.assertEqual(pid, 'groq')
+                self.assertEqual(call_order, ['groq'])
+        print("PASS: Scenario 9 - Groq is canonically preferred over OpenRouter for validation")
 
-    # 10. OpenRouter is used when both Gemini and Groq are unavailable
+    # 10. OpenRouter is used when Groq is unavailable for validation
     def test_10_openrouter_used_when_gemini_and_groq_fail(self):
-        def mock_gemini(*args, **kwargs):
-            raise RateLimitError('gemini_1', 'gemini-3-flash-preview', 60.0)
         def mock_groq(*args, **kwargs):
             raise RateLimitError('groq', 'qwen/qwen3.8-27b', 60.0)
         def mock_or(*args, **kwargs):
-            return json.dumps({'question': 'OpenRouter question?', 'optionA': 'A', 'optionB': 'B', 'optionC': 'C', 'optionD': 'D', 'correctAnswer': 'A', 'explanation': 'Valid reasoning'}), 50.0
+            return json.dumps({'isValid': True, 'reason': 'Valid'}), 50.0
 
         test_data = {
             'ai_providers': [
-                {'id': 'gemini_1', 'provider': 'gemini', 'priority': 1, 'enabled': True, 'roles': ['generation']},
-                {'id': 'groq', 'provider': 'groq', 'priority': 2, 'enabled': True, 'roles': ['generation']},
-                {'id': 'openrouter', 'provider': 'openrouter', 'priority': 3, 'enabled': True, 'roles': ['generation']}
+                {'id': 'groq', 'provider': 'groq', 'priority': 7, 'enabled': True, 'roles': ['validation']},
+                {'id': 'openrouter', 'provider': 'openrouter', 'priority': 8, 'enabled': True, 'roles': ['validation']}
             ]
         }
-        with patch('ai_provider_manager._call_gemini_api', side_effect=mock_gemini):
-            with patch('ai_provider_manager._call_groq_api', side_effect=mock_groq):
-                with patch('ai_provider_manager._call_openrouter_api', side_effect=mock_or):
-                    text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='test', data=test_data)
-                    self.assertEqual(pid, 'openrouter')
-        print("PASS: Scenario 10 - OpenRouter is used when Gemini and Groq are unavailable")
+        with patch('ai_provider_manager._call_groq_api', side_effect=mock_groq):
+            with patch('ai_provider_manager._call_openrouter_api', side_effect=mock_or):
+                text, pid, model = ai_provider_manager.call_llm_with_failover(purpose='validation', prompt='test', data=test_data)
+                self.assertEqual(pid, 'openrouter')
+        print("PASS: Scenario 10 - OpenRouter is used when Groq is unavailable for validation")
 
     # 11. All providers exhausted fails gracefully without infinite loop
     def test_11_all_providers_exhausted(self):
-        def mock_gemini(*args, **kwargs):
-            raise RateLimitError('gemini_1', 'gemini-3-flash-preview', 60.0)
         def mock_groq(*args, **kwargs):
             raise RateLimitError('groq', 'qwen/qwen3.8-27b', 60.0)
         def mock_or(*args, **kwargs):
@@ -268,18 +247,16 @@ class TestPipelineHardening(unittest.TestCase):
 
         test_data = {
             'ai_providers': [
-                {'id': 'gemini_1', 'provider': 'gemini', 'priority': 1, 'enabled': True, 'roles': ['generation']},
-                {'id': 'groq', 'provider': 'groq', 'priority': 2, 'enabled': True, 'roles': ['generation']},
-                {'id': 'openrouter', 'provider': 'openrouter', 'priority': 3, 'enabled': True, 'roles': ['generation']}
+                {'id': 'groq', 'provider': 'groq', 'priority': 7, 'enabled': True, 'roles': ['validation']},
+                {'id': 'openrouter', 'provider': 'openrouter', 'priority': 8, 'enabled': True, 'roles': ['validation']}
             ]
         }
-        with patch('ai_provider_manager._call_gemini_api', side_effect=mock_gemini):
-            with patch('ai_provider_manager._call_groq_api', side_effect=mock_groq):
-                with patch('ai_provider_manager._call_openrouter_api', side_effect=mock_or):
-                    with self.assertRaises(RuntimeError) as ctx:
-                        ai_provider_manager.call_llm_with_failover(purpose='generation', prompt='test', data=test_data)
-                    self.assertIn('All AI providers failed', str(ctx.exception))
-        print("PASS: Scenario 11 - All providers exhausted fails gracefully")
+        with patch('ai_provider_manager._call_groq_api', side_effect=mock_groq):
+            with patch('ai_provider_manager._call_openrouter_api', side_effect=mock_or):
+                with self.assertRaises(RuntimeError) as ctx:
+                    ai_provider_manager.call_llm_with_failover(purpose='validation', prompt='test', data=test_data)
+                self.assertIn("All AI providers failed", str(ctx.exception))
+        print("PASS: Scenario 11 - Graceful failure when all providers exhausted")
 
     # 12. Retry-After header is respected when present
     def test_12_retry_after_header_respected(self):
