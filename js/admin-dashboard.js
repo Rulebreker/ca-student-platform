@@ -7778,14 +7778,14 @@ class AdminDashboard {
               <div>
                 <h4 class="text-sm font-bold text-slate-900">Autonomous MCQ Generation Engine</h4>
                 <p class="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-                  Configure the parameters on the left and click <b>Generate & Host Test Now</b>. The system will formulate, mathematically verify, and independently audit questions across multi-provider failover.
+                  Configure the parameters on the left and click <b>Generate & Host Test Now</b>. The system will formulate, mathematically verify, and validate questions autonomously using local Qwen3 8B via Ollama.
                 </p>
               </div>
 
               <div class="grid grid-cols-2 gap-3 max-w-sm mx-auto text-left pt-4">
                 <div class="p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
-                  <span class="text-[10px] font-bold text-slate-500 uppercase block">Generation Failover</span>
-                  <span class="text-xs font-semibold text-slate-800">Gemini 1 → 2 → OpenRouter → Groq</span>
+                  <span class="text-[10px] font-bold text-slate-500 uppercase block">Generation Engine</span>
+                  <span class="text-xs font-semibold text-slate-800">Local Qwen3 8B (Ollama)</span>
                 </div>
                 <div class="p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
                   <span class="text-[10px] font-bold text-slate-500 uppercase block">Duplicate Filter</span>
@@ -9733,7 +9733,7 @@ class AdminDashboard {
                 </td>
                 <td class="py-3 px-4 text-[11px]">
                   <span class="px-2 py-0.5 bg-slate-100 rounded text-slate-700 font-semibold">
-                    ${(l.providersUsed || []).join(', ') || 'Gemini'}
+                    ${(l.providersUsed || []).join(', ') || 'LOCAL (qwen3:8b)'}
                   </span>
                 </td>
                 <td class="py-3 px-4 text-slate-600 font-mono text-[11px]">
@@ -9758,7 +9758,7 @@ class AdminDashboard {
     }
   }
 
-  // --- SUB-TAB 5: AI PROVIDER MANAGEMENT & FULL CRUD ---
+  // --- SUB-TAB 5: AI PROVIDER MANAGEMENT & LOCAL DAEMON STATUS ---
   async renderAiProvidersSubTab(container) {
     if (!container) return;
 
@@ -9767,13 +9767,13 @@ class AdminDashboard {
 
     container.innerHTML = `
       <div class="space-y-6 max-w-4xl">
-        <!-- Security & Architecture Banner -->
+        <!-- Architecture Banner -->
         <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3">
           <i data-lucide="shield-check" class="w-5 h-5 text-emerald-700 mt-0.5 flex-shrink-0"></i>
           <div class="text-xs text-emerald-950 space-y-1">
-            <span class="font-black text-sm block">Authenticated Encrypted Vault & Strict Credential Isolation</span>
+            <span class="font-black text-sm block">Local AI Infrastructure: Qwen3 8B via Ollama</span>
             <p class="text-emerald-800">
-              Provider credentials are encrypted server-side using PBKDF2-HMAC-SHA256 authenticated encryption, persisted in isolated vault storage, and synced securely across serverless cold starts. Plaintext keys are never sent to the browser or stored in Git.
+              MCQ generation is powered 100% locally by Qwen3 8B running through the Ollama inference engine at <code class="font-mono bg-emerald-100 px-1 py-0.5 rounded">http://127.0.0.1:11434</code>. Zero external cloud API calls, zero third-party quotas, and zero rate limits.
             </p>
           </div>
         </div>
@@ -9784,24 +9784,21 @@ class AdminDashboard {
             <div>
               <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <i data-lucide="cpu" class="w-4 h-4 text-rose-600"></i>
-                Configured AI Models & Gateways
+                Local AI Engine & Models
               </h3>
               <p class="text-xs text-slate-500 mt-0.5">
-                Manage provider hierarchy, execution priorities, failover chains, and verify live connectivity.
+                Verify local Ollama engine status, test live round-trip latency, and inspect runtime health.
               </p>
             </div>
             <div class="flex items-center gap-2">
-              <button onclick="window.adminDashboard.openAddProviderModal()" class="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5">
-                <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add Provider
-              </button>
-              <button onclick="window.adminDashboard.saveAiProvidersSettings()" class="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5">
-                <i data-lucide="save" class="w-3.5 h-3.5"></i> Save Settings
+              <button onclick="window.adminDashboard.testAiProvider('local_qwen', this)" class="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5">
+                <i data-lucide="activity" class="w-3.5 h-3.5"></i> Test Connection
               </button>
             </div>
           </div>
 
           <div id="ai-providers-grid" class="space-y-4">
-            <div class="py-8 text-center text-slate-400 text-xs">Loading provider telemetry...</div>
+            <div class="py-8 text-center text-slate-400 text-xs">Checking local engine status...</div>
           </div>
         </div>
       </div>
@@ -9824,7 +9821,7 @@ class AdminDashboard {
         grid.innerHTML = `
           <div class="py-12 text-center text-slate-400 text-xs">
             <i data-lucide="cpu" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
-            No AI providers configured. Click <b>Add Provider</b> to register an AI gateway.
+            No AI providers configured.
           </div>
         `;
         if (window.lucide) window.lucide.createIcons();
@@ -9832,29 +9829,21 @@ class AdminDashboard {
       }
 
       grid.innerHTML = providers.map(p => {
-        let badgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
-        let badgeText = p.status || 'Unknown';
-        if (badgeText === 'Configured — Healthy' || badgeText === 'healthy') {
-          badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-200';
-          badgeText = 'Configured — Healthy';
-        } else if (badgeText === 'Configured — Connection Failed' || badgeText === 'error') {
-          badgeClass = 'bg-rose-100 text-rose-800 border-rose-200';
-          badgeText = 'Connection Failed';
-        } else if (badgeText === 'Not Configured') {
-          badgeClass = 'bg-amber-100 text-amber-800 border-amber-200';
-          badgeText = 'Not Configured';
-        } else if (badgeText === 'Disabled') {
-          badgeClass = 'bg-slate-100 text-slate-600 border-slate-200';
-          badgeText = 'Disabled';
-        }
+        const isOllama = p.provider === 'ollama' || p.id === 'local_qwen';
+        const isHealthy = p.status === 'Configured — Healthy' || p.status === 'healthy' || p.online === true;
+        
+        let badgeClass = isHealthy
+          ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+          : 'bg-rose-100 text-rose-800 border-rose-200';
+        let badgeText = isHealthy ? 'Online' : 'Offline';
 
-        const typeBadge = (p.provider || 'ai').substring(0, 3).toUpperCase();
+        const typeBadge = isOllama ? 'LOCAL' : (p.provider || 'ai').substring(0, 3).toUpperCase();
 
         return `
           <div class="p-4 border border-slate-200 rounded-xl bg-slate-50 hover:bg-white transition-all space-y-3" id="provider-card-${p.id}">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div class="flex items-center gap-3">
-                <div class="w-9 h-9 rounded-lg bg-rose-100 text-rose-800 flex items-center justify-center font-black text-xs uppercase flex-shrink-0">
+                <div class="w-10 h-10 rounded-lg ${isOllama ? 'bg-purple-100 text-purple-800' : 'bg-rose-100 text-rose-800'} flex items-center justify-center font-black text-xs uppercase flex-shrink-0">
                   ${typeBadge}
                 </div>
                 <div>
@@ -9862,7 +9851,7 @@ class AdminDashboard {
                     <span class="font-bold text-slate-900 text-xs block">${p.name}</span>
                     <span class="text-[10px] text-slate-400 font-mono">(${p.id})</span>
                   </div>
-                  <span class="text-[10px] text-slate-500 font-mono block">Model: <b>${p.model}</b> ${p.fallback_model ? `• Fallback: ${p.fallback_model}` : ''}</span>
+                  <span class="text-[10px] text-slate-500 font-mono block">Model: <b>${p.model}</b> • Runtime: <b>${isOllama ? 'Ollama (127.0.0.1:11434)' : p.provider}</b></span>
                 </div>
               </div>
 
@@ -9880,41 +9869,24 @@ class AdminDashboard {
                   <i data-lucide="activity" class="w-3.5 h-3.5 text-rose-600"></i>
                   Test Connection
                 </button>
-
-                <button 
-                  onclick="window.adminDashboard.openEditProviderModal('${p.id}')"
-                  class="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all border border-slate-200"
-                  title="Edit Provider Settings & Key"
-                >
-                  <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
-                </button>
-
-                <button 
-                  onclick="window.adminDashboard.deleteAiProvider('${p.id}')"
-                  class="p-1.5 text-rose-600 hover:text-rose-900 hover:bg-rose-50 rounded-lg transition-all border border-rose-200"
-                  title="Delete Provider"
-                >
-                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-                </button>
               </div>
             </div>
 
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-200 text-xs">
-              <div>
-                <span class="text-[10px] font-bold text-slate-500 uppercase block">Masked Vault Credential</span>
-                <span class="font-mono text-slate-800 font-bold">${p.maskedKey || '••••••••••••'}</span>
+            ${!isHealthy && isOllama ? `
+              <div class="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800 font-medium">
+                Local AI is offline. Start Ollama on the generation machine and try again.
               </div>
+            ` : ''}
 
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200 text-xs">
               <div>
-                <span class="text-[10px] font-bold text-slate-500 uppercase block">Execution Priority (1 = Top)</span>
-                <input type="number" id="prov-priority-${p.id}" data-id="${p.id}" min="1" max="20" value="${p.priority || 1}" class="prov-priority-input w-20 px-2 py-0.5 text-xs font-bold border border-slate-300 rounded focus:ring-1 focus:ring-rose-500 focus:outline-none" />
+                <span class="text-[10px] font-bold text-slate-500 uppercase block">Inference Host / Daemon</span>
+                <span class="font-mono text-slate-800 font-bold">${isOllama ? 'http://127.0.0.1:11434' : (p.maskedKey || 'Configured')}</span>
               </div>
 
               <div class="flex items-center sm:justify-end gap-2">
-                <label class="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
-                  <input type="checkbox" id="prov-enabled-${p.id}" data-id="${p.id}" ${p.enabled !== false ? 'checked' : ''} class="prov-enabled-input rounded text-rose-600 focus:ring-rose-500" />
-                  Active in Failover Chain
-                </label>
+                <span class="text-[10px] font-bold text-slate-500 uppercase">Engine Status:</span>
+                <span class="text-xs font-bold ${isHealthy ? 'text-emerald-700' : 'text-rose-700'}">${isHealthy ? 'Active & Ready' : 'Unreachable'}</span>
               </div>
             </div>
 
@@ -9922,6 +9894,12 @@ class AdminDashboard {
           </div>
         `;
       }).join('');
+
+      if (window.lucide) window.lucide.createIcons();
+    } catch (err) {
+      console.error('[AI_PROVIDERS_FETCH_ERROR]', err);
+    }
+  }
 
       if (window.lucide) window.lucide.createIcons();
     } catch (err) {

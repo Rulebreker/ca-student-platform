@@ -28962,76 +28962,33 @@
   },
   "ai_providers": [
     {
-      "enabled": true,
-      "fallback_model": "gemini-flash-latest",
-      "id": "gemini_1",
-      "model": "gemini-3-flash-preview",
-      "name": "Google Gemini (Account 1 - Primary)",
+      "id": "local_qwen",
+      "name": "Local Qwen3 8B (Ollama)",
+      "provider": "ollama",
+      "model": "qwen3:8b",
+      "fallback_model": "qwen3:8b",
+      "endpoint": "http://127.0.0.1:11434",
       "priority": 1,
-      "provider": "gemini",
-      "purpose": "generation_validation",
+      "enabled": true,
+      "purpose": "generation",
       "roles": [
         "generation",
         "validation"
       ],
-      "status": "healthy"
+      "status": "healthy",
+      "maskedKey": "LOCAL-DAEMON"
     },
     {
-      "enabled": true,
-      "fallback_model": "mistral-ocr-latest",
       "id": "mistral_ocr",
-      "model": "mistral-ocr-latest",
       "name": "Mistral OCR (Document Intelligence)",
-      "priority": 1,
       "provider": "mistral",
+      "model": "mistral-ocr-latest",
+      "fallback_model": "local-fallback",
+      "priority": 2,
+      "enabled": true,
       "purpose": "ocr",
       "roles": [
         "ocr"
-      ],
-      "status": "healthy"
-    },
-    {
-      "enabled": true,
-      "fallback_model": "gemini-flash-latest",
-      "id": "gemini_2",
-      "model": "gemini-3-flash-preview",
-      "name": "Google Gemini (Account 2 - Secondary)",
-      "priority": 2,
-      "provider": "gemini",
-      "purpose": "generation_validation",
-      "roles": [
-        "generation",
-        "validation"
-      ],
-      "status": "healthy"
-    },
-    {
-      "enabled": true,
-      "fallback_model": "google/gemini-2.0-flash-exp:free",
-      "id": "openrouter",
-      "model": "meta-llama/llama-3.3-70b-instruct",
-      "name": "OpenRouter (Llama 3.3 70B)",
-      "priority": 3,
-      "provider": "openrouter",
-      "purpose": "generation_validation",
-      "roles": [
-        "generation",
-        "validation"
-      ],
-      "status": "healthy"
-    },
-    {
-      "enabled": true,
-      "fallback_model": "llama-3.3-70b-versatile",
-      "id": "groq",
-      "model": "qwen/qwen3.8-27b",
-      "name": "Groq (Qwen 3.8 27B / Llama 3.3 70B)",
-      "priority": 4,
-      "provider": "groq",
-      "purpose": "generation_validation",
-      "roles": [
-        "generation",
-        "validation"
       ],
       "status": "healthy"
     }

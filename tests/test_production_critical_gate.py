@@ -43,7 +43,8 @@ class TestProductionCriticalGate(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(data.get('success'))
         providers = data.get('providers', [])
-        self.assertGreaterEqual(len(providers), 6, "Expected at least 6 configured providers")
+        self.assertGreaterEqual(len(providers), 1, "Expected at least 1 configured provider")
+        self.assertTrue(any(p.get('id') == 'local_qwen' for p in providers), "Expected local_qwen configured provider")
 
     # TEST 2: AI automation/scheduler data loads after refresh
     def test_02_ai_scheduler_data_loads_repeatedly(self):

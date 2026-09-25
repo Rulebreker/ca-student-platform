@@ -1,0 +1,1011 @@
+<USER_REQUEST>
+PROJECT: ExcellenceCA
+TASK: Complete AI MCQ Generation Migration — Remove External AI APIs and Integrate Local Qwen3 8B via Ollama
+
+==================================================
+ROLE
+==================================================
+
+You are the Lead Full-Stack AI Infrastructure Engineer + Backend Architect + QA/Regression Engineer for ExcellenceCA.
+
+You have strong expertise in:
+- Python / FastAPI or the project's existing backend stack
+- Node.js / existing frontend stack if applicable
+- REST APIs
+- Local LLM inference
+- Ollama integration
+- Qwen3 model integration
+- Structured JSON generation
+- Prompt engineering
+- MCQ generation pipelines
+- Database transactions
+- Background jobs / schedulers
+- Auto-pilot systems
+- Admin dashboards
+- Async processing
+- Error handling and retries
+- Data validation
+- Race-condition prevention
+- Duplicate prevention
+- Production-safe migrations
+- Regression testing
+
+You must behave like a senior engineer modifying an existing production application.
+
+Do NOT rewrite unrelated parts of the application.
+Do NOT redesign the entire project.
+Do NOT blindly delete shared code.
+Do NOT make speculative changes.
+
+Follow the existing ExcellenceCA architecture wherever practical.
+
+==================================================
+PRIMARY OBJECTIVE
+==================================================
+
+Completely migrate ExcellenceCA's AI MCQ generation system from external/cloud AI providers to a LOCAL Qwen3 8B model running through Ollama.
+
+The final MCQ generation architecture must be:
+
+Admin / Auto-Pilot
+        ↓
+Subject + Chapter + Generation Configuration
+        ↓
+ExcellenceCA Backend
+        ↓
+Local Ollama
+        ↓
+Qwen3 8B
+        ↓
+Structured MCQ JSON
+        ↓
+Validation / Quality Checks
+        ↓
+Database
+        ↓
+Preview / Publish
+        ↓
+Website
+
+The local AI model currently installed and tested successfully is:
+
+Model:
+qwen3:8b
+
+Inference runtime:
+Ollama
+
+Local Ollama endpoint:
+http://127.0.0.1:11434
+
+Confirmed working:
+- Ollama installed
+- qwen3:8b downloaded
+- Local generation working
+- /api/generate tested successfully
+
+The local Qwen model MUST become the single AI generation engine for MCQs.
+
+==================================================
+IMPORTANT ARCHITECTURAL DECISION
+==================================================
+
+This migration means:
+
+OLD:
+Gemini / Mistral / Groq / OpenRouter / other external AI providers
+        ↓
+MCQ Generation
+
+NEW:
+ExcellenceCA Backend
+        ↓
+Ollama localhost
+        ↓
+Qwen3 8B
+        ↓
+MCQ Generation
+
+There must NOT be an external AI fallback for MCQ generation after this migration.
+
+Do not implement:
+- Gemini fallback
+- Mistral fallback
+- Groq fallback
+- OpenRouter fallback
+- API provider rotation
+- Cloud AI fallback
+- provider quota switching
+
+The purpose of this migration is to eliminate external AI API quota/rate-limit dependency from the MCQ generation workflow.
+
+==================================================
+IMPORTANT: DO NOT DELETE UNRELATED APIs
+==================================================
+
+Only AI-generation-related external APIs must be removed/replaced.
+
+DO NOT remove:
+- Authentication APIs
+- Payment APIs
+- UPI/payment verification APIs
+- Database APIs
+- Student APIs
+- Admin APIs
+- Subscription APIs
+- Leaderboard APIs
+- Test paper APIs
+- File upload APIs
+- Other unrelated application integrations
+
+First identify which external AI code belongs specifically to MCQ generation.
+
+Create a dependency map before deleting anything.
+
+==================================================
+PHASE 1 — CODEBASE AUDIT
+==================================================
+
+Before changing code, perform a complete codebase audit.
+
+Search for all references to:
+
+- Gemini
+- Google AI
+- Mistral
+- Groq
+- OpenRouter
+- AI provider
+- provider fallback
+- AI API key
+- model provider
+- external model endpoint
+- generation provider
+- MCQ AI generation
+- AI question generator
+- generation service
+- autopilot AI generation
+- scheduled MCQ generation
+- generate MCQ
+- bulk MCQ generation
+
+Identify:
+
+1. Backend AI services
+2. AI provider configuration
+3. API key storage
+4. Provider selection logic
+5. Fallback logic
+6. MCQ generation endpoints
+7. Admin "Generate & Host Now"
+8. Auto-Pilot MCQ generation
+9. Scheduled MCQ generation
+10. Background jobs
+11. Generation history
+12. Database models involved
+13. Frontend/admin components that depend on the old provider architecture
+
+Before editing, clearly report the affected files/modules.
+
+Do not modify unrelated modules.
+
+==================================================
+PHASE 2 — REMOVE OLD AI WORKFLOW
+==================================================
+
+Remove the old AI provider workflow from MCQ generation.
+
+Remove/replace:
+
+- External AI provider calls
+- Provider-specific MCQ generation services
+- Provider API keys used only for MCQ generation
+- Provider selection UI used only for MCQ generation
+- Provider fallback logic
+- Cloud quota handling
+- API rotation logic
+- External AI provider status checks
+- Provider-specific retry logic
+- Provider-specific parsing logic if no longer necessary
+- Unused provider configuration fields
+- Unused provider frontend UI
+
+After migration, search the entire codebase again.
+
+No external AI provider must remain in the MCQ generation path.
+
+IMPORTANT:
+Do not break unrelated code that happens to use the same generic API infrastructure.
+
+==================================================
+PHASE 3 — LOCAL OLLAMA SERVICE
+==================================================
+
+Create a clean backend abstraction for local AI generation.
+
+Do NOT scatter raw Ollama HTTP calls throughout the application.
+
+Create one centralized service such as:
+
+LocalQwenService
+or
+OllamaMCQService
+
+The service should be responsible for:
+
+- Checking Ollama availability
+- Calling Ollama
+- Selecting qwen3:8b
+- Building generation requests
+- Handling timeouts
+- Parsing responses
+- Validating structured output
+- Returning normalized MCQ objects
+- Reporting errors
+
+Ollama endpoint:
+
+http://127.0.0.1:11434
+
+Model:
+
+qwen3:8b
+
+Do not hardcode the endpoint throughout the codebase.
+
+Use backend configuration/environment variables, for example:
+
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen3:8b
+
+Default to the above values when appropriate.
+
+Do NOT expose Ollama configuration or internal service details to the public browser unnecessarily.
+
+==================================================
+PHASE 4 — LOCAL QWEN GENERATION
+==================================================
+
+Implement MCQ generation through Ollama.
+
+Preferred endpoint:
+
+POST /api/chat
+or /api/generate
+
+Use the endpoint that best matches the project's backend architecture.
+
+The backend should send a structured generation request.
+
+Use:
+
+model = qwen3:8b
+stream = false
+thinking = false
+
+The generation service must request strict structured JSON.
+
+Example logical output:
+
+{
+  "mcqs": [
+    {
+      "question": "...",
+      "options": {
+        "A": "...",
+        "B": "...",
+        "C": "...",
+        "D": "..."
+      },
+      "answer": "B",
+      "explanation": "...",
+      "subject": "Quantitative Aptitude",
+      "chapter": "Ratio and Proportion",
+      "difficulty": "Medium"
+    }
+  ]
+}
+
+Do not rely on markdown parsing as the primary format.
+
+Do not accept arbitrary prose as successful generation.
+
+==================================================
+PHASE 5 — MCQ PROMPT ENGINE
+==================================================
+
+Create a centralized prompt builder.
+
+The prompt must receive:
+
+- Subject
+- Chapter
+- Number of MCQs
+- Difficulty
+- Marks
+- Negative marking if configured
+- CA exam level
+- Optional question type
+- Optional instructions configured by admin
+
+For example:
+
+Subject:
+Quantitative Aptitude
+
+Chapter:
+Ratio and Proportion
+
+Exam Level:
+CA Foundation
+
+Count:
+20
+
+Difficulty:
+Medium
+
+The model instruction must clearly state:
+
+1. Generate only from the selected subject/chapter.
+2. Do not mix unrelated chapters.
+3. Generate CA Foundation-appropriate questions.
+4. Do not create duplicate questions.
+5. Exactly 4 options per question.
+6. Exactly one correct answer.
+7. Correct answer must match one option.
+8. Explanation must support the answer.
+9. Do not invent impossible or contradictory values.
+10. Avoid malformed mathematical notation.
+11. Perform internal answer verification.
+12. Return JSON only.
+
+IMPORTANT CURRENT PRODUCT DECISION:
+
+For this version, MCQs are generated using Qwen3 8B's learned knowledge based on:
+
+Subject + Chapter + CA level
+
+PDF upload is NOT required for generation.
+
+Web research is NOT required for generation.
+
+Do NOT reintroduce PDF dependency into this workflow.
+
+==================================================
+PHASE 6 — VALIDATION LAYER
+==================================================
+
+Never directly publish raw Qwen output.
+
+Create a validation pipeline.
+
+Validate every generated MCQ for:
+
+- valid JSON
+- required fields
+- question exists
+- exactly 4 options
+- options are non-empty
+- answer is A/B/C/D
+- answer exists in options
+- explanation exists
+- subject matches selected subject
+- chapter matches selected chapter
+- difficulty exists
+- no duplicate questions
+- no duplicate option sets
+- no duplicate MCQ fingerprints
+- no obvious malformed expressions
+- no missing values
+- no accidental empty strings
+
+Create a normalized question fingerprint to detect duplicates.
+
+Use safe normalization before duplicate comparison.
+
+==================================================
+PHASE 7 — MATHEMATICAL VALIDATION
+==================================================
+
+Because Qwen will generate CA Quantitative Aptitude questions, mathematical correctness is important.
+
+Where possible, validate numerical questions programmatically.
+
+At minimum:
+
+- Check that the answer option exists.
+- Detect obvious calculation inconsistencies where practical.
+- Never silently replace the model's answer with a guessed answer.
+- If validation fails, regenerate the invalid MCQ rather than publishing it.
+- Put a maximum retry count to prevent infinite generation loops.
+
+For example:
+
+Requested:
+10 MCQs
+
+Model returns:
+10 MCQs
+
+Validation:
+8 PASS
+2 FAIL
+
+Then regenerate only the invalid 2 questions.
+
+Final result must contain exactly 10 valid MCQs.
+
+==================================================
+PHASE 8 — GENERATE & HOST NOW
+==================================================
+
+Replace the existing Generate & Host Now AI generation path.
+
+Admin should be able to:
+
+1. Open MCQ Studio
+2. Select Subject
+3. Select Chapter
+4. Select MCQ count
+5. Select difficulty
+6. Configure marks if applicable
+7. Click:
+
+GENERATE & HOST NOW
+
+Backend must then:
+
+1. Validate admin request
+2. Check local Ollama availability
+3. Start generation
+4. Generate requested MCQs
+5. Validate them
+6. Prevent duplicates
+7. Save them transactionally
+8. Apply subject/chapter metadata
+9. Apply visibility/host settings
+10. Publish/host them according to current product logic
+11. Record generation history
+12. Return success details to admin
+
+Do NOT create duplicate MCQs if the request is retried.
+
+Use an idempotency mechanism or generation job identifier.
+
+==================================================
+PHASE 9 — AUTO-PILOT INTEGRATION
+==================================================
+
+Integrate the SAME LocalQwenService into Auto-Pilot.
+
+Do not create a second AI implementation for Auto-Pilot.
+
+Architecture:
+
+Auto-Pilot Scheduler
+        ↓
+Generation Job
+        ↓
+LocalQwenService
+        ↓
+Qwen3 8B
+        ↓
+Validation
+        ↓
+Database
+        ↓
+Host/Publish
+
+Auto-Pilot must support the existing scheduling behavior.
+
+Examples:
+
+Daily:
+7:00 PM → generate MCQs → host/publish
+
+One-time:
+18/09/26 7:00 PM → generate/host
+18/09/26 7:15 PM → expire according to existing event rules
+
+Use the existing scheduler architecture where possible.
+
+Do not rewrite the entire scheduler.
+
+==================================================
+PHASE 10 — AUTO-PILOT SAFETY
+==================================================
+
+For scheduled generation:
+
+- Do not create duplicate jobs.
+- Do not run the same schedule twice.
+- Do not generate duplicate MCQs.
+- If Ollama is offline, mark the job as FAILED with a clear reason.
+- Do not leave jobs stuck permanently in "running".
+- Store generation status.
+
+Statuses should support something like:
+
+PENDING
+RUNNING
+SUCCESS
+FAILED
+PARTIAL
+CANCELLED
+
+Use a job ID.
+
+Record:
+
+- job ID
+- subject
+- chapter
+- requested count
+- generated count
+- valid count
+- invalid count
+- start time
+- end time
+- duration
+- model
+- error message if failed
+
+==================================================
+PHASE 11 — GENERATION HISTORY
+==================================================
+
+Existing AI Generation History must continue working.
+
+Update it to reflect local Qwen generation.
+
+Example:
+
+Provider:
+LOCAL
+
+Model:
+qwen3:8b
+
+Runtime:
+Ollama
+
+Subject:
+Quantitative Aptitude
+
+Chapter:
+Ratio and Proportion
+
+Requested:
+20
+
+Generated:
+20
+
+Valid:
+20
+
+Status:
+SUCCESS
+
+The admin should be able to see:
+
+- What was generated
+- When
+- Subject
+- Chapter
+- Count
+- Model
+- Status
+- Failure reason if applicable
+
+Do not expose API keys because there should no longer be external AI keys for MCQ generation.
+
+==================================================
+PHASE 12 — ADMIN UX
+==================================================
+
+Keep the existing ExcellenceCA design and layout.
+
+Do NOT redesign the entire Admin Panel.
+
+Update only the AI MCQ generation sections.
+
+The AI configuration area should no longer ask the admin for:
+
+- Gemini API key
+- Mistral API key
+- Groq key
+- OpenRouter key
+- provider selection
+
+Instead show local AI status:
+
+LOCAL AI
+Status: Online / Offline
+Model: qwen3:8b
+Runtime: Ollama
+
+Optional:
+Last generation
+Last successful job
+Current job
+
+If Ollama is offline:
+
+Show:
+"Local AI is offline. Start Ollama on the generation machine and try again."
+
+Do NOT show:
+"Invalid API key"
+"Provider quota exceeded"
+"Switching provider"
+
+because this is no longer an external AI architecture.
+
+==================================================
+PHASE 13 — PERFORMANCE
+==================================================
+
+The current machine runs:
+
+Qwen3 8B
+5.1 GB model
+24 GB RAM
+4 GB AMD GPU
+
+Generation may take time.
+
+Do NOT block the admin browser request for the entire generation if the existing architecture supports background jobs.
+
+Prefer:
+
+Admin Request
+→ Create Generation Job
+→ Background Worker
+→ Qwen Generation
+→ Validation
+→ Save
+→ Update Progress
+
+Admin UI should show:
+
+Queued
+Generating
+Validating
+Saving
+Completed
+Failed
+
+Avoid infinite loading states.
+
+Implement reasonable timeout handling.
+
+Do not create duplicate background jobs on frontend retries.
+
+==================================================
+PHASE 14 — ERROR HANDLING
+==================================================
+
+Handle:
+
+1. Ollama unavailable
+2. Model missing
+3. Ollama timeout
+4. Invalid model response
+5. Invalid JSON
+6. Wrong MCQ count
+7. Duplicate questions
+8. Validation failures
+9. Database failure
+10. Scheduler failure
+11. Worker crash
+12. Partial generation
+
+Errors must be actionable.
+
+Example:
+
+"Local Qwen generation failed: Ollama is not reachable at http://127.0.0.1:11434."
+
+Do not silently swallow errors.
+
+Do not expose stack traces to normal admin UI.
+
+Full technical errors can go to backend logs.
+
+==================================================
+PHASE 15 — DATABASE SAFETY
+==================================================
+
+Use the existing MCQ schema wherever possible.
+
+Do NOT unnecessarily change database schema.
+
+Do not insert partially generated batches.
+
+Prefer transactional behavior:
+
+Generate
+→ Validate entire batch
+→ Begin transaction
+→ Insert
+→ Commit
+
+If insert fails:
+
+Rollback.
+
+No partial MCQ batch should be published accidentally.
+
+==================================================
+PHASE 16 — SECURITY
+==================================================
+
+Local Ollama must be accessed by trusted backend code.
+
+Do NOT allow arbitrary public users to directly send prompts to Ollama through the frontend.
+
+Admin authentication must remain required for generation.
+
+Validate:
+
+- subject
+- chapter
+- count
+- difficulty
+- marks
+- all generation parameters
+
+Prevent prompt injection through admin fields where practical.
+
+Do not log:
+- credentials
+- secrets
+- private student data
+
+==================================================
+PHASE 17 — BACKWARDS COMPATIBILITY
+==================================================
+
+Existing features must continue working:
+
+- Student MCQ solving
+- MCQ hosting
+- Test papers
+- Leaderboard
+- Subscription access
+- MCQ tier protection
+- Admin MCQ management
+- Existing MCQ publishing
+- Generation history
+- Auto-Pilot scheduler
+- Existing admin authentication
+
+The AI provider migration must not change existing student-facing behavior unless required.
+
+==================================================
+PHASE 18 — DEVELOPMENT / PRODUCTION CONSIDERATION
+==================================================
+
+Important:
+
+Ollama currently runs locally on the AI generation machine.
+
+Local endpoint:
+
+127.0.0.1:11434
+
+Do not assume localhost on a production cloud backend means the admin's PC.
+
+Create the integration so the Ollama endpoint is configurable through backend environment configuration.
+
+Development example:
+
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen3:8b
+
+Do not hardcode environment-specific deployment assumptions.
+
+Do not expose the Ollama endpoint publicly without proper security.
+
+==================================================
+PHASE 19 — ONE PATCH RULE
+==================================================
+
+This is one isolated migration task.
+
+Before modifying shared code:
+
+1. Identify affected modules.
+2. Identify dependent features.
+3. Identify shared services being changed.
+4. Identify potential regression areas.
+
+Then implement the smallest safe migration.
+
+Do NOT:
+- redesign admin panel
+- redesign MCQ database
+- redesign scheduler
+- redesign payment system
+- redesign student dashboard
+
+Only replace the AI MCQ generation engine and connect it correctly to the existing workflows.
+
+==================================================
+PHASE 20 — TEST PLAN
+==================================================
+
+You MUST test locally before declaring completion.
+
+TEST 1:
+Subject:
+Quantitative Aptitude
+
+Chapter:
+Ratio and Proportion
+
+Count:
+2
+
+Expected:
+Exactly 2 valid MCQs.
+
+TEST 2:
+Count:
+10
+
+Expected:
+Exactly 10 valid MCQs.
+
+TEST 3:
+Generate & Host Now
+
+Expected:
+MCQs generated, validated, saved and hosted.
+
+TEST 4:
+Duplicate prevention
+
+Generate the same configuration again.
+
+Expected:
+No accidental duplicate insertion.
+
+TEST 5:
+Wrong chapter protection
+
+Request:
+Quantitative Aptitude
+Ratio and Proportion
+
+Verify generated questions do not intentionally drift into unrelated chapters.
+
+TEST 6:
+Ollama offline
+
+Stop Ollama.
+
+Run generation.
+
+Expected:
+Clear failure state, no infinite loading, no database corruption.
+
+TEST 7:
+Malformed model response
+
+Simulate invalid JSON.
+
+Expected:
+Validation failure and controlled error/retry.
+
+TEST 8:
+Auto-Pilot daily job
+
+Create a test schedule.
+
+Expected:
+Exactly one generation job at execution time.
+
+TEST 9:
+Auto-Pilot failure
+
+Ollama unavailable during scheduled execution.
+
+Expected:
+FAILED job with clear reason.
+
+TEST 10:
+Generation history
+
+Verify local model generation appears correctly.
+
+TEST 11:
+Student side regression
+
+Verify existing published MCQs remain accessible according to subscription/tier rules.
+
+TEST 12:
+Production build
+
+Run frontend and backend production build/test checks.
+
+==================================================
+PHASE 21 — FINAL CODEBASE AUDIT
+==================================================
+
+After implementation, search the entire repository again for:
+
+Gemini
+Mistral
+Groq
+OpenRouter
+AI API Key
+provider fallback
+external AI generation
+MCQ provider
+old AI generation endpoint
+
+Expected:
+
+No old external provider should remain in the MCQ generation path.
+
+Unused dead code should be removed only when safe.
+
+Do not remove code that is still required elsewhere.
+
+==================================================
+PHASE 22 — REQUIRED FINAL REPORT
+==================================================
+
+At the end, provide:
+
+1. Root architecture change
+2. Old AI workflow removed
+3. New Local Qwen architecture
+4. Files changed
+5. Files removed
+6. Environment variables added
+7. Database changes, if any
+8. Generate & Host Now status
+9. Auto-Pilot status
+10. Generation History status
+11. Validation status
+12. Duplicate prevention status
+13. Tests performed
+14. Test results
+15. Any remaining limitation
+16. Exact command/configuration needed to run Ollama + qwen3:8b locally
+
+==================================================
+DEFINITION OF DONE
+==================================================
+
+The task is NOT complete merely because the code compiles.
+
+It is complete only when:
+
+- Old external AI MCQ providers are removed from the MCQ generation path.
+- Local Ollama + qwen3:8b generates MCQs successfully.
+- Subject + Chapter selection works.
+- Generate & Host Now works.
+- Auto-Pilot uses the same LocalQwenService.
+- Scheduled generation works.
+- Validation works.
+- Duplicate prevention works.
+- Generation History works.
+- Failure handling works.
+- No infinite loading occurs.
+- Existing student/admin functionality passes regression.
+- Local development testing passes.
+- Final codebase audit passes.
+
+IMPORTANT:
+Do not start implementing immediately without first auditing the current codebase.
+First identify the exact old AI generation flow and affected files.
+Then implement the migration in the smallest safe way.
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-25T18:56:50+05:30.
+</ADDITIONAL_METADATA>

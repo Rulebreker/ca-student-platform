@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 
 import ai_job_manager
+import local_qwen_service
 
 # Indian Standard Time (IST) is UTC+05:30
 IST_OFFSET = timedelta(hours=5, minutes=30)
@@ -517,6 +518,22 @@ def execute_scheduler_task_sync(
     }
 
     try:
+        # Pre-check Local Ollama health
+        is_online, health_info = local_qwen_service.check_ollama_health(timeout=3.0)
+        if not is_online:
+            err_msg = f"Local AI is offline. Ollama is not reachable at {local_qwen_service.OLLAMA_BASE_URL}. Start Ollama and try again."
+            print(f"[SCHEDULER_FAILED_OLLAMA_OFFLINE] Task '{task.get('name')}' failed: {err_msg}", flush=True)
+            task['status'] = 'failed'
+            task['lastError'] = err_msg
+            task['updatedAt'] = format_iso_utc(get_now_utc())
+            if task.get('scheduleType') == 'recurring':
+                task['nextRunAt'] = calculate_next_run(task, get_now_utc())
+            if save_callback:
+                save_callback(data)
+            if firebase_sync_callback:
+                firebase_sync_callback(f"ai_scheduled_tasks/{task_id}", task, method='PUT', sync=True)
+            return False, err_msg, None
+
         # 3. Synchronously generate and host test
         ok, err, res = ai_job_manager.run_generation_job_synchronous(
             params=params,

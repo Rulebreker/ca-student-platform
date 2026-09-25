@@ -617,9 +617,11 @@ def _run_generation_job_worker(
         job_record['lastHeartbeatAt'] = completed_iso
         job_record['validatedCount'] = len(questions)
         job_record['rejectedCount'] = metrics.get('rejectedDuplicates', 0) + metrics.get('rejectedValidation', 0)
-        job_record['retryCount'] = metrics.get('regenerationAttempts', 0)
-        job_record['providersUsed'] = list(metrics.get('providersUsed', []))
-        job_record['validationProvidersUsed'] = list(metrics.get('validationProvidersUsed', []))
+        job_record['providersUsed'] = list(metrics.get('providersUsed', [])) or ['local_qwen']
+        job_record['provider'] = 'LOCAL'
+        job_record['model'] = 'qwen3:8b'
+        job_record['runtime'] = 'Ollama'
+        job_record['validationProvidersUsed'] = list(metrics.get('validationProvidersUsed', [])) or ['local']
 
         # Ensure all verified questions are preserved in data['questions']
         if data is not None and isinstance(data, dict):
@@ -707,6 +709,10 @@ def _run_generation_job_worker(
             'testTitle': test_record.get('title', 'MCQ Test') if len(questions) > 0 else 'Failed Generation',
             'subject': params.get('subject'),
             'topic': params.get('topic'),
+            'chapter': params.get('chapter', chapter or ''),
+            'provider': 'LOCAL',
+            'model': 'qwen3:8b',
+            'runtime': 'Ollama',
             'questionCategory': question_category,
             'questionSpeed': question_speed,
             'requestedCount': count,
@@ -717,8 +723,8 @@ def _run_generation_job_worker(
             'rejectedValidation': metrics.get('rejectedValidation', 0),
             'regenerationAttempts': metrics.get('regenerationAttempts', 0),
             'durationSeconds': metrics.get('durationSeconds', 0),
-            'providersUsed': list(metrics.get('providersUsed', [])),
-            'validationProvidersUsed': list(metrics.get('validationProvidersUsed', [])),
+            'providersUsed': list(metrics.get('providersUsed', [])) or ['local_qwen'],
+            'validationProvidersUsed': list(metrics.get('validationProvidersUsed', [])) or ['local'],
             'status': job_record['status'],
             'isPublished': auto_publish if len(questions) > 0 else False,
             'timestamp': completed_iso

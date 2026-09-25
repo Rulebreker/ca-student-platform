@@ -12,6 +12,7 @@ import random
 import threading
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
+import local_qwen_service
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 IS_SERVERLESS = bool(os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME'))
@@ -120,88 +121,18 @@ VAULT_PASSPHRASE = b"ExcellenceCA_AI_Production_HMAC_Secret_Token_v2"
 
 DEFAULT_PROVIDERS = [
     {
-        'id': 'gemini_1',
-        'name': 'Google Gemini (Key 1)',
-        'provider': 'gemini',
-        'model': 'gemini-3-flash-preview',
-        'fallback_model': 'gemini-flash-latest',
+        'id': 'local_qwen',
+        'name': 'Local Qwen3 8B (Ollama)',
+        'provider': 'ollama',
+        'model': 'qwen3:8b',
+        'fallback_model': 'qwen3:8b',
         'priority': 1,
         'enabled': True,
         'purpose': 'generation',
-        'roles': ['generation'],
-        'status': 'healthy'
-    },
-    {
-        'id': 'gemini_2',
-        'name': 'Google Gemini (Key 2)',
-        'provider': 'gemini',
-        'model': 'gemini-3-flash-preview',
-        'fallback_model': 'gemini-flash-latest',
-        'priority': 2,
-        'enabled': True,
-        'purpose': 'generation',
-        'roles': ['generation'],
-        'status': 'healthy'
-    },
-    {
-        'id': 'gemini_3',
-        'name': 'Google Gemini (Key 3)',
-        'provider': 'gemini',
-        'model': 'gemini-3-flash-preview',
-        'fallback_model': 'gemini-flash-latest',
-        'priority': 3,
-        'enabled': True,
-        'purpose': 'generation',
-        'roles': ['generation'],
-        'status': 'healthy'
-    },
-    {
-        'id': 'gemini_4',
-        'name': 'Google Gemini (Key 4)',
-        'provider': 'gemini',
-        'model': 'gemini-3-flash-preview',
-        'fallback_model': 'gemini-flash-latest',
-        'priority': 4,
-        'enabled': True,
-        'purpose': 'generation',
-        'roles': ['generation'],
-        'status': 'healthy'
-    },
-    {
-        'id': 'gemini_5',
-        'name': 'Google Gemini (Key 5)',
-        'provider': 'gemini',
-        'model': 'gemini-3-flash-preview',
-        'fallback_model': 'gemini-flash-latest',
-        'priority': 5,
-        'enabled': True,
-        'purpose': 'generation',
-        'roles': ['generation'],
-        'status': 'healthy'
-    },
-    {
-        'id': 'gemini_6',
-        'name': 'Google Gemini (Key 6)',
-        'provider': 'gemini',
-        'model': 'gemini-3-flash-preview',
-        'fallback_model': 'gemini-flash-latest',
-        'priority': 6,
-        'enabled': True,
-        'purpose': 'generation',
-        'roles': ['generation'],
-        'status': 'healthy'
-    },
-    {
-        'id': 'openrouter',
-        'name': 'OpenRouter (Llama 3.3 70B)',
-        'provider': 'openrouter',
-        'model': 'meta-llama/llama-3.3-70b-instruct',
-        'fallback_model': 'meta-llama/llama-3.3-70b-instruct',
-        'priority': 7,
-        'enabled': True,
-        'purpose': 'validation',
-        'roles': ['validation'],
-        'status': 'healthy'
+        'roles': ['generation', 'validation'],
+        'status': 'healthy',
+        'endpoint': 'http://127.0.0.1:11434',
+        'maskedKey': 'LOCAL-DAEMON'
     },
     {
         'id': 'mistral_ocr',
@@ -209,22 +140,10 @@ DEFAULT_PROVIDERS = [
         'provider': 'mistral',
         'model': 'mistral-ocr-latest',
         'fallback_model': 'local-fallback',
-        'priority': 8,
+        'priority': 2,
         'enabled': True,
         'purpose': 'ocr',
         'roles': ['ocr'],
-        'status': 'healthy'
-    },
-    {
-        'id': 'groq',
-        'name': 'Groq (Qwen 3.8 27B Fast Inference)',
-        'provider': 'groq',
-        'model': 'qwen/qwen3.8-27b',
-        'fallback_model': 'qwen/qwen3.8-27b',
-        'priority': 9,
-        'enabled': True,
-        'purpose': 'validation',
-        'roles': ['validation'],
         'status': 'healthy'
     }
 ]
@@ -492,6 +411,18 @@ def get_sanitized_providers(data: Optional[Dict[str, Any]] = None) -> List[Dict[
     result = []
     for p in providers:
         pid = p['id']
+        if p.get('provider') == 'ollama' or pid == 'local_qwen':
+            is_online, health_info = local_qwen_service.check_ollama_health(timeout=2.0)
+            p_copy = dict(p)
+            p_copy['maskedKey'] = 'LOCAL-DAEMON'
+            p_copy['hasKey'] = True
+            p_copy['status'] = 'Configured — Healthy' if is_online else 'Configured — Connection Failed'
+            p_copy['online'] = is_online
+            p_copy['lastLatencyMs'] = health_info.get('latencyMs')
+            p_copy['error'] = health_info.get('error')
+            result.append(p_copy)
+            continue
+
         key = secrets_map.get(pid, '')
         has_key = bool(key and len(key) > 5)
         
@@ -959,6 +890,38 @@ def call_llm_with_failover(
     question_number: Optional[int] = None,
     attempt: Optional[int] = None
 ) -> Tuple[str, str, str]:
+    # Authoritative Local Qwen delegation for MCQ generation and validation
+    is_online, health_info = local_qwen_service.check_ollama_health(timeout=2.0)
+    if is_online or preferred_provider == 'local_qwen':
+        if not is_online:
+            raise RuntimeError(f"Local AI is offline. Ollama is not reachable at {local_qwen_service.OLLAMA_BASE_URL}.")
+        payload = {
+            "model": local_qwen_service.OLLAMA_MODEL,
+            "messages": [
+                {"role": "system", "content": system_instruction or local_qwen_service.DEFAULT_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt}
+            ],
+            "stream": False,
+            "format": "json" if json_mode else None,
+            "think": False,
+            "options": {"temperature": temperature if temperature is not None else 0.6}
+        }
+        url = f"{local_qwen_service.OLLAMA_BASE_URL}/api/chat"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=max(timeout, 60.0)) as resp:
+                data_resp = json.loads(resp.read().decode('utf-8'))
+                text = data_resp.get('message', {}).get('content', '')
+                return text, 'local_qwen', 'qwen3:8b'
+        except Exception as q_err:
+            print(f"[LOCAL_QWEN_GATEWAY_ERROR] {q_err}", flush=True)
+            raise RuntimeError(f"Local Qwen generation failed: {q_err}")
+
     providers = get_registered_providers(data)
     secrets_map = load_secrets()
     now = time.time()
@@ -1137,7 +1100,29 @@ def test_provider_connection(provider_id: str, data: Optional[Dict[str, Any]] = 
     prov = next((p for p in providers if p['id'] == provider_id), None)
     if not prov:
         return {'success': False, 'error': f"Provider '{provider_id}' not found in registry."}
-        
+
+    if prov.get('provider') == 'ollama' or provider_id == 'local_qwen':
+        is_online, health_info = local_qwen_service.check_ollama_health(timeout=5.0)
+        if is_online:
+            lat = health_info.get('latencyMs', 50.0)
+            mark_provider_success('local_qwen', lat)
+            return {
+                'success': True,
+                'latency_ms': lat,
+                'model': 'qwen3:8b',
+                'status': 'Configured — Healthy',
+                'message': 'Local Ollama Qwen3 8B daemon is online and responsive.'
+            }
+        else:
+            mark_provider_failure('local_qwen', health_info.get('error', 'Unreachable'))
+            return {
+                'success': False,
+                'latency_ms': None,
+                'model': 'qwen3:8b',
+                'status': 'Configured — Connection Failed',
+                'error': 'Local AI is offline. Start Ollama on the generation machine and try again.'
+            }
+
     secrets_map = load_secrets()
     key = secrets_map.get(provider_id)
     if not key:

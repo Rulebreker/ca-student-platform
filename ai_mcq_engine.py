@@ -9,6 +9,7 @@ from typing import Dict, Any, List, Optional, Tuple, Set
 import ai_provider_manager
 import ai_document_indexer
 import syllabus_hierarchy
+import local_qwen_service
 
 # ----------------- Duplicate Detection -----------------
 
@@ -911,7 +912,10 @@ def validate_mcq_locally_deterministic(
             q_data['sourcePage'] = best_chunk.get('sourcePage') or (best_chunk.get('pages', [1])[0] if best_chunk.get('pages') else 1)
             q_data['sourceChapter'] = best_chunk.get('chapter') or q_data.get('sourceChapter')
             q_data['sourceTopic'] = best_chunk.get('topic') or q_data.get('sourceTopic')
-            q_data['groundingScore'] = round(best_score, 3)
+    # 12. Mathematical & Numerical Option Sanity Check
+    correct_opt_text = opts.get(corr, '').strip()
+    if not correct_opt_text:
+        return False, f"Correct option '{corr}' text is missing or empty.", "MATHEMATICAL_VALIDATION_ERROR"
 
     return True, "Passed local deterministic validation.", None
 
@@ -1013,24 +1017,31 @@ def generate_single_mcq(
         admin_description=admin_description
     )
 
-    # Safe temperature variation per specification: 0.7 + ((attempt - 1) % 3) * 0.1
+    # Safe temperature variation per specification: 0.7 + ((attempt_number - 1) % 3) * 0.1
     calculated_temp = temperature if temperature is not None else round(0.7 + ((attempt_number - 1) % 3) * 0.1, 2)
 
-    response_text, provider_id, model_name = ai_provider_manager.call_llm_with_failover(
-        purpose='generation',
-        prompt=user_prompt,
-        system_instruction=system_instruction,
-        json_mode=True,
-        data=data,
-        preferred_provider=preferred_provider,
-        on_provider_event=on_provider_event,
-        temperature=calculated_temp,
-        job_id=job_id,
-        question_number=question_number or slot_number,
-        attempt=attempt_number
-    )
-
-    q_data = parse_and_repair_mcq_json(response_text)
+    try:
+        valid_mcqs, telemetry = local_qwen_service.generate_mcqs(
+            subject=subject,
+            chapter=chapter or (chapter_metadata.get('chapterName') if chapter_metadata else topic),
+            count=1,
+            exam_level=exam_level,
+            difficulty=difficulty,
+            topic=topic,
+            question_category=question_category,
+            question_speed=question_speed,
+            admin_description=admin_description,
+            previous_concepts=previous_concepts
+        )
+        if valid_mcqs:
+            q_data = valid_mcqs[0]
+            provider_id = 'local_qwen'
+            model_name = 'qwen3:8b'
+        else:
+            raise ValueError("Local Qwen returned empty MCQ payload.")
+    except Exception as e:
+        print(f"[LOCAL_QWEN_SINGLE_ERROR] {e}", flush=True)
+        raise
 
     # Normalize fields (support question or text, correctAnswer or correctOption)
     q_text = str(q_data.get('question') or q_data.get('text') or '').strip()
@@ -1114,45 +1125,8 @@ def validate_mcq_independently(
     if not is_valid_local:
         return False, local_reason, None, "local"
 
-    # Stage 2: Secondary AI validation ONLY if explicitly requested or flagged for audit
-    needs_secondary_ai = force_ai_validation or bool(q_data.get('requires_ai_audit', False))
-    if not needs_secondary_ai:
-        return True, "Passed local deterministic validation.", None, "local"
-
-    # If secondary AI validation is requested, call failover gateway (Gemini is excluded from validation role)
-    q_text = q_data.get('question') or q_data.get('text', '')
-    corr_ans = q_data.get('correctAnswer') or q_data.get('correctOption', 'A')
-
-    user_prompt = VALIDATOR_USER_PROMPT_TEMPLATE.format(
-        subject=subject,
-        topic=topic,
-        exam_level=exam_level,
-        text=q_text,
-        optionA=q_data.get('optionA', ''),
-        optionB=q_data.get('optionB', ''),
-        optionC=q_data.get('optionC', ''),
-        optionD=q_data.get('optionD', ''),
-        correctOption=corr_ans,
-        explanation=q_data.get('explanation', '')
-    )
-
-    try:
-        val_response, val_prov, val_model = ai_provider_manager.call_llm_with_failover(
-            purpose='validation',
-            prompt=user_prompt,
-            system_instruction=VALIDATOR_SYSTEM_PROMPT,
-            json_mode=True,
-            data=data,
-            on_provider_event=on_provider_event
-        )
-        val_data = parse_and_repair_mcq_json(val_response)
-        is_valid = bool(val_data.get('isValid', False))
-        reason = str(val_data.get('reason', 'Validated successfully by secondary AI provider.'))
-        suggested_fix = val_data.get('suggestedFix')
-        return is_valid, reason, suggested_fix, val_prov
-    except Exception as e:
-        print(f"[AI_VALIDATION_NOTE] Secondary AI validator unavailable ({e}). Accepting passed local deterministic validation.", flush=True)
-        return True, "Passed local deterministic validation fallback.", None, "local"
+    # Stage 2: Pure deterministic local validation (zero external cloud dependencies)
+    return True, "Passed local deterministic validation.", None, "local"
 
 def generate_batched_mcqs(
     subject: str,
@@ -1213,18 +1187,23 @@ def generate_batched_mcqs(
         question_speed=question_speed
     )
 
-    raw_response, provider_id, model_name = ai_provider_manager.call_llm_with_failover(
-        purpose='generation',
-        prompt=user_prompt,
-        system_instruction=sys_inst,
-        preferred_provider=preferred_provider,
-        json_mode=True,
-        data=data,
-        on_provider_event=on_provider_event
-    )
-
-    parsed_list = parse_and_repair_mcqs_payload(raw_response)
-    return parsed_list, provider_id, model_name
+    try:
+        valid_mcqs, telemetry = local_qwen_service.generate_mcqs(
+            subject=subject,
+            chapter=chapter or (chapter_metadata.get('chapterName') if chapter_metadata else topic),
+            count=count,
+            exam_level=exam_level,
+            difficulty=difficulty,
+            topic=topic,
+            question_category=question_category,
+            question_speed=question_speed,
+            admin_description=admin_description,
+            previous_concepts=previous_concepts
+        )
+        return valid_mcqs, 'local_qwen', 'qwen3:8b'
+    except Exception as batch_err:
+        print(f"[LOCAL_QWEN_BATCHED_GEN_ERROR] {batch_err}", flush=True)
+        raise
 
 def _build_question_record(
     q_data: Dict[str, Any],
@@ -1313,12 +1292,13 @@ def generate_exact_mcqs_pipeline(
     on_question_verified: Optional[Any] = None,
     admin_description: str = '',
     chapter_metadata: Optional[Dict[str, Any]] = None,
-    allow_ungrounded: bool = False
+    allow_ungrounded: bool = True
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Resilient production generation pipeline:
+    - Powered by Local Qwen3 8B via Ollama.
     - Bounded execution (Pass 1 batched call + at most 1 repair pass).
-    - Mandatory syllabus grounding (fails fast if no active chunks and not allow_ungrounded).
+    - Learned syllabus knowledge based on Subject + Chapter + CA level (PDF upload not required).
     - Never stalls: failing slots are marked FAILED and the job finishes with COMPLETED, PARTIAL, or FAILED.
     - Zero infinite loops: strictly bounded attempts.
     """
@@ -1346,6 +1326,7 @@ def generate_exact_mcqs_pipeline(
         'regenerationAttempts': 0,
         'regenerationCount': 0,
         'geminiGenerationCalls': 0,
+        'qwenGenerationCalls': 0,
         'validationCalls': 0,
         'validationProvider': 'local',
         'providersUsed': set(),
@@ -1384,7 +1365,7 @@ def generate_exact_mcqs_pipeline(
     canonical_subject = resolved_ch_meta.get('subject', subject)
     canonical_exam_level = resolved_ch_meta.get('examLevel', exam_level)
 
-    # 2. Retrieve Stored Syllabus Knowledge Base Chunks (Grounded Context)
+    # 2. Retrieve Stored Syllabus Knowledge Base Chunks if available (Optional Grounded Context)
     all_docs = source_documents if (source_documents is not None) else (data.get('ai_source_documents', []) if data and isinstance(data, dict) else [])
     active_chunks = ai_document_indexer.retrieve_relevant_chunks(
         documents=all_docs,
@@ -1396,27 +1377,13 @@ def generate_exact_mcqs_pipeline(
         max_chunks=6
     )
 
-    # Mandatory Source Grounding: Fail fast if no active chunks exist
     is_mocked_generator = (
         hasattr(generate_single_mcq, 'mock') or
         isinstance(generate_single_mcq, unittest.mock.Mock) or
         type(generate_single_mcq).__name__ in ('MagicMock', 'Mock')
     )
     if not active_chunks:
-        if not allow_ungrounded and not is_mocked_generator:
-            err_msg = f"INSUFFICIENT_SOURCE: No active syllabus chunks found for chapter '{canonical_ch_name}'. Upload and index the chapter PDF first."
-            print(f"[GROUNDED_SYLLABUS_ERROR] {err_msg}", flush=True)
-            for s in question_statuses:
-                s['status'] = 'failed'
-                s['error'] = err_msg
-            metrics['failedCount'] = count
-            metrics['endTime'] = time.time()
-            metrics['durationSeconds'] = round(metrics['endTime'] - metrics['startTime'], 1)
-            metrics['error'] = err_msg
-            metrics['finalStatus'] = 'FAILED'
-            return [], metrics
-        else:
-            print(f"[GROUNDED_SYLLABUS] No pre-indexed PDF chunks for '{canonical_ch_name}' ({canonical_ch_id}). Relying on authoritative syllabus hierarchy metadata.", flush=True)
+        print(f"[LOCAL_QWEN_GENERATION] Generating from Qwen3 8B learned syllabus knowledge for '{canonical_ch_name}' ({canonical_ch_id}).", flush=True)
     else:
         print(f"[GROUNDED_SYLLABUS] Retrieved {len(active_chunks)} authoritative syllabus chunks for '{canonical_ch_name}' ({canonical_ch_id}).", flush=True)
 
@@ -1527,6 +1494,7 @@ def generate_exact_mcqs_pipeline(
                     break
                 else:
                     slot_status_obj['error'] = val_reason
+                    metrics['rejectedValidation'] += 1
                     metrics['regenerationAttempts'] += 1
 
             if not slot_success:
@@ -1554,8 +1522,8 @@ def generate_exact_mcqs_pipeline(
                 pass
 
         candidate_questions: List[Dict[str, Any]] = []
-        gen_prov = 'gemini_1'
-        gen_model = 'gemini-3-flash-preview'
+        gen_prov = 'local_qwen'
+        gen_model = 'qwen3:8b'
         try:
             candidate_questions, gen_prov, gen_model = generate_batched_mcqs(
                 subject=canonical_subject,
@@ -1575,7 +1543,7 @@ def generate_exact_mcqs_pipeline(
                 job_id=job_id
             )
             metrics['providersUsed'].add(gen_prov)
-            metrics['geminiGenerationCalls'] += 1
+            metrics['qwenGenerationCalls'] = metrics.get('qwenGenerationCalls', 0) + 1
         except Exception as batch_err:
             print(f"[BATCH_GEN_PASS1_ERROR] {batch_err}", flush=True)
             candidate_questions = []
@@ -1669,7 +1637,7 @@ def generate_exact_mcqs_pipeline(
                     job_id=job_id
                 )
                 metrics['providersUsed'].add(r_prov)
-                metrics['geminiGenerationCalls'] += 1
+                metrics['qwenGenerationCalls'] = metrics.get('qwenGenerationCalls', 0) + 1
                 metrics['regenerationAttempts'] += 1
                 metrics['regenerationCount'] += 1
             except Exception as r_err:

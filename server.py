@@ -4,6 +4,7 @@ import ai_document_indexer
 import ai_mcq_engine
 import ai_job_manager
 import ai_scheduler
+import local_qwen_service
 import syllabus_hierarchy
 import http.server
 import socketserver
@@ -3503,6 +3504,17 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(content_length) if content_length > 0 else b'{}'
                 req_data = json.loads(body.decode('utf-8'))
                 
+                # Check Local Ollama health
+                is_online, health_info = local_qwen_service.check_ollama_health(timeout=3.0)
+                if not is_online:
+                    self.send_json(503, {
+                        'success': False,
+                        'error': 'Local AI is offline. Start Ollama on the generation machine and try again.',
+                        'code': 503,
+                        'details': health_info
+                    })
+                    return
+
                 data = load_backend_data(refresh_collections=['tests', 'questions', 'ai_source_documents', 'ai_providers', 'ai_generation_jobs'])
                 
                 # Double-click and concurrent submission guard
