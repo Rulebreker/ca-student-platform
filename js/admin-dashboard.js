@@ -9898,12 +9898,26 @@ class AdminDashboard {
       if (window.lucide) window.lucide.createIcons();
     } catch (err) {
       console.error('[AI_PROVIDERS_FETCH_ERROR]', err);
-    }
-  }
-
-      if (window.lucide) window.lucide.createIcons();
-    } catch (err) {
-      console.error('[AI_PROVIDERS_FETCH_ERROR]', err);
+      const grid = document.getElementById('ai-providers-grid');
+      if (grid) {
+        grid.innerHTML = `
+          <div class="p-4 border border-rose-200 rounded-xl bg-rose-50 space-y-2 text-xs">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-rose-900 flex items-center gap-1.5">
+                <i data-lucide="cpu" class="w-4 h-4 text-rose-600"></i>
+                Local Qwen3 8B Engine
+              </span>
+              <span class="px-2.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider border bg-rose-100 text-rose-800 border-rose-200">
+                Offline
+              </span>
+            </div>
+            <p class="text-rose-700 text-[11px]">
+              Local Ollama daemon is currently unreachable. Start Ollama at http://127.0.0.1:11434 and click "Test Connection" to retry.
+            </p>
+          </div>
+        `;
+        if (window.lucide) window.lucide.createIcons();
+      }
     }
   }
 
