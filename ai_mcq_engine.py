@@ -1220,7 +1220,9 @@ def _build_question_record(
     topic: str,
     gen_prov: str,
     gen_model: str,
-    val_prov: str
+    val_prov: str,
+    platform_xp: float = 10.0,
+    **kwargs
 ) -> Dict[str, Any]:
     q_text = str(q_data.get('question') or q_data.get('text') or '').strip()
     c_ans = str(q_data.get('correctAnswer') or q_data.get('correctOption', 'A')).strip().upper()
@@ -1243,6 +1245,8 @@ def _build_question_record(
         'correctAnswer': c_ans,
         'marks': float(marks_per_correct),
         'negativeMarks': float(negative_marks),
+        'points': float(platform_xp),
+        'xp': float(platform_xp),
         'explanation': q_data.get('explanation', ''),
         'category': question_category,
         'difficulty': difficulty,
@@ -1283,6 +1287,8 @@ def generate_exact_mcqs_pipeline(
     job_id: Optional[str] = None,
     marks_per_correct: float = 2.0,
     negative_marks: float = 0.5,
+    negative_marks_per_wrong: Optional[float] = None,
+    platform_xp: Optional[float] = None,
     progress_callback: Optional[Any] = None,
     data: Optional[Dict[str, Any]] = None,
     exam_level_id: str = '',
@@ -1292,7 +1298,8 @@ def generate_exact_mcqs_pipeline(
     on_question_verified: Optional[Any] = None,
     admin_description: str = '',
     chapter_metadata: Optional[Dict[str, Any]] = None,
-    allow_ungrounded: bool = True
+    allow_ungrounded: bool = True,
+    **kwargs
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Resilient production generation pipeline:
@@ -1302,6 +1309,12 @@ def generate_exact_mcqs_pipeline(
     - Never stalls: failing slots are marked FAILED and the job finishes with COMPLETED, PARTIAL, or FAILED.
     - Zero infinite loops: strictly bounded attempts.
     """
+    if negative_marks_per_wrong is not None:
+        try:
+            negative_marks = float(negative_marks_per_wrong)
+        except (ValueError, TypeError):
+            pass
+
     if existing_questions is None:
         existing_questions = []
 
@@ -1478,7 +1491,8 @@ def generate_exact_mcqs_pipeline(
                         topic=topic,
                         gen_prov=gen_prov,
                         gen_model=gen_model,
-                        val_prov=val_prov
+                        val_prov=val_prov,
+                        platform_xp=platform_xp if platform_xp is not None else 10.0
                     )
                     generated_questions.append(q_rec)
                     concept_summaries.append(q_rec['text'][:120])
@@ -1594,7 +1608,8 @@ def generate_exact_mcqs_pipeline(
                     topic=topic,
                     gen_prov=gen_prov,
                     gen_model=gen_model,
-                    val_prov=val_prov
+                    val_prov=val_prov,
+                    platform_xp=platform_xp if platform_xp is not None else 10.0
                 )
                 generated_questions.append(q_rec)
                 concept_summaries.append(q_rec['text'][:120])
@@ -1689,7 +1704,8 @@ def generate_exact_mcqs_pipeline(
                         topic=topic,
                         gen_prov=r_prov,
                         gen_model=r_model,
-                        val_prov=val_prov
+                        val_prov=val_prov,
+                        platform_xp=platform_xp if platform_xp is not None else 10.0
                     )
                     generated_questions.append(q_rec)
                     concept_summaries.append(q_rec['text'][:120])

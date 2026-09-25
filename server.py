@@ -3565,7 +3565,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     })
                     return
 
-                queue_only = IS_SERVERLESS
+                queue_only = bool(IS_SERVERLESS or req_data.get('queueOnly') or req_data.get('queue_only'))
                 ok, err, job_record = ai_job_manager.create_generation_job(
                     params=req_data,
                     data=data,

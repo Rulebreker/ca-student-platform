@@ -24,6 +24,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import ai_job_manager
 import ai_provider_manager
 import ai_scheduler
+import ai_mcq_engine
+import local_qwen_worker
 import server
 
 class TestLocalQwenWorker(unittest.TestCase):
@@ -376,6 +378,71 @@ class TestLocalQwenWorker(unittest.TestCase):
             self.assertEqual(sent_status[0], 200)
             self.assertTrue(sent_body[0]['queuedForWorker'])
             self.assertEqual(sent_body[0]['job']['status'], 'QUEUED')
+
+    @patch('ai_mcq_engine.generate_batched_mcqs')
+    def test_09_worker_process_job_signature_compatibility(self, mock_batch_gen):
+        """Worker process_job passes parameters without unexpected keyword argument errors and preserves negative marking."""
+        mock_batch_gen.return_value = ([
+            {
+                'question': 'Which of the following describes the nature of Business Economics?',
+                'optionA': 'It is purely theoretical and abstract in nature',
+                'optionB': 'It is pragmatic and applied microeconomics with macro perspective',
+                'optionC': 'It ignores macroeconomic developments and focuses solely on costs',
+                'optionD': 'It is entirely based on mathematical models without business application',
+                'correctAnswer': 'B',
+                'explanation': 'Business Economics is pragmatic and incorporates both micro and macro economic aspects to solve business problems.'
+            }
+        ], 'local_qwen', 'qwen3:8b')
+
+        worker = local_qwen_worker.LocalQwenWorker(
+            server_url='http://127.0.0.1:8000',
+            token='token_admin_excellenceca_secret'
+        )
+
+        completed_calls = []
+        progress_calls = []
+
+        def fake_request(endpoint, payload=None, timeout=10.0):
+            if endpoint == '/api/admin/ai/worker/progress':
+                progress_calls.append(payload)
+                return True, {'success': True}, None
+            if endpoint == '/api/admin/ai/worker/complete':
+                completed_calls.append(payload)
+                return True, {'success': True}, None
+            return True, {'success': True}, None
+
+        worker._make_request = fake_request
+
+        test_job = {
+            'id': 'job-test-biz-econ-1',
+            'title': 'Business Economics - Nature and Scope',
+            'subject': 'Business Economics',
+            'topic': 'Nature and Scope of Business Economics',
+            'chapter': 'Nature & Scope of Business Economics',
+            'chapterId': 'ch-fnd-eco-1',
+            'examLevel': 'CA Foundation',
+            'difficulty': 'ICAI Exam Standard',
+            'questionCategory': 'Direct Questions',
+            'questionSpeed': 'Quick',
+            'count': 1,
+            'marksPerCorrect': 2.0,
+            'negativeMarksPerWrong': 0.5,
+            'platformXp': 10.0
+        }
+
+        # Must run without TypeError: generate_exact_mcqs_pipeline() got an unexpected keyword argument
+        worker.process_job(test_job)
+
+        self.assertEqual(len(completed_calls), 1, "Worker should have posted completion payload")
+        completed_payload = completed_calls[0]
+        self.assertEqual(completed_payload['jobId'], 'job-test-biz-econ-1')
+        qs = completed_payload['questions']
+        self.assertEqual(len(qs), 1)
+        self.assertEqual(qs[0]['negativeMarks'], 0.5, "Negative marks must be preserved as 0.5")
+        self.assertEqual(qs[0]['marks'], 2.0)
+        self.assertEqual(qs[0]['points'], 10.0)
+        self.assertEqual(qs[0]['xp'], 10.0)
+        self.assertEqual(qs[0]['correctOption'], 'B')
 
 if __name__ == '__main__':
     unittest.main()

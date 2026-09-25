@@ -33037,12 +33037,13 @@
       ],
       "requestedCount": 10,
       "retryCount": 0,
-      "status": "QUEUED",
+      "status": "FAILED",
       "subject": "Business Economics",
       "subjectId": "sub-3",
       "title": "Production Hardening 10-MCQ Verification Test",
       "topic": "Nature and Scope of Business Economics",
-      "totalQuestions": 10
+      "totalQuestions": 10,
+      "error": "Expired stale job"
     },
     {
       "allowedPlans": [
@@ -38492,13 +38493,14 @@
       ],
       "requestedCount": 1,
       "retryCount": 0,
-      "status": "GENERATING",
+      "status": "FAILED",
       "subject": "Business Economics",
       "subjectId": "sub-3",
       "testId": "tst-ai-1789713973144",
       "title": "Business Economics - Theory of Demand Practice Test",
       "topic": "Price Elasticity of Demand",
-      "totalQuestions": 1
+      "totalQuestions": 1,
+      "error": "Legacy terminated job"
     },
     {
       "allowedPlans": [
@@ -46432,13 +46434,14 @@
       ],
       "requestedCount": 10,
       "retryCount": 0,
-      "status": "GENERATING",
+      "status": "FAILED",
       "subject": "Business Economics",
       "subjectId": "sub-3",
       "testId": "tst-ai-1789706209940",
       "title": "Nature & Scope of Business Economics Conceptual Sprint Test 1",
       "topic": "Theory of Demand and Supply",
-      "totalQuestions": 10
+      "totalQuestions": 10,
+      "error": "Legacy terminated job"
     },
     {
       "allowedPlans": [
@@ -46816,13 +46819,14 @@
       ],
       "requestedCount": 2,
       "retryCount": 0,
-      "status": "GENERATING",
+      "status": "FAILED",
       "subject": "Business Economics",
       "subjectId": "sub-1",
       "testId": "tst-ai-1789704815285",
       "title": "AI Business Economics Conceptual Sprint",
       "topic": "Nature and Scope of Business Economics",
-      "totalQuestions": 2
+      "totalQuestions": 2,
+      "error": "Legacy terminated job"
     },
     {
       "allowedPlans": [
@@ -46929,13 +46933,14 @@
       "progressPct": 26,
       "requestedCount": 10,
       "retryCount": 0,
-      "status": "GENERATING",
+      "status": "FAILED",
       "subject": "Business Economics",
       "subjectId": "sub-3",
       "testId": "tst-ai-1789702013108",
       "title": "Nature & Scope of Business Economics Conceptual Sprint Test 1",
       "topic": "Theory of Demand and Supply",
-      "totalQuestions": 10
+      "totalQuestions": 10,
+      "error": "Legacy terminated job"
     },
     {
       "allowedPlans": [

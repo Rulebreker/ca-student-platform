@@ -249,6 +249,7 @@ class LocalQwenWorker:
                 existing_questions=[],
                 job_id=job_id,
                 marks_per_correct=marks_per_correct,
+                negative_marks=negative_marks,
                 negative_marks_per_wrong=negative_marks,
                 platform_xp=platform_xp,
                 chapter_metadata=chapter_metadata,
