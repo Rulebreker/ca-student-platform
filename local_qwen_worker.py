@@ -178,7 +178,7 @@ class LocalQwenWorker:
             'questions': questions,
             'metrics': metrics
         }
-        ok, res, err = self._make_request('/api/admin/ai/worker/complete', payload, timeout=15.0)
+        ok, res, err = self._make_request('/api/admin/ai/worker/complete', payload, timeout=60.0)
         if not ok:
             print(f"[WORKER_COMPLETE_ERR] Failed to post job completion: {err}", flush=True)
             return False
@@ -297,6 +297,9 @@ class LocalQwenWorker:
         print(f"Target Model:  {self.model}", flush=True)
         print(f"Poll Interval: {self.poll_interval}s", flush=True)
         print(f"Heartbeat:     {self.heartbeat_interval}s", flush=True)
+        import inspect
+        pipeline_sig = inspect.signature(ai_mcq_engine.generate_exact_mcqs_pipeline)
+        print(f"Pipeline Signature: generate_exact_mcqs_pipeline{pipeline_sig}", flush=True)
         print("-" * 65, flush=True)
 
         # 1. Verify local Ollama setup

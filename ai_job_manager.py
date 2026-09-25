@@ -1218,8 +1218,8 @@ def complete_job_from_worker(
     if firebase_sync_callback:
         try:
             if len(questions) > 0:
-                firebase_sync_callback(f"tests/{test_id}", test_record, method='PUT', sync=True)
-            firebase_sync_callback(f"ai_generation_jobs/{job_id}", job_record, method='PUT', sync=True)
+                firebase_sync_callback(f"tests/{test_id}", test_record, method='PUT', sync=False)
+            firebase_sync_callback(f"ai_generation_jobs/{job_id}", job_record, method='PUT', sync=False)
         except Exception:
             pass
 
