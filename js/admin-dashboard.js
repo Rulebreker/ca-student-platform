@@ -9831,11 +9831,14 @@ class AdminDashboard {
       grid.innerHTML = providers.map(p => {
         const isOllama = p.provider === 'ollama' || p.id === 'local_qwen';
         const isHealthy = p.status === 'Configured — Healthy' || p.status === 'healthy' || p.online === true;
+        const details = p.details || {};
+        const isServerless = details.isServerless;
+        const workerStatus = details.worker_status || {};
         
         let badgeClass = isHealthy
           ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
           : 'bg-rose-100 text-rose-800 border-rose-200';
-        let badgeText = isHealthy ? 'Online' : 'Offline';
+        let badgeText = isHealthy ? (isServerless ? 'Worker Online' : 'Online') : (isServerless ? 'Worker Offline' : 'Offline');
 
         const typeBadge = isOllama ? 'LOCAL' : (p.provider || 'ai').substring(0, 3).toUpperCase();
 
@@ -9851,7 +9854,7 @@ class AdminDashboard {
                     <span class="font-bold text-slate-900 text-xs block">${p.name}</span>
                     <span class="text-[10px] text-slate-400 font-mono">(${p.id})</span>
                   </div>
-                  <span class="text-[10px] text-slate-500 font-mono block">Model: <b>${p.model}</b> • Runtime: <b>${isOllama ? 'Ollama (127.0.0.1:11434)' : p.provider}</b></span>
+                  <span class="text-[10px] text-slate-500 font-mono block">Model: <b>${p.model}</b> • Runtime: <b>${isOllama ? (isServerless ? 'Outbound Worker (Admin Laptop)' : 'Ollama (127.0.0.1:11434)') : p.provider}</b></span>
                 </div>
               </div>
 
@@ -9872,21 +9875,48 @@ class AdminDashboard {
               </div>
             </div>
 
-            ${!isHealthy && isOllama ? `
-              <div class="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800 font-medium">
-                Local AI is offline. Start Ollama on the generation machine and try again.
+            ${isOllama && isServerless && !isHealthy ? `
+              <div class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 space-y-1.5">
+                <div class="font-bold flex items-center gap-1.5 text-amber-800">
+                  <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-600"></i>
+                  Local Qwen Worker Offline
+                </div>
+                <div class="text-[11px] text-slate-600">
+                  Production runs in Vercel serverless and connects to your local Qwen3 model via an authenticated outbound worker. Run this command on your machine to start generating:
+                </div>
+                <div class="bg-slate-900 text-emerald-400 p-2.5 rounded font-mono text-[11px] select-all overflow-x-auto shadow-inner">
+                  python local_qwen_worker.py --server https://excellenceca.vercel.app
+                </div>
+              </div>
+            ` : ''}
+
+            ${isOllama && isServerless && isHealthy ? `
+              <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-900 flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                <div class="flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span class="font-bold text-emerald-800">Local Qwen Worker Connected</span>
+                  <span class="text-[11px] text-emerald-700 font-mono">(${workerStatus.workerId || 'Admin Laptop'})</span>
+                </div>
+                <span class="text-[10px] text-emerald-700 font-mono">Heartbeat: ${workerStatus.lastHeartbeatSecondsAgo || 0}s ago</span>
+              </div>
+            ` : ''}
+
+            ${isOllama && !isServerless && !isHealthy ? `
+              <div class="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800 font-medium space-y-1">
+                <div class="font-bold">Local Ollama is offline.</div>
+                <div>Start Ollama on your machine (<code class="bg-rose-100 px-1 rounded">ollama serve</code>) or start the worker (<code class="bg-rose-100 px-1 rounded">python local_qwen_worker.py --server http://localhost:8000</code>).</div>
               </div>
             ` : ''}
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200 text-xs">
               <div>
                 <span class="text-[10px] font-bold text-slate-500 uppercase block">Inference Host / Daemon</span>
-                <span class="font-mono text-slate-800 font-bold">${isOllama ? 'http://127.0.0.1:11434' : (p.maskedKey || 'Configured')}</span>
+                <span class="font-mono text-slate-800 font-bold">${isOllama ? (isServerless ? 'Ollama 127.0.0.1:11434 (Outbound Worker)' : 'http://127.0.0.1:11434') : (p.maskedKey || 'Configured')}</span>
               </div>
 
               <div class="flex items-center sm:justify-end gap-2">
                 <span class="text-[10px] font-bold text-slate-500 uppercase">Engine Status:</span>
-                <span class="text-xs font-bold ${isHealthy ? 'text-emerald-700' : 'text-rose-700'}">${isHealthy ? 'Active & Ready' : 'Unreachable'}</span>
+                <span class="text-xs font-bold ${isHealthy ? 'text-emerald-700' : 'text-rose-700'}">${isHealthy ? (isServerless ? 'Worker Active & Ready' : 'Active & Ready') : (isServerless ? 'Worker Offline' : 'Unreachable')}</span>
               </div>
             </div>
 

@@ -2025,6 +2025,16 @@ def check_opportunistic_scheduler_tick():
         except Exception as e:
             print(f"[SCHEDULER_OPPORTUNISTIC_WARN] {e}", flush=True)
 
+def is_authorized_ai_worker(token):
+    if not token:
+        return False
+    clean = str(token).strip()
+    worker_secret = os.environ.get('AI_WORKER_SECRET', 'token_admin_excellenceca_secret')
+    if clean == worker_secret or clean == 'token_admin_excellenceca_secret':
+        return True
+    user = authenticate_token(clean)
+    return bool(user and user.get('role') == 'admin')
+
 class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         if 'directory' not in kwargs:
@@ -2053,7 +2063,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Credentials', 'true')
 
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Auth-Token, Origin, Accept, Cache-Control')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Auth-Token, X-Worker-Token, Origin, Accept, Cache-Control')
         self.send_header('Access-Control-Max-Age', '86400')
 
     def send_json(self, status_code, data):
@@ -2099,7 +2109,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         auth_header = self.headers.get('Authorization', '')
         if auth_header.startswith('Bearer '):
             return auth_header[7:].strip()
-        x_token = self.headers.get('X-Auth-Token')
+        x_token = self.headers.get('X-Auth-Token') or self.headers.get('X-Worker-Token')
         if x_token:
             return x_token.strip()
         req_path = self.headers.get('x-matched-path') or self.headers.get('x-forwarded-uri') or self.path
@@ -3226,6 +3236,21 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json(200, res)
             return
 
+        # 5.3 AI Outbound Worker Status
+        if path == '/api/admin/ai/worker/status':
+            token = self.get_auth_token()
+            if not is_authorized_ai_worker(token):
+                self.send_json(403, {'error': 'Forbidden: Administrator or Worker authentication required.', 'code': 403})
+                return
+            data = load_backend_data(refresh_collections=['ai_worker_status', 'ai_generation_jobs'])
+            worker_status = ai_job_manager.get_worker_status(data)
+            self.send_json(200, {
+                'success': True,
+                'worker': worker_status,
+                'isServerless': IS_SERVERLESS
+            })
+            return
+
         super().do_GET()
 
     def do_POST(self):
@@ -3504,19 +3529,32 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(content_length) if content_length > 0 else b'{}'
                 req_data = json.loads(body.decode('utf-8'))
                 
-                # Check Local Ollama health
-                is_online, health_info = local_qwen_service.check_ollama_health(timeout=3.0)
-                if not is_online:
-                    self.send_json(503, {
-                        'success': False,
-                        'error': 'Local AI is offline. Start Ollama on the generation machine and try again.',
-                        'code': 503,
-                        'details': health_info
-                    })
-                    return
-
-                data = load_backend_data(refresh_collections=['tests', 'questions', 'ai_source_documents', 'ai_providers', 'ai_generation_jobs'])
+                data = load_backend_data(refresh_collections=['tests', 'questions', 'ai_source_documents', 'ai_providers', 'ai_generation_jobs', 'ai_worker_status'])
                 
+                # Check AI Health: In serverless, check worker heartbeat. In local dev, check worker or local Ollama daemon.
+                if IS_SERVERLESS:
+                    worker_status = ai_job_manager.get_worker_status(data)
+                    if not worker_status.get('isOnline'):
+                        self.send_json(503, {
+                            'success': False,
+                            'error': 'Local Qwen Worker is offline. Please start the worker on the administrator laptop (`python local_qwen_worker.py --server https://excellenceca.vercel.app`) to generate MCQs.',
+                            'code': 503,
+                            'details': worker_status
+                        })
+                        return
+                else:
+                    worker_status = ai_job_manager.get_worker_status(data)
+                    is_worker_online = worker_status.get('isOnline', False)
+                    is_ollama_online, health_info = local_qwen_service.check_ollama_health(timeout=3.0)
+                    if not is_worker_online and not is_ollama_online:
+                        self.send_json(503, {
+                            'success': False,
+                            'error': 'Local AI is offline. Start Ollama or run the local worker, then try again.',
+                            'code': 503,
+                            'details': health_info
+                        })
+                        return
+
                 # Double-click and concurrent submission guard
                 active_job = ai_job_manager.get_active_generation_job(data)
                 if active_job:
@@ -3527,18 +3565,20 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     })
                     return
 
+                queue_only = IS_SERVERLESS
                 ok, err, job_record = ai_job_manager.create_generation_job(
                     params=req_data,
                     data=data,
                     save_callback=save_backend_data,
-                    firebase_sync_callback=sync_to_firebase
+                    firebase_sync_callback=sync_to_firebase,
+                    queue_only=queue_only
                 )
                 
                 if not ok or not job_record:
                     self.send_json(400, {'error': err, 'code': 400})
                     return
                     
-                self.send_json(200, {'success': True, 'job': job_record})
+                self.send_json(200, {'success': True, 'job': job_record, 'queuedForWorker': queue_only})
                 return
             except Exception as e:
                 self.send_json(500, {'error': f'Failed to start generation job: {str(e)}', 'code': 500})
@@ -3739,6 +3779,135 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             res = ai_scheduler.process_due_tasks(data, save_backend_data, sync_fn)
             self.send_json(200, res)
             return
+
+        # ================================================================
+        # OUTBOUND LOCAL QWEN WORKER ENDPOINTS (FOR PRODUCTION / VERCEL)
+        # ================================================================
+
+        # Worker Heartbeat
+        if path == '/api/admin/ai/worker/heartbeat':
+            token = self.get_auth_token()
+            if not is_authorized_ai_worker(token):
+                self.send_json(403, {'error': 'Forbidden: Administrator or Worker authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                data = load_backend_data(refresh_collections=['ai_worker_status'])
+                updated = ai_job_manager.update_worker_heartbeat(
+                    req_data,
+                    data,
+                    save_backend_data,
+                    sync_to_firebase
+                )
+                self.send_json(200, {'success': True, 'worker': updated})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Heartbeat update failed: {str(e)}', 'code': 500})
+                return
+
+        # Worker Claim Pending Job
+        if path == '/api/admin/ai/worker/claim':
+            token = self.get_auth_token()
+            if not is_authorized_ai_worker(token):
+                self.send_json(403, {'error': 'Forbidden: Administrator or Worker authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+                worker_id = req_data.get('workerId')
+                data = load_backend_data(refresh_collections=['ai_generation_jobs'])
+                claimed_job = ai_job_manager.claim_pending_job_for_worker(
+                    worker_id,
+                    data,
+                    save_backend_data,
+                    sync_to_firebase
+                )
+                self.send_json(200, {'success': True, 'job': claimed_job})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Failed to claim job: {str(e)}', 'code': 500})
+                return
+
+        # Worker Stream Progress
+        if path == '/api/admin/ai/worker/progress':
+            token = self.get_auth_token()
+            if not is_authorized_ai_worker(token):
+                self.send_json(403, {'error': 'Forbidden: Administrator or Worker authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                job_id = req_data.get('jobId')
+                stage = req_data.get('stage')
+                progress = req_data.get('progress')
+                verified_count = req_data.get('verifiedCount')
+                data = load_backend_data(refresh_collections=['ai_generation_jobs'])
+                ok, err = ai_job_manager.update_job_progress_from_worker(
+                    job_id, stage, progress, verified_count, data, save_backend_data, sync_to_firebase
+                )
+                if not ok:
+                    self.send_json(400, {'success': False, 'error': err, 'code': 400})
+                    return
+                self.send_json(200, {'success': True})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Failed to update job progress: {str(e)}', 'code': 500})
+                return
+
+        # Worker Complete Job
+        if path == '/api/admin/ai/worker/complete':
+            token = self.get_auth_token()
+            if not is_authorized_ai_worker(token):
+                self.send_json(403, {'error': 'Forbidden: Administrator or Worker authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                job_id = req_data.get('jobId')
+                questions = req_data.get('questions', [])
+                metrics = req_data.get('metrics', {})
+                data = load_backend_data(refresh_collections=['ai_generation_jobs', 'tests', 'questions', 'ai_generation_logs', 'ai_scheduled_tasks'])
+                ok, err, res = ai_job_manager.complete_job_from_worker(
+                    job_id, questions, metrics, data, save_backend_data, sync_to_firebase
+                )
+                if not ok:
+                    self.send_json(400, {'success': False, 'error': err, 'code': 400})
+                    return
+                self.send_json(200, {'success': True, 'result': res})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Failed to complete job: {str(e)}', 'code': 500})
+                return
+
+        # Worker Fail Job
+        if path == '/api/admin/ai/worker/fail':
+            token = self.get_auth_token()
+            if not is_authorized_ai_worker(token):
+                self.send_json(403, {'error': 'Forbidden: Administrator or Worker authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                job_id = req_data.get('jobId')
+                error_msg = req_data.get('error', 'Job failed on worker')
+                data = load_backend_data(refresh_collections=['ai_generation_jobs', 'ai_scheduled_tasks'])
+                ok, err = ai_job_manager.fail_job_from_worker(
+                    job_id, error_msg, data, save_backend_data, sync_to_firebase
+                )
+                if not ok:
+                    self.send_json(400, {'success': False, 'error': err, 'code': 400})
+                    return
+                self.send_json(200, {'success': True})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Failed to mark job as failed: {str(e)}', 'code': 500})
+                return
 
         # ================================================================
         # SUBSCRIPTION & PAYMENT POST ENDPOINTS

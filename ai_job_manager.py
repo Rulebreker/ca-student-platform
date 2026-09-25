@@ -221,11 +221,14 @@ def create_generation_job(
     params: Dict[str, Any],
     data: Dict[str, Any],
     save_callback: Any,
-    firebase_sync_callback: Any
+    firebase_sync_callback: Any,
+    queue_only: bool = False,
+    scheduledTaskId: Optional[str] = None
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Validate parameters and queue a background MCQ generation job.
     Persists job record immediately to production DB before launching worker.
+    In queue_only mode, saves the job as QUEUED for an external local worker to claim.
     """
     title = str(params.get('title', '')).strip()
     subject = str(params.get('subject', '')).strip()
@@ -245,7 +248,7 @@ def create_generation_job(
                 j.get('subject') == subject and 
                 j.get('topic') == topic and 
                 (now_ts - j.get('createdTs', 0)) < 10 and 
-                j.get('status') in ['QUEUED', 'PROCESSING', 'GENERATING']):
+                j.get('status') in ['QUEUED', 'PROCESSING', 'GENERATING', 'CLAIMED']):
                 return True, None, j
 
     job_id = f"job-ai-{int(now_ts * 1000)}-{uuid.uuid4().hex[:6]}"
@@ -256,6 +259,9 @@ def create_generation_job(
     allowed_plans = params.get('allowedPlans', ['free', 'trial', 'core', 'plus', 'elite'])
     question_category = str(params.get('questionCategory') or 'Direct Questions').strip()
     question_speed = str(params.get('questionSpeed') or 'Quick').strip()
+    scheduled_task_id = params.get('scheduledTaskId')
+
+    stage_text = 'Waiting for Local Qwen Worker to claim...' if queue_only else 'Initializing Generation Pipeline...'
 
     job_record = {
         'id': job_id,
@@ -266,6 +272,7 @@ def create_generation_job(
         'chapter': chapter,
         'chapterId': chapter_id,
         'topic': topic,
+        'scheduledTaskId': scheduled_task_id,
         'sourceDocumentId': params.get('sourceDocId') or params.get('sourceDocumentId'),
         'sourceDocId': params.get('sourceDocId') or params.get('sourceDocumentId'),
         'examLevel': params.get('examLevel', 'CA Foundation'),
@@ -289,7 +296,7 @@ def create_generation_job(
         'autoPublish': bool(params.get('autoPublish', True)),
         'status': 'QUEUED',
         'progressPct': 5,
-        'currentStage': 'Initializing Generation Pipeline...',
+        'currentStage': stage_text,
         'currentQuestionIndex': 0,
         'totalQuestions': count,
         'generatedQuestions': [],
@@ -301,21 +308,23 @@ def create_generation_job(
         'completedAt': None,
         'lastHeartbeatAt': datetime.now(timezone.utc).isoformat(),
         'error': None,
-        'result': None
+        'result': None,
+        'scheduledTaskId': scheduledTaskId or params.get('scheduledTaskId')
     }
 
     # Persist job record immediately in DB & Firebase
     save_job_record(job_record, data, save_callback, firebase_sync_callback)
 
-    # Launch worker in background thread
-    worker_thread = threading.Thread(
-        target=_run_generation_job_worker,
-        args=(job_id, params, data, save_callback, firebase_sync_callback),
-        daemon=True
-    )
-    with _jobs_lock:
-        _active_workers[job_id] = worker_thread
-    worker_thread.start()
+    # In queue-only mode (serverless/worker mode), do not spawn an in-process worker thread
+    if not queue_only:
+        worker_thread = threading.Thread(
+            target=_run_generation_job_worker,
+            args=(job_id, params, data, save_callback, firebase_sync_callback),
+            daemon=True
+        )
+        with _jobs_lock:
+            _active_workers[job_id] = worker_thread
+        worker_thread.start()
 
     return True, None, job_record
 
@@ -760,3 +769,500 @@ def _run_generation_job_worker(
                     pass
 
         save_job_record(job_record, data, save_callback, firebase_sync_callback)
+
+# ======================================================================
+# OUTBOUND LOCAL QWEN WORKER INTEGRATION (FOR PRODUCTION / VERCEL)
+# ======================================================================
+
+def update_worker_heartbeat(
+    worker_payload: Dict[str, Any],
+    data: Dict[str, Any],
+    save_callback: Any = None,
+    firebase_sync_callback: Any = None
+) -> Dict[str, Any]:
+    """
+    Record heartbeat received outbound from local administrator machine worker.
+    """
+    now_utc = datetime.now(timezone.utc)
+    now_iso = now_utc.isoformat()
+    now_ts = now_utc.timestamp()
+
+    worker_id = str(worker_payload.get('workerId', 'worker-laptop-01')).strip()
+    status_obj = {
+        'workerId': worker_id,
+        'status': 'online',
+        'model': str(worker_payload.get('model', 'qwen3:8b')),
+        'runtime': str(worker_payload.get('runtime', 'Ollama (127.0.0.1:11434 on Admin Machine)')),
+        'ollamaUrl': str(worker_payload.get('ollamaUrl', 'http://127.0.0.1:11434')),
+        'ollamaHealthy': bool(worker_payload.get('ollamaHealthy', True)),
+        'lastLatencyMs': worker_payload.get('lastLatencyMs'),
+        'currentJobId': worker_payload.get('currentJobId'),
+        'currentJobTitle': worker_payload.get('currentJobTitle'),
+        'system': worker_payload.get('system', {}),
+        'lastHeartbeatAt': now_iso,
+        'lastHeartbeatTs': now_ts
+    }
+    
+    if data is not None and isinstance(data, dict):
+        data['ai_worker_status'] = status_obj
+        if save_callback:
+            try:
+                save_callback(data)
+            except Exception:
+                pass
+
+    if firebase_sync_callback:
+        try:
+            firebase_sync_callback('ai_worker_status', status_obj, method='PUT', sync=False)
+        except Exception:
+            pass
+
+    return status_obj
+
+def get_worker_status(data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Check if a local Qwen worker is currently registered and active.
+    Heartbeats older than 60s are treated as offline.
+    """
+    fallback = {
+        'online': False,
+        'isOnline': False,
+        'workerOnline': False,
+        'status': 'offline',
+        'error': 'Local Qwen Worker Offline',
+        'model': 'qwen3:8b',
+        'runtime': 'Ollama (127.0.0.1:11434 on Admin Machine)',
+        'lastHeartbeatSecondsAgo': 9999,
+        'secondsSinceHeartbeat': 9999
+    }
+    if not data or not isinstance(data, dict):
+        return fallback
+
+    w = data.get('ai_worker_status')
+    if not w or not isinstance(w, dict):
+        return fallback
+
+    last_ts = w.get('lastHeartbeatTs', 0)
+    if not last_ts and w.get('lastHeartbeatAt'):
+        try:
+            last_ts = datetime.fromisoformat(str(w['lastHeartbeatAt']).replace('Z', '+00:00')).timestamp()
+        except Exception:
+            last_ts = 0
+
+    now_ts = time.time()
+    is_fresh = bool(last_ts > 0 and (now_ts - last_ts) <= 60.0)
+    ollama_ok = bool(w.get('ollamaHealthy', True))
+    sec_ago = round(now_ts - last_ts, 1) if last_ts > 0 else 9999
+
+    w_copy = dict(w)
+    w_copy['workerOnline'] = is_fresh
+    w_copy['online'] = bool(is_fresh and ollama_ok)
+    w_copy['isOnline'] = w_copy['online']
+    w_copy['secondsSinceHeartbeat'] = sec_ago
+    w_copy['lastHeartbeatSecondsAgo'] = sec_ago
+
+    if not is_fresh:
+        w_copy['status'] = 'offline'
+        w_copy['error'] = 'Local Qwen Worker Offline'
+    elif not ollama_ok:
+        w_copy['status'] = 'ollama_offline'
+        w_copy['error'] = 'Worker connected, but local Ollama daemon is unreachable'
+    else:
+        w_copy['status'] = 'online'
+        w_copy['error'] = None
+
+    return w_copy
+
+def claim_pending_job_for_worker(
+    worker_id: str,
+    data: Dict[str, Any],
+    save_callback: Any = None,
+    firebase_sync_callback: Any = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Atomically claim the oldest pending QUEUED job for an outbound worker.
+    Recovers orphaned jobs stalled in CLAIMED status for > 180s.
+    """
+    now_utc = datetime.now(timezone.utc)
+    now_iso = now_utc.isoformat()
+    now_ts = now_utc.timestamp()
+
+    with _jobs_lock:
+        all_jobs = []
+        if data and isinstance(data.get('ai_generation_jobs'), list):
+            all_jobs = data['ai_generation_jobs']
+        
+        # Merge memory jobs
+        for mem_j in _active_jobs.values():
+            if not any(j.get('id') == mem_j.get('id') for j in all_jobs):
+                all_jobs.append(mem_j)
+
+        # Sort by creation time (FIFO)
+        def _get_ts(j):
+            return j.get('createdTs', 0)
+        all_jobs = sorted(all_jobs, key=_get_ts)
+
+        target_job = None
+        for j in all_jobs:
+            st = j.get('status')
+            if st == 'QUEUED':
+                target_job = j
+                break
+            # Check for orphaned claimed job whose previous worker died
+            if st in ('CLAIMED', 'PROCESSING'):
+                last_hb = j.get('lastHeartbeatAt')
+                last_hb_ts = 0
+                if last_hb:
+                    try:
+                        last_hb_ts = datetime.fromisoformat(str(last_hb).replace('Z', '+00:00')).timestamp()
+                    except Exception:
+                        last_hb_ts = 0
+                if (now_ts - last_hb_ts) > 180:
+                    print(f"[WORKER_RECOVER_ORPHAN] Re-claiming orphaned job {j.get('id')} (inactive > 180s)", flush=True)
+                    target_job = j
+                    break
+
+        if not target_job:
+            return None
+
+        job_id = target_job.get('id')
+        target_job['status'] = 'CLAIMED'
+        target_job['workerId'] = worker_id
+        target_job['claimedAt'] = now_iso
+        target_job['startedAt'] = target_job.get('startedAt') or now_iso
+        target_job['lastHeartbeatAt'] = now_iso
+        target_job['currentStage'] = f"Claimed by Local Qwen Worker ({worker_id}). Preparing inference..."
+        _active_jobs[job_id] = dict(target_job)
+
+    save_job_record(target_job, data, save_callback, firebase_sync_callback)
+    print(f"[WORKER_CLAIM_SUCCESS] Worker {worker_id} successfully claimed job {job_id} ('{target_job.get('title')}').", flush=True)
+    return dict(target_job)
+
+def update_job_progress_from_worker(
+    job_id: str,
+    *args,
+    **kwargs
+) -> Tuple[bool, Optional[str]]:
+    """
+    Update live execution progress received from worker.
+    Supports flexible signatures:
+    - (job_id, stage, progress, verified_count, data, save_callback, firebase_sync_callback)
+    - (job_id, worker_id, progress_pct, current_stage, verified_count, question_statuses, data, save_callback, firebase_sync_callback)
+    - Keyword arguments
+    """
+    stage = kwargs.get('stage') or kwargs.get('current_stage') or 'Processing...'
+    progress = kwargs.get('progress') or kwargs.get('progress_pct', 50)
+    verified_count = kwargs.get('verified_count', 0)
+    data = kwargs.get('data')
+    save_callback = kwargs.get('save_callback')
+    firebase_sync_callback = kwargs.get('firebase_sync_callback')
+    worker_id = kwargs.get('worker_id')
+    question_statuses = kwargs.get('question_statuses')
+
+    if len(args) >= 6 and isinstance(args[5], dict):
+        worker_id = args[0]
+        progress = args[1]
+        stage = args[2]
+        verified_count = args[3]
+        question_statuses = args[4]
+        data = args[5]
+        if len(args) > 6: save_callback = args[6]
+        if len(args) > 7: firebase_sync_callback = args[7]
+    elif len(args) >= 4 and isinstance(args[3], dict):
+        stage = args[0]
+        progress = args[1]
+        verified_count = args[2]
+        data = args[3]
+        if len(args) > 4: save_callback = args[4]
+        if len(args) > 5: firebase_sync_callback = args[5]
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    job = get_job_status(job_id, data)
+    if not job:
+        return False, "Job not found"
+
+    with _jobs_lock:
+        job['status'] = 'PROCESSING'
+        if worker_id:
+            job['workerId'] = worker_id
+        job['progressPct'] = min(95, max(5, int(progress)))
+        job['currentStage'] = str(stage)
+        job['generatedCount'] = int(verified_count)
+        job['lastHeartbeatAt'] = now_iso
+        if question_statuses is not None and isinstance(question_statuses, list):
+            job['questionStatuses'] = question_statuses
+        _active_jobs[job_id] = dict(job)
+
+    save_job_record(job, data, save_callback, firebase_sync_callback)
+    return True, None
+
+def complete_job_from_worker(
+    job_id: str,
+    questions: List[Dict[str, Any]],
+    metrics: Dict[str, Any],
+    *args,
+    **kwargs
+) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Finalize a job submitted by the local Qwen worker.
+    Guarantees idempotency: hosts test, commits questions, logs telemetry, and marks job completed.
+    Supports flexible positional arguments:
+    - (job_id, questions, metrics, data, save_callback, firebase_sync_callback)
+    - (job_id, questions, metrics, worker_id, data, save_callback, firebase_sync_callback)
+    """
+    worker_id = kwargs.get('worker_id')
+    data = kwargs.get('data')
+    save_callback = kwargs.get('save_callback')
+    firebase_sync_callback = kwargs.get('firebase_sync_callback')
+
+    if len(args) >= 2 and isinstance(args[1], dict):
+        worker_id = args[0]
+        data = args[1]
+        if len(args) > 2: save_callback = args[2]
+        if len(args) > 3: firebase_sync_callback = args[3]
+    elif len(args) >= 1 and isinstance(args[0], dict):
+        data = args[0]
+        if len(args) > 1: save_callback = args[1]
+        if len(args) > 2: firebase_sync_callback = args[2]
+
+    if not worker_id and metrics and isinstance(metrics, dict):
+        worker_id = metrics.get('workerId')
+
+    now_utc = datetime.now(timezone.utc)
+    completed_iso = now_utc.isoformat()
+
+    job_record = get_job_status(job_id, data)
+    if not job_record:
+        return False, "Job not found", None
+
+    # Idempotency check: if job already COMPLETED, return cleanly without duplicating
+    if job_record.get('status') == 'COMPLETED':
+        return True, None, job_record.get('result')
+
+    count = int(job_record.get('count', len(questions)))
+    auto_publish = bool(job_record.get('autoPublish', True))
+    marks_per_correct = float(job_record.get('marksPerCorrect', 2.0))
+    negative_marks = float(job_record.get('negativeMarksPerWrong', 0.5))
+    platform_xp = float(job_record.get('platformXp', 10.0))
+    allowed_plans = job_record.get('allowedPlans', ['free', 'trial', 'core', 'plus', 'elite'])
+    max_attempts = int(job_record.get('maxAttempts', 3))
+    exam_level_id = job_record.get('examLevelId', 'foundation')
+    chapter = job_record.get('chapter', '')
+    chapter_id = job_record.get('chapterId', '')
+
+    test_id = job_record.get('testId') or f"tst-ai-{int(now_utc.timestamp() * 1000)}"
+    job_record['testId'] = test_id
+
+    # 1. Preserve verified questions in data['questions']
+    if data is not None and isinstance(data, dict):
+        existing_q_ids = {q.get('id') for q in data.get('questions', []) if isinstance(q, dict)}
+        for q in questions:
+            if isinstance(q, dict):
+                q['testId'] = test_id
+                if q.get('id') not in existing_q_ids:
+                    data.setdefault('questions', []).append(q)
+                    existing_q_ids.add(q.get('id'))
+                    if firebase_sync_callback:
+                        try:
+                            firebase_sync_callback(f"questions/{q['id']}", q, method='PUT', sync=False)
+                        except Exception:
+                            pass
+
+    # 2. Construct / update Test record
+    test_record = None
+    if data is not None and isinstance(data.get('tests'), list):
+        test_record = next((t for t in data['tests'] if t.get('id') == test_id or t.get('aiJobId') == job_id), None)
+
+    if not test_record:
+        test_record = {
+            'id': test_id,
+            'title': job_record.get('title', 'AI-Generated Practice Test'),
+            'description': job_record.get('description') or f"AI-Generated {job_record.get('difficulty')} Practice Test for {chapter or job_record.get('topic')}.",
+            'subject': job_record.get('subject'),
+            'subjectId': job_record.get('subjectId', 'sub-1'),
+            'chapter': chapter,
+            'chapterId': chapter_id,
+            'topic': job_record.get('topic'),
+            'examLevel': job_record.get('examLevel', 'CA Foundation'),
+            'examLevelId': exam_level_id,
+            'difficulty': job_record.get('difficulty', 'ICAI Exam Standard'),
+            'questionCategory': job_record.get('questionCategory', 'Direct Questions'),
+            'questionSpeed': job_record.get('questionSpeed', 'Quick'),
+            'durationMinutes': int(job_record.get('durationMinutes', 15)),
+            'totalQuestions': len(questions),
+            'marksPerCorrect': marks_per_correct,
+            'negativeMarksPerWrong': negative_marks,
+            'maximumMarks': round(len(questions) * marks_per_correct, 2),
+            'allowedPlans': allowed_plans,
+            'hideFromNonEligible': False,
+            'isPublished': auto_publish,
+            'status': 'Published' if auto_publish else 'Draft',
+            'pointsPerCorrect': platform_xp,
+            'platformXp': platform_xp,
+            'unattemptedMarks': 0.0,
+            'maxAttempts': max_attempts,
+            'aiGenerated': True,
+            'aiJobId': job_id,
+            'generatedQuestions': list(questions),
+            'createdAt': completed_iso,
+            'updatedAt': completed_iso
+        }
+        if data is not None and isinstance(data, dict):
+            data.setdefault('tests', []).insert(0, test_record)
+    else:
+        test_record['totalQuestions'] = len(questions)
+        test_record['maximumMarks'] = round(len(questions) * marks_per_correct, 2)
+        test_record['isPublished'] = auto_publish
+        test_record['status'] = 'Published' if auto_publish else 'Draft'
+        test_record['updatedAt'] = completed_iso
+        test_record['generatedQuestions'] = list(questions)
+
+    # 3. Finalize Job Record
+    with _jobs_lock:
+        job_record['workerId'] = worker_id
+        job_record['completedAt'] = completed_iso
+        job_record['lastHeartbeatAt'] = completed_iso
+        job_record['generatedCount'] = len(questions)
+        job_record['validatedCount'] = len(questions)
+        job_record['failedCount'] = max(0, count - len(questions))
+        job_record['metrics'] = metrics
+        job_record['provider'] = 'LOCAL'
+        job_record['model'] = 'qwen3:8b'
+        job_record['runtime'] = 'Ollama'
+        job_record['providersUsed'] = ['local_qwen']
+        job_record['validationProvidersUsed'] = ['local']
+
+        if len(questions) == count:
+            job_record['status'] = 'COMPLETED'
+            job_record['progressPct'] = 100
+            job_record['currentStage'] = 'Test Hosted & Published Successfully!'
+        elif len(questions) > 0:
+            job_record['status'] = 'PARTIAL'
+            job_record['progressPct'] = int((len(questions) / count) * 100) if count > 0 else 50
+            job_record['currentStage'] = f"Partial Success: {len(questions)} of {count} questions verified and hosted."
+        else:
+            job_record['status'] = 'FAILED'
+            job_record['progressPct'] = 0
+            job_record['currentStage'] = 'Failed: 0 questions verified.'
+
+        job_record['result'] = {
+            'test': test_record,
+            'questions': questions,
+            'metrics': metrics,
+            'job': dict(job_record)
+        }
+        _active_jobs[job_id] = dict(job_record)
+
+    # 4. Record Telemetry Log
+    if data is not None and isinstance(data, dict):
+        if 'ai_generation_logs' not in data:
+            data['ai_generation_logs'] = []
+        log_record = {
+            'id': f"log-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}",
+            'jobId': job_id,
+            'testId': test_id,
+            'testTitle': test_record.get('title', 'MCQ Test') if len(questions) > 0 else 'Failed Generation',
+            'subject': job_record.get('subject'),
+            'topic': job_record.get('topic'),
+            'chapter': chapter,
+            'provider': 'LOCAL',
+            'model': 'qwen3:8b',
+            'runtime': 'Ollama',
+            'workerId': worker_id,
+            'questionCategory': job_record.get('questionCategory', 'Direct Questions'),
+            'questionSpeed': job_record.get('questionSpeed', 'Quick'),
+            'requestedCount': count,
+            'generatedCount': len(questions),
+            'failedCount': max(0, count - len(questions)),
+            'questionStatuses': metrics.get('questionStatuses', job_record.get('questionStatuses', [])),
+            'rejectedDuplicates': metrics.get('rejectedDuplicates', 0),
+            'rejectedValidation': metrics.get('rejectedValidation', 0),
+            'regenerationAttempts': metrics.get('regenerationAttempts', 0),
+            'durationSeconds': metrics.get('durationSeconds', 0),
+            'providersUsed': ['local_qwen'],
+            'validationProvidersUsed': ['local'],
+            'status': job_record['status'],
+            'isPublished': auto_publish if len(questions) > 0 else False,
+            'timestamp': completed_iso
+        }
+        data['ai_generation_logs'].insert(0, log_record)
+
+        # 5. Link with Auto-Pilot scheduled task if applicable
+        sched_id = job_record.get('scheduledTaskId')
+        if sched_id and isinstance(data.get('ai_scheduled_tasks'), list):
+            for t in data['ai_scheduled_tasks']:
+                if t.get('id') == sched_id:
+                    t['lastRunAt'] = completed_iso
+                    t['lastJobId'] = job_id
+                    t['lastTestId'] = test_id
+                    t['lastTestTitle'] = test_record.get('title')
+                    t['lastError'] = None
+                    t['executionCount'] = t.get('executionCount', 0) + 1
+                    t['updatedAt'] = completed_iso
+                    if bool(t.get('isLiveEvent', True)):
+                        t['status'] = 'live'
+                    elif t.get('scheduleType') == 'recurring':
+                        t['status'] = 'scheduled'
+                    else:
+                        t['status'] = 'completed'
+                    if firebase_sync_callback:
+                        try:
+                            firebase_sync_callback(f"ai_scheduled_tasks/{sched_id}", t, method='PUT', sync=True)
+                        except Exception:
+                            pass
+                    break
+
+        if save_callback:
+            save_callback(data)
+
+    if firebase_sync_callback:
+        try:
+            if len(questions) > 0:
+                firebase_sync_callback(f"tests/{test_id}", test_record, method='PUT', sync=True)
+            firebase_sync_callback(f"ai_generation_jobs/{job_id}", job_record, method='PUT', sync=True)
+        except Exception:
+            pass
+
+    save_job_record(job_record, data, save_callback, firebase_sync_callback)
+    print(f"[WORKER_JOB_COMPLETE] Job {job_id} successfully finalized by worker {worker_id}. Created test {test_id} with {len(questions)} MCQs.", flush=True)
+    return True, None, job_record.get('result')
+
+def fail_job_from_worker(
+    job_id: str,
+    error_msg: str,
+    worker_id: str,
+    data: Dict[str, Any],
+    save_callback: Any = None,
+    firebase_sync_callback: Any = None
+) -> bool:
+    """
+    Mark a job failed as reported by the worker.
+    """
+    job = get_job_status(job_id, data)
+    if not job:
+        return False
+    with _jobs_lock:
+        job['status'] = 'FAILED'
+        job['workerId'] = worker_id
+        job['error'] = error_msg
+        job['currentStage'] = f"Failed by worker: {error_msg}"
+        job['lastHeartbeatAt'] = datetime.now(timezone.utc).isoformat()
+        _active_jobs[job_id] = dict(job)
+
+    # If linked to scheduled task, update task status as well
+    sched_id = job.get('scheduledTaskId')
+    if sched_id and data and isinstance(data.get('ai_scheduled_tasks'), list):
+        for t in data['ai_scheduled_tasks']:
+            if t.get('id') == sched_id:
+                t['status'] = 'failed'
+                t['lastError'] = error_msg
+                t['updatedAt'] = datetime.now(timezone.utc).isoformat()
+                if firebase_sync_callback:
+                    try:
+                        firebase_sync_callback(f"ai_scheduled_tasks/{sched_id}", t, method='PUT', sync=True)
+                    except Exception:
+                        pass
+                break
+
+    save_job_record(job, data, save_callback, firebase_sync_callback)
+    return True

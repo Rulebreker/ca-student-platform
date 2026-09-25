@@ -9,6 +9,8 @@ from typing import Dict, Any, List, Optional, Tuple
 import ai_job_manager
 import local_qwen_service
 
+IS_SERVERLESS = bool(os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME'))
+
 # Indian Standard Time (IST) is UTC+05:30
 IST_OFFSET = timedelta(hours=5, minutes=30)
 IST_TZ = timezone(IST_OFFSET)
@@ -518,6 +520,52 @@ def execute_scheduler_task_sync(
     }
 
     try:
+        # If running in serverless / production:
+        if IS_SERVERLESS:
+            worker_status = ai_job_manager.get_worker_status(data)
+            if not worker_status.get('isOnline'):
+                err_msg = "Local Qwen Worker is offline. Start the worker on the administrator laptop (`python local_qwen_worker.py --server https://excellenceca.vercel.app`) and try again."
+                print(f"[SCHEDULER_FAILED_WORKER_OFFLINE] Task '{task.get('name')}' failed: {err_msg}", flush=True)
+                task['status'] = 'failed'
+                task['lastError'] = err_msg
+                task['updatedAt'] = format_iso_utc(get_now_utc())
+                if task.get('scheduleType') == 'recurring':
+                    task['nextRunAt'] = calculate_next_run(task, get_now_utc())
+                if save_callback:
+                    save_callback(data)
+                if firebase_sync_callback:
+                    firebase_sync_callback(f"ai_scheduled_tasks/{task_id}", task, method='PUT', sync=True)
+                return False, err_msg, None
+
+            # Queue generation job for the worker
+            ok, err, job_record = ai_job_manager.create_generation_job(
+                params=params,
+                data=data,
+                save_callback=save_callback,
+                firebase_sync_callback=firebase_sync_callback,
+                queue_only=True,
+                scheduledTaskId=task_id
+            )
+            if not ok or not job_record:
+                err_msg = f"Failed to queue worker job: {err}"
+                task['status'] = 'failed'
+                task['lastError'] = err_msg
+                task['updatedAt'] = format_iso_utc(get_now_utc())
+                if save_callback:
+                    save_callback(data)
+                if firebase_sync_callback:
+                    firebase_sync_callback(f"ai_scheduled_tasks/{task_id}", task, method='PUT', sync=True)
+                return False, err_msg, None
+
+            task['status'] = 'processing'
+            task['activeJobId'] = job_record['id']
+            task['updatedAt'] = format_iso_utc(get_now_utc())
+            if save_callback:
+                save_callback(data)
+            if firebase_sync_callback:
+                firebase_sync_callback(f"ai_scheduled_tasks/{task_id}", task, method='PUT', sync=True)
+            return True, None, {'job': job_record, 'queuedForWorker': True}
+
         # Pre-check Local Ollama health
         is_online, health_info = local_qwen_service.check_ollama_health(timeout=3.0)
         if not is_online:

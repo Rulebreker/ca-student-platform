@@ -412,14 +412,41 @@ def get_sanitized_providers(data: Optional[Dict[str, Any]] = None) -> List[Dict[
     for p in providers:
         pid = p['id']
         if p.get('provider') == 'ollama' or pid == 'local_qwen':
-            is_online, health_info = local_qwen_service.check_ollama_health(timeout=2.0)
+            import ai_job_manager
+            worker_status = ai_job_manager.get_worker_status(data)
+            is_worker_online = bool(worker_status.get('online', False))
+            
             p_copy = dict(p)
-            p_copy['maskedKey'] = 'LOCAL-DAEMON'
+            p_copy['maskedKey'] = 'LOCAL-WORKER' if IS_SERVERLESS else 'LOCAL-DAEMON'
             p_copy['hasKey'] = True
-            p_copy['status'] = 'Configured — Healthy' if is_online else 'Configured — Connection Failed'
-            p_copy['online'] = is_online
-            p_copy['lastLatencyMs'] = health_info.get('latencyMs')
-            p_copy['error'] = health_info.get('error')
+            p_copy['isServerless'] = IS_SERVERLESS
+            p_copy['workerStatus'] = worker_status
+
+            if IS_SERVERLESS:
+                p_copy['online'] = is_worker_online
+                p_copy['workerOnline'] = is_worker_online
+                if is_worker_online:
+                    p_copy['status'] = 'Configured — Healthy'
+                    p_copy['lastLatencyMs'] = worker_status.get('lastLatencyMs', 15.0)
+                    p_copy['error'] = None
+                else:
+                    p_copy['status'] = 'Configured — Worker Offline'
+                    p_copy['error'] = 'Local Qwen Worker is offline. Start local_qwen_worker.py on administrator laptop.'
+            else:
+                # In local dev environment:
+                if is_worker_online:
+                    p_copy['online'] = True
+                    p_copy['workerOnline'] = True
+                    p_copy['status'] = 'Configured — Healthy'
+                    p_copy['lastLatencyMs'] = worker_status.get('lastLatencyMs', 15.0)
+                    p_copy['error'] = None
+                else:
+                    is_online, health_info = local_qwen_service.check_ollama_health(timeout=2.0)
+                    p_copy['status'] = 'Configured — Healthy' if is_online else 'Configured — Connection Failed'
+                    p_copy['online'] = is_online
+                    p_copy['lastLatencyMs'] = health_info.get('latencyMs')
+                    p_copy['error'] = health_info.get('error')
+
             result.append(p_copy)
             continue
 
@@ -1102,26 +1129,61 @@ def test_provider_connection(provider_id: str, data: Optional[Dict[str, Any]] = 
         return {'success': False, 'error': f"Provider '{provider_id}' not found in registry."}
 
     if prov.get('provider') == 'ollama' or provider_id == 'local_qwen':
-        is_online, health_info = local_qwen_service.check_ollama_health(timeout=5.0)
-        if is_online:
-            lat = health_info.get('latencyMs', 50.0)
-            mark_provider_success('local_qwen', lat)
-            return {
-                'success': True,
-                'latency_ms': lat,
-                'model': 'qwen3:8b',
-                'status': 'Configured — Healthy',
-                'message': 'Local Ollama Qwen3 8B daemon is online and responsive.'
-            }
+        import ai_job_manager
+        worker_status = ai_job_manager.get_worker_status(data)
+        is_worker_online = bool(worker_status.get('online', False))
+
+        if IS_SERVERLESS:
+            if is_worker_online:
+                lat = worker_status.get('lastLatencyMs', 25.0)
+                mark_provider_success('local_qwen', lat)
+                return {
+                    'success': True,
+                    'latency_ms': lat,
+                    'model': 'qwen3:8b',
+                    'status': 'Configured — Healthy',
+                    'message': f"Local Qwen Worker ({worker_status.get('workerId', 'worker')}) is online and responsive."
+                }
+            else:
+                mark_provider_failure('local_qwen', 'Worker Offline')
+                return {
+                    'success': False,
+                    'latency_ms': None,
+                    'model': 'qwen3:8b',
+                    'status': 'Configured — Worker Offline',
+                    'error': 'Local Qwen Worker is offline. Start local_qwen_worker.py on the administrator machine.'
+                }
         else:
-            mark_provider_failure('local_qwen', health_info.get('error', 'Unreachable'))
-            return {
-                'success': False,
-                'latency_ms': None,
-                'model': 'qwen3:8b',
-                'status': 'Configured — Connection Failed',
-                'error': 'Local AI is offline. Start Ollama on the generation machine and try again.'
-            }
+            if is_worker_online:
+                lat = worker_status.get('lastLatencyMs', 25.0)
+                mark_provider_success('local_qwen', lat)
+                return {
+                    'success': True,
+                    'latency_ms': lat,
+                    'model': 'qwen3:8b',
+                    'status': 'Configured — Healthy',
+                    'message': f"Local Qwen Worker ({worker_status.get('workerId', 'worker')}) is online."
+                }
+            is_online, health_info = local_qwen_service.check_ollama_health(timeout=5.0)
+            if is_online:
+                lat = health_info.get('latencyMs', 50.0)
+                mark_provider_success('local_qwen', lat)
+                return {
+                    'success': True,
+                    'latency_ms': lat,
+                    'model': 'qwen3:8b',
+                    'status': 'Configured — Healthy',
+                    'message': 'Local Ollama Qwen3 8B daemon is online and responsive.'
+                }
+            else:
+                mark_provider_failure('local_qwen', health_info.get('error', 'Unreachable'))
+                return {
+                    'success': False,
+                    'latency_ms': None,
+                    'model': 'qwen3:8b',
+                    'status': 'Configured — Connection Failed',
+                    'error': 'Local AI is offline. Start Ollama on the generation machine and try again.'
+                }
 
     secrets_map = load_secrets()
     key = secrets_map.get(provider_id)
