@@ -1,9 +1,57 @@
+# --- Python ---
 __pycache__/
-*.pyc
-latest_user_request*.txt
-test_*.html
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# --- Node ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Vercel ---
+.vercel/
+
+# --- Local secrets & environment (never commit) ---
 .env
 .env.*
+!.env.example
 *secrets*.json
+*.pem
+*.key
+
+# --- Private runtime storage (uploads, submissions, QR codes, local data store) ---
 private_storage/
+
+# --- Local data backups (contain user data) ---
+backend_data.json.bak*
+backend_data_backup_*.json
+*.bak
+
+# --- Logs, temp & scratch files ---
+*.log
+logs/
+*.tmp
+*.tmp.*
+tmp/
+temp/
+scratch_*.py
+latest_user_request*.txt
+
+# --- Local test artifacts ---
+test_*.html
 tests/test_provider_api.py
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

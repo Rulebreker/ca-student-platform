@@ -443,7 +443,7 @@ def generate_exact_10_mcqs(
                         verified_questions.append(norm)
                         existing_question_texts.append(norm['question'])
                         safe_preview = norm['question'][:60].encode('ascii', errors='replace').decode('ascii')
-                    print(f"  -> Q{q_num} Verified: {safe_preview}... [Key: {norm['correctOption']}]", flush=True)
+                        print(f"  -> Q{q_num} Verified: {safe_preview}... [Key: {norm['correctOption']}]", flush=True)
         except Exception as e:
             print(f"[QWEN_TOPUP_ERR] Top-up attempt failed: {e}", flush=True)
 

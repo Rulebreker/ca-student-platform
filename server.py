@@ -1,7 +1,6 @@
 import subscription_manager
 import ai_provider_manager
 import ai_document_indexer
-import ai_mcq_engine
 import ai_job_manager
 import ai_scheduler
 import local_qwen_service

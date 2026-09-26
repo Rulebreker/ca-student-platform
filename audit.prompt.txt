@@ -1,0 +1,39 @@
+We are working on the ExcellenceCA production project.
+
+FIRST DO A READ-ONLY AUDIT.
+Do not modify anything yet.
+
+Inspect the entire project and understand:
+
+1. Frontend architecture
+2. Backend architecture
+3. Database/persistence architecture
+4. Authentication
+5. Admin dashboard
+6. MCQ generation system
+7. Generate & Host Now
+8. Auto-Pilot / scheduled MCQ generation
+9. local_qwen_worker.py
+10. Ollama/Qwen3 integration
+11. Production/Vercel deployment
+12. Current Firebase/database dependencies
+13. Old Gemini/Mistral/Groq/OpenRouter AI dependencies
+
+Also inspect the recent Local Qwen migration and identify why:
+- worker generation has failed with generate_exact_mcqs_pipeline() argument mismatch
+- 10-MCQ generation stalls in a single large request
+- Local Qwen Test Connection can throw NoneType __round__
+- production/local architecture can become confused
+- Firebase still remains in the architecture
+
+Do NOT change anything yet.
+
+Return only:
+A. Current architecture
+B. Current AI generation flow
+C. Current database flow
+D. Exact blocking problems
+E. Files/modules responsible
+F. Recommended minimal fix order
+
+Do not rewrite or refactor anything during this audit.
