@@ -166,6 +166,28 @@ class TestCanonicalPipeline(unittest.TestCase):
         self.run_pipeline(fake, count=4, topic='Elasticity of Demand')
         self.assertEqual({k['topic'] for k in fake.kwargs}, {'Elasticity of Demand'})
 
+    def test_correct_answers_are_spread_evenly_and_keep_their_text(self):
+        from collections import Counter
+        qs, _, _, _ = self.run_pipeline(FakeQwen(), count=12)  # the fake model always answers "B"
+        self.assertEqual(Counter(q['correctOption'] for q in qs), Counter({'A': 3, 'B': 3, 'C': 3, 'D': 3}))
+        for q in qs:
+            self.assertTrue(q[f"option{q['correctOption']}"].startswith('Beta answer'), "correct text moves with the key")
+            self.assertEqual(q['correctAnswer'], q['correctOption'])
+            self.assertEqual(q['options'][q['correctOption']], q[f"option{q['correctOption']}"])
+            self.assertEqual(len({q['optionA'], q['optionB'], q['optionC'], q['optionD']}), 4)
+
+    def test_shuffle_remaps_letter_references_in_explanation(self):
+        import random
+        q = {'optionA': 'alpha', 'optionB': 'beta', 'optionC': 'gamma', 'optionD': 'delta', 'correctAnswer': 'B',
+             'correctOption': 'B', 'explanation': "Option B is correct. (A) is wrong. The answer is B. A choice a firm makes."}
+        ai_mcq_engine.shuffle_options_to(q, 'D', random.Random(7))
+        self.assertEqual((q['correctOption'], q['optionD']), ('D', 'beta'))
+        self.assertIn('Option D is correct', q['explanation'])
+        self.assertIn('The answer is D', q['explanation'])
+        old_a_new = next(k for k in 'ABCD' if q[f'option{k}'] == 'alpha')
+        self.assertIn(f'({old_a_new}) is wrong', q['explanation'])
+        self.assertTrue(q['explanation'].endswith('A choice a firm makes.'), "prose is untouched")
+
     def test_start_number_offsets_numbering_for_resumed_jobs(self):
         qs, metrics, _, _ = self.run_pipeline(FakeQwen(), count=4, start_number=7)
         self.assertEqual([q['number'] for q in qs], [7, 8, 9, 10])

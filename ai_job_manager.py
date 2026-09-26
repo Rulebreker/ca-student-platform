@@ -395,12 +395,8 @@ def claim_pending_job_for_worker(worker_id: str, data: Dict[str, Any], save_call
 
     claimed = dict(job)
     claimed['existingQuestions'] = [
-        {'text': q.get('text') or q.get('question')}
-        for q in (data.get('questions') or [])
-        if isinstance(q, dict) and (q.get('text') or q.get('question'))
-        and q.get('subject') == job.get('subject')
-        and (q.get('chapterId') == job.get('chapterId') or q.get('chapter') == job.get('chapter'))
-    ][-300:]
+        {'text': t} for t in repo.existing_question_texts(job.get('subject'), job.get('chapterId'), job.get('chapter'))
+    ]
     return claimed
 
 
@@ -505,7 +501,6 @@ def _finalize_without_worker(repo: JobRepository, job: Dict[str, Any], status: s
 def _finalize_job(repo: JobRepository, job: Dict[str, Any], questions: List[Dict[str, Any]],
                   metrics: Dict[str, Any], note: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Host verified questions as a test (COMPLETED / PARTIAL) or fail the job when there are none."""
-    data = repo.data
     count = int(job.get('count') or len(questions) or 1)
     questions = [q for q in questions if isinstance(q, dict)][:count]
     now = _now_ts()
@@ -527,11 +522,7 @@ def _finalize_job(repo: JobRepository, job: Dict[str, Any], questions: List[Dict
         q['testId'] = test_id
         q['number'] = i
 
-    existing_q_ids = {q.get('id') for q in data.get('questions', []) if isinstance(q, dict)}
-    for q in questions:
-        if q.get('id') not in existing_q_ids:
-            data.setdefault('questions', []).append(q)
-            repo.mirror(f"questions/{q['id']}", q)
+    repo.save_questions(questions)
 
     test_record = {
         'id': test_id,
@@ -565,13 +556,7 @@ def _finalize_job(repo: JobRepository, job: Dict[str, Any], questions: List[Dict
         'createdAt': completed_iso,
         'updatedAt': completed_iso
     }
-    tests = data.setdefault('tests', [])
-    idx = next((i for i, t in enumerate(tests) if isinstance(t, dict) and t.get('id') == test_id), None)
-    if idx is None:
-        tests.insert(0, test_record)
-    else:
-        tests[idx] = test_record
-    repo.mirror(f"tests/{test_id}", test_record)
+    repo.save_test(test_record)
 
     complete = len(questions) >= count
     job.update({
@@ -621,8 +606,7 @@ def _finalize_job(repo: JobRepository, job: Dict[str, Any], questions: List[Dict
         'isPublished': auto_publish,
         'timestamp': completed_iso
     }
-    data.setdefault('ai_generation_logs', []).insert(0, log_record)
-    repo.mirror(f"ai_generation_logs/{log_record['id']}", log_record)
+    repo.add_generation_log(log_record)
 
     _save(repo, job)
     _notify_scheduler(repo, job, test_record)

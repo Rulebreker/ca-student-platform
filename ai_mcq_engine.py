@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import random
 import time
 import uuid
 from typing import Callable, Dict, Any, List, Optional, Tuple, Set
@@ -675,6 +676,60 @@ class GenerationCancelled(Exception):
     """Raised between batches when the caller (e.g. a worker that lost its job lease) cancels."""
 
 
+ANSWER_LETTERS = ('A', 'B', 'C', 'D')
+# Option-letter references in explanations ("Option A", "option (B)", "Answer: C", "(D)"), remapped
+# after shuffling in a single pass. The letter itself must be uppercase so prose like "a choice a firm
+# makes" is never touched.
+_LETTER_REFERENCE = re.compile(
+    r'\b(?i:options?|choices?|answer(?:\s+is)?)\s*[:\-]?\s*\(?([A-D])\)?(?![A-Za-z])|\(([A-D])\)')
+
+
+class AnswerPositionBalancer:
+    """Balanced random correct-answer positions: every 4 questions use A, B, C and D once, in random order."""
+
+    def __init__(self, rng: Optional[random.Random] = None):
+        self.rng = rng or random.Random()
+        self._bag: List[str] = []
+
+    def next_letter(self) -> str:
+        if not self._bag:
+            self._bag = list(ANSWER_LETTERS)
+            self.rng.shuffle(self._bag)
+        return self._bag.pop()
+
+
+def shuffle_options_to(q_data: Dict[str, Any], target_letter: str, rng: random.Random) -> None:
+    """
+    Reorder the four options in place so the correct answer sits at target_letter (distractors in
+    random order), then remap option-letter references in the explanation to the new letters.
+    """
+    correct = str(q_data.get('correctAnswer') or q_data.get('correctOption') or '').strip().upper()
+    texts = {k: q_data.get(f'option{k}', '') for k in ANSWER_LETTERS}
+    if correct not in ANSWER_LETTERS or target_letter not in ANSWER_LETTERS or not all(texts.values()):
+        return
+    distractors = [k for k in ANSWER_LETTERS if k != correct]
+    rng.shuffle(distractors)
+    new_to_old: Dict[str, str] = {target_letter: correct}
+    for new_letter in ANSWER_LETTERS:
+        if new_letter != target_letter:
+            new_to_old[new_letter] = distractors.pop()
+    old_to_new = {old: new for new, old in new_to_old.items()}
+
+    for new_letter, old_letter in new_to_old.items():
+        q_data[f'option{new_letter}'] = texts[old_letter]
+    q_data['options'] = {k: q_data[f'option{k}'] for k in ANSWER_LETTERS}
+    q_data['correctAnswer'] = q_data['correctOption'] = q_data['answer'] = target_letter
+
+    def _remap(m: 're.Match') -> str:
+        group = 1 if m.group(1) else 2
+        pos = m.start(group) - m.start(0)
+        text = m.group(0)
+        return text[:pos] + old_to_new[m.group(group)] + text[pos + 1:]
+
+    if q_data.get('explanation'):
+        q_data['explanation'] = _LETTER_REFERENCE.sub(_remap, str(q_data['explanation']))
+
+
 def _build_syllabus_scope(chapter_metadata: Optional[Dict[str, Any]]) -> str:
     """Compact syllabus scope (chapter description + allowed topics) passed to Qwen."""
     if not chapter_metadata:
@@ -828,7 +883,8 @@ def generate_exact_mcqs_pipeline(
     batch_timeout: Optional[float] = None,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     on_question_verified: Optional[Callable[..., None]] = None,
-    cancel_check: Optional[Callable[[], bool]] = None
+    cancel_check: Optional[Callable[[], bool]] = None,
+    rng: Optional[random.Random] = None
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     The single canonical MCQ generation pipeline (Local Qwen3 8B via Ollama).
@@ -844,8 +900,12 @@ def generate_exact_mcqs_pipeline(
 
     start_number offsets question numbering when resuming a job that already has saved questions.
     cancel_check is polled before every Ollama call; returning True raises GenerationCancelled.
+    Accepted questions have their options shuffled so correct answers are spread evenly over
+    A-D (rng may be passed for reproducible tests).
     """
     size = max(1, int(batch_size or QWEN_BATCH_SIZE))
+    rng = rng or random.Random()
+    answer_positions = AnswerPositionBalancer(rng)  # models favour "A"; spread correct answers evenly
     per_call_timeout = float(batch_timeout or QWEN_BATCH_TIMEOUT)
     existing_questions = list(existing_questions or [])
 
@@ -1047,6 +1107,7 @@ def generate_exact_mcqs_pipeline(
 
             if fix and isinstance(fix, dict):
                 cand_q.update(fix)
+            shuffle_options_to(cand_q, answer_positions.next_letter(), rng)
             q_rec = _build_question_record(
                 q_data=cand_q,
                 number=slot['number'],

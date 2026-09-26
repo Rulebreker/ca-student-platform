@@ -128,7 +128,8 @@ CRITICAL RULES:
   over generic "Which of the following best describes X?" stems.
 - Exactly 4 options per question (keys: "A", "B", "C", "D").
 - Answer must be the single uppercase letter: "A", "B", "C", or "D".
-- Explanation must thoroughly verify why that option is correct.
+- Explanation must thoroughly verify why that option is correct. In the explanation refer to options
+  by their content, never by their letter (options are re-ordered after generation).
 - Return output as a single JSON object matching this schema:
 {{
   "mcqs": [

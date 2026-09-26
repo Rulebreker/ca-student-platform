@@ -1,14 +1,23 @@
 """
 job_repository.py
 =================
-Storage boundary for MCQ generation jobs and Local Qwen Worker status.
+Storage boundary for MCQ generation jobs, Local Qwen Worker status, and the content a
+finished job publishes (questions, test, generation log).
 
-ai_job_manager owns the job state machine; it reads and writes jobs ONLY through this
-repository. The current implementation keeps jobs inside the backend data store dict
-(persisted via save_callback and mirrored via sync_callback). The planned MySQL
-implementation must provide the same methods, and must make the read-modify-write
-sequences that ai_job_manager performs under STORE_LOCK atomic across serverless
-instances (e.g. `UPDATE ... WHERE id=? AND status=? AND worker_id=?` for claims/leases).
+ai_job_manager owns the job state machine; it reads and writes this state ONLY through this
+repository. The current implementation keeps it inside the backend data store dict
+(persisted via save_callback and mirrored via sync_callback).
+
+Contract for the planned MySQL implementation (see docs/MYSQL_MIGRATION_PLAN.md):
+    list_jobs, get, save                      -> ai_generation_jobs
+    get_worker_status, save_worker_status     -> ai_worker_status
+    existing_question_texts                   -> questions (read, duplicate detection)
+    save_questions, save_test                 -> questions, tests
+    add_generation_log                        -> ai_generation_logs
+    persist                                   -> transaction commit
+The read-modify-write sequences ai_job_manager performs under STORE_LOCK must become
+single transactions (claims/leases as `UPDATE ... WHERE id=? AND status=? AND worker_id=?`)
+so they stay atomic across serverless instances.
 """
 
 import threading
@@ -74,6 +83,42 @@ class JobRepository:
         self.data['ai_worker_status'] = status
         self.persist()
         self.mirror('ai_worker_status', status)
+
+    # ---- published content ----------------------------------------------
+    def existing_question_texts(self, subject: str, chapter_id: str, chapter: str, limit: int = 300) -> List[str]:
+        """Stems of existing bank questions in the same subject/chapter (for duplicate detection)."""
+        texts = [
+            q.get('text') or q.get('question')
+            for q in (self.data.get('questions') or [])
+            if isinstance(q, dict) and (q.get('text') or q.get('question'))
+            and q.get('subject') == subject
+            and (q.get('chapterId') == chapter_id or q.get('chapter') == chapter)
+        ]
+        return texts[-limit:]
+
+    def save_questions(self, questions: List[Dict[str, Any]]) -> None:
+        """Insert questions that are not stored yet (idempotent by question id)."""
+        bank = self.data.setdefault('questions', [])
+        known = {q.get('id') for q in bank if isinstance(q, dict)}
+        for q in questions:
+            if q.get('id') not in known:
+                bank.append(q)
+                known.add(q.get('id'))
+                self.mirror(f"questions/{q['id']}", q)
+
+    def save_test(self, test: Dict[str, Any]) -> None:
+        """Upsert a test record (newest first)."""
+        tests = self.data.setdefault('tests', [])
+        idx = next((i for i, t in enumerate(tests) if isinstance(t, dict) and t.get('id') == test['id']), None)
+        if idx is None:
+            tests.insert(0, test)
+        else:
+            tests[idx] = test
+        self.mirror(f"tests/{test['id']}", test)
+
+    def add_generation_log(self, log: Dict[str, Any]) -> None:
+        self.data.setdefault('ai_generation_logs', []).insert(0, log)
+        self.mirror(f"ai_generation_logs/{log['id']}", log)
 
     # ---- generic persistence -------------------------------------------
     def persist(self) -> None:
