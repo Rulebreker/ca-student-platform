@@ -20,6 +20,7 @@ import re
 import zlib
 import hashlib
 import hmac
+import collections
 
 PORT = 8000
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -167,11 +168,12 @@ import mongodb_manager
 
 def sync_to_database(path, data, method='PUT', sync=None):
     """Sync updates to MongoDB Atlas natively, maintaining local JSON mirror."""
-    should_sync = sync if sync is not None else IS_SERVERLESS
+    should_sync = True if IS_SERVERLESS else bool(sync)
     try:
-        mongodb_manager.sync_document_to_mongo(path, data, method=method, sync=should_sync)
-    except Exception:
-        pass
+        return mongodb_manager.sync_document_to_mongo(path, data, method=method, sync=should_sync)
+    except Exception as e:
+        print(f"[MONGODB_SYNC_ERROR] {path}: {e}", flush=True)
+        return False
 
 # Maintain backward compatibility alias for legacy callers
 sync_to_firebase = sync_to_database
@@ -1017,18 +1019,72 @@ def check_scheduled_mcq_tests(data, sync_fn=None):
 _backend_data_lock = threading.RLock()
 _collection_last_synced = {}
 
-def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
+# Every collection shared across server instances through MongoDB Atlas.
+SHARED_COLLECTIONS = [
+    'users', 'revoked_users', 'revoked_tokens', 'subscriptions', 'subscription_plans', 'payment_sessions',
+    'payment_channels', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'test_attempts',
+    'assignments', 'papers', 'submissions', 'subjects', 'bookmarks', 'xp_transactions', 'xp_reset_history',
+    'xp_reset_settings', 'referrals', 'referral_settings', 'ai_source_documents', 'ai_generation_logs',
+    'ai_autopilot_config', 'ai_scheduled_tasks', 'deleted_scheduled_tasks', 'ai_generation_jobs', 'ai_worker_status'
+]
+
+
+def _doc_ts(doc):
+    """Best-effort modification time of a document (0 when unknown)."""
+    if not isinstance(doc, dict):
+        return 0.0
+    for key in ('updatedTs', 'lastHeartbeatTs'):
+        if isinstance(doc.get(key), (int, float)):
+            return float(doc[key])
+    for key in ('updatedAt', 'submittedAt', 'createdAt', 'timestamp'):
+        val = doc.get(key)
+        if val:
+            try:
+                return datetime.fromisoformat(str(val).replace('Z', '+00:00')).timestamp()
+            except ValueError:
+                continue
+    return 0.0
+
+
+def _merge_documents(local_items, cloud_items, key_field='id'):
+    """Merge by key: a document present in both keeps the newer copy (MongoDB wins ties and unknown
+    timestamps). Local-only documents are kept - nothing is dropped until data reconciliation."""
+    merged = {}
+    order = []
+    for doc in local_items or []:
+        if isinstance(doc, dict) and doc.get(key_field):
+            if doc[key_field] not in merged:
+                order.append(doc[key_field])
+            merged[doc[key_field]] = doc
+    for doc in cloud_items or []:
+        if not isinstance(doc, dict) or not doc.get(key_field):
+            continue
+        k = doc[key_field]
+        cur = merged.get(k)
+        if cur is None:
+            order.append(k)
+            merged[k] = doc
+        elif _doc_ts(cur) <= _doc_ts(doc) or not _doc_ts(cur):
+            merged[k] = doc
+    return [merged[k] for k in order]
+
+
+def _as_items(cloud_data):
+    if isinstance(cloud_data, dict):
+        return list(cloud_data.values())
+    return cloud_data if isinstance(cloud_data, list) else []
+
+
+def refresh_collections_from_mongo(data, collections=None, min_interval=1.0):
     """
-    Safely synchronizes dynamic collections from Firebase RTDB to prevent stale container state.
-    Uses throttling (min_interval) to avoid redundant round-trips while guaranteeing fresh data.
+    Merge the requested collections from MongoDB Atlas (the shared production store) into this
+    instance's data. Throttled per collection by min_interval seconds.
     """
     if not data or not isinstance(data, dict):
         return data
 
     now = time.time()
-    all_keys = ['users', 'revoked_users', 'revoked_tokens', 'subscriptions', 'payment_sessions', 'payment_channels', 'subscription_plans', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'assignments', 'papers', 'ai_source_documents', 'ai_generation_logs', 'ai_providers', 'ai_autopilot_config', 'ai_scheduled_tasks', 'ai_generation_jobs']
-    target_keys = collections if collections else all_keys
-
+    target_keys = [k for k in (collections or SHARED_COLLECTIONS) if k != 'ai_providers']
     keys_to_fetch = [k for k in target_keys if (now - _collection_last_synced.get(k, 0)) >= min_interval]
     if not keys_to_fetch:
         return data
@@ -1044,225 +1100,112 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
                     updated = True
                 continue
 
-                if key == 'users':
-                    if isinstance(cloud_data, dict):
-                        users_dict = data.setdefault('users', {})
-                        revoked_set = set(str(x).lower().strip() for x in data.get('revoked_users', [])) | REVOKED_USERS
-                        for uid, u in cloud_data.items():
-                            if isinstance(u, dict):
-                                u_email = str(u.get('email') or '').strip().lower()
-                                u_id = str(u.get('id') or uid).strip()
-                                u_uname = str(u.get('username') or '').strip().lower().lstrip('@')
-                                if u_id.lower() in revoked_set or u_email in revoked_set or u_uname in revoked_set or u.get('isDeleted', False):
-                                    continue
-                                target_key = None
-                                if u_email and u_email in users_dict:
-                                    target_key = u_email
-                                else:
-                                    for k, exist_u in users_dict.items():
-                                        if (exist_u.get('id') and exist_u.get('id') == u_id) or (u_email and exist_u.get('email') and exist_u.get('email').lower() == u_email):
-                                            target_key = k
-                                            break
-                                if target_key:
-                                    for f_k, f_v in u.items():
-                                        if f_v is not None and (f_k != 'password' or f_v):
-                                            if f_k == 'token' and (f_v in REVOKED_TOKENS or f_v in data.get('revoked_tokens', [])):
-                                                continue
-                                            users_dict[target_key][f_k] = f_v
-                                else:
-                                    k_name = u_email if u_email else u_id
-                                    users_dict[k_name] = dict(u)
-                        _collection_last_synced[key] = now
-                        updated = True
-                elif key == 'revoked_users':
-                    if isinstance(cloud_data, (dict, list)):
-                        rev_list = data.setdefault('revoked_users', [])
-                        cloud_keys = list(cloud_data.keys()) if isinstance(cloud_data, dict) else cloud_data
-                        for r_k in cloud_keys:
-                            if r_k:
-                                clean_r = str(r_k).strip().lower()
-                                REVOKED_USERS.add(clean_r)
-                                if clean_r not in rev_list:
-                                    rev_list.append(clean_r)
-                        _collection_last_synced[key] = now
-                        updated = True
-                elif key == 'revoked_tokens':
-                    if isinstance(cloud_data, (dict, list)):
-                        tok_list = data.setdefault('revoked_tokens', [])
-                        cloud_keys = list(cloud_data.keys()) if isinstance(cloud_data, dict) else cloud_data
-                        for t_k in cloud_keys:
-                            if t_k:
-                                clean_t = str(t_k).strip()
-                                REVOKED_TOKENS.add(clean_t)
-                                if clean_t not in tok_list:
-                                    tok_list.append(clean_t)
-                        _collection_last_synced[key] = now
-                        updated = True
-                elif key in ['subscriptions', 'subscription_plans']:
-                    if isinstance(cloud_data, dict):
-                        data.setdefault(key, {}).update(cloud_data)
-                        _collection_last_synced[key] = now
-                        updated = True
-                elif key == 'payment_sessions':
-                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                    if items:
-                        s_map = {s.get('paymentSessionId') or s.get('id'): s for s in data.get('payment_sessions', []) if isinstance(s, dict) and (s.get('paymentSessionId') or s.get('id'))}
-                        for s in items:
-                            if isinstance(s, dict):
-                                sid = s.get('paymentSessionId') or s.get('id')
-                                if sid:
-                                    cur = s_map.get(sid)
-                                    if cur and cur.get('status') in ('cancelled', 'approved', 'rejected', 'submitted') and s.get('status') == 'pending':
+            if key == 'users':
+                if isinstance(cloud_data, dict):
+                    users_dict = data.setdefault('users', {})
+                    revoked_set = set(str(x).lower().strip() for x in data.get('revoked_users', [])) | REVOKED_USERS
+                    for uid, u in cloud_data.items():
+                        if not isinstance(u, dict):
+                            continue
+                        u_email = str(u.get('email') or '').strip().lower()
+                        u_id = str(u.get('id') or uid).strip()
+                        u_uname = str(u.get('username') or '').strip().lower().lstrip('@')
+                        if u_id.lower() in revoked_set or u_email in revoked_set or u_uname in revoked_set or u.get('isDeleted', False):
+                            continue
+                        target_key = None
+                        if u_email and u_email in users_dict:
+                            target_key = u_email
+                        else:
+                            for k, exist_u in users_dict.items():
+                                if (exist_u.get('id') and exist_u.get('id') == u_id) or (u_email and exist_u.get('email') and exist_u.get('email').lower() == u_email):
+                                    target_key = k
+                                    break
+                        if target_key:
+                            for f_k, f_v in u.items():
+                                if f_v is not None and (f_k != 'password' or f_v):
+                                    if f_k == 'token' and (f_v in REVOKED_TOKENS or f_v in data.get('revoked_tokens', [])):
                                         continue
-                                    s_map[sid] = s
-                        data['payment_sessions'] = list(s_map.values())
-                        _collection_last_synced[key] = now
-                        updated = True
-                elif key == 'payment_channels':
-                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                    if items:
-                        c_map = {c.get('id'): c for c in data.get('payment_channels', []) if isinstance(c, dict) and c.get('id')}
-                        for c in items:
-                            if isinstance(c, dict) and c.get('id'):
-                                if 'subscriptionTier' not in c:
-                                    c['subscriptionTier'] = 'all'
-                                c_map[c['id']] = c
-                        data['payment_channels'] = list(c_map.values())
-                        _collection_last_synced[key] = now
-                        updated = True
-                elif key == 'notifications':
-                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                    if items:
-                        n_map = {n.get('id'): n for n in data.get('notifications', []) if isinstance(n, dict) and n.get('id')}
-                        for n in items:
-                            if isinstance(n, dict) and n.get('id'):
-                                n_map[n['id']] = n
-                        data['notifications'] = list(n_map.values())
-                        _collection_last_synced[key] = now
-                        updated = True
-                elif key == 'admin_audit_logs':
-                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                    if items:
-                        l_map = {l.get('id'): l for l in data.get('admin_audit_logs', []) if isinstance(l, dict) and l.get('id')}
-                        for l in items:
-                            if isinstance(l, dict) and l.get('id'):
-                                l_map[l['id']] = l
-                        data['admin_audit_logs'] = list(l_map.values())
-                        _collection_last_synced[key] = now
-                        updated = True
-                elif key == 'tests':
-                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                    if items:
-                        t_map = {t.get('id'): t for t in data.get('tests', []) if isinstance(t, dict) and t.get('id')}
-                        for t in items:
-                            if isinstance(t, dict) and t.get('id'):
-                                tid = t.get('id')
-                                cur = t_map.get(tid)
-                                if cur:
-                                    local_tq = int(cur.get('totalQuestions', 0))
-                                    cloud_tq = int(t.get('totalQuestions', 0))
-                                    cloud_updated = t.get('updatedAt') or t.get('createdAt') or ''
-                                    local_updated = cur.get('updatedAt') or cur.get('createdAt') or ''
-                                    if local_updated and cloud_updated and local_updated > cloud_updated:
-                                        continue
-                                    cur.update(t)
-                                    if local_tq > cloud_tq:
-                                        cur['totalQuestions'] = local_tq
-                                else:
-                                    t_map[tid] = t
-                        data['tests'] = list(t_map.values())
-                        _collection_last_synced[key] = now
-                        updated = True
-                elif key == 'questions':
-                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                    if items:
-                        q_map = {q.get('id'): q for q in data.get('questions', []) if isinstance(q, dict) and q.get('id')}
-                        for q in items:
-                            if isinstance(q, dict) and q.get('id'):
-                                qid = q.get('id')
-                                cur = q_map.get(qid)
-                                if cur:
-                                    cur.update(q)
-                                else:
-                                    q_map[qid] = q
-                        data['questions'] = list(q_map.values())
-                        _collection_last_synced[key] = now
-                        updated = True
-                elif key in ['assignments', 'papers']:
-                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                    if items is not None:
-                        p_map = {p.get('id'): p for p in items if isinstance(p, dict) and p.get('id')}
-                        PROTECTED_IDS = ['asg-1789408695574', 'asg-1789409044746']
-                        for p in data.get('papers', []):
-                            if p.get('id') in PROTECTED_IDS and p.get('id') not in p_map:
-                                p_map[p.get('id')] = p
-                        data['papers'] = list(p_map.values())
-                        data['assignments'] = list(p_map.values())
-                        _collection_last_synced[key] = now
-                        updated = True
-                elif key == 'ai_source_documents':
-                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                    if items is not None:
-                        doc_map = {d.get('id'): d for d in data.get('ai_source_documents', []) if isinstance(d, dict) and d.get('id')}
-                        for d in items:
-                            if isinstance(d, dict) and d.get('id'):
-                                doc_map[d['id']] = d
-                        data['ai_source_documents'] = list(doc_map.values())
-                        _collection_last_synced[key] = now
-                        updated = True
-                elif key == 'ai_generation_logs':
-                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                    if items is not None:
-                        log_map = {l.get('id'): l for l in data.get('ai_generation_logs', []) if isinstance(l, dict) and l.get('id')}
-                        for l in items:
-                            if isinstance(l, dict) and l.get('id'):
-                                log_map[l['id']] = l
-                        data['ai_generation_logs'] = list(log_map.values())
-                        _collection_last_synced[key] = now
-                        updated = True
-                elif key == 'ai_providers':
-                    if isinstance(cloud_data, (dict, list)):
-                        items = list(cloud_data.values()) if isinstance(cloud_data, dict) else cloud_data
-                        data['ai_providers'] = items
-                        _collection_last_synced[key] = now
-                        updated = True
-                elif key == 'ai_autopilot_config':
-                    if isinstance(cloud_data, dict):
-                        data['ai_autopilot_config'] = cloud_data
-                        _collection_last_synced[key] = now
-                        updated = True
-                elif key == 'subjects':
-                    if isinstance(cloud_data, (dict, list)):
-                        items = list(cloud_data.values()) if isinstance(cloud_data, dict) else cloud_data
-                        if items:
-                            s_map = {s.get('id'): s for s in data.get('subjects', []) if isinstance(s, dict) and s.get('id')}
-                            for s in items:
-                                if isinstance(s, dict) and s.get('id'):
-                                    s_map[s['id']] = s
-                            data['subjects'] = list(s_map.values())
-                            _collection_last_synced[key] = now
-                            updated = True
-                elif key == 'ai_scheduled_tasks':
-                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                    tombstones = set(data.get('deleted_scheduled_tasks', []))
-                    data['ai_scheduled_tasks'] = [
-                        t for t in items 
-                        if isinstance(t, dict) and t.get('id') and t.get('id') not in tombstones and not t.get('isDeleted') and t.get('status') != 'deleted'
-                    ]
-                    _collection_last_synced[key] = now
-                    updated = True
-                elif key == 'ai_generation_jobs':
-                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                    j_map = {j.get('id'): j for j in data.get('ai_generation_jobs', []) if isinstance(j, dict) and j.get('id')}
-                    for j in items:
-                        if isinstance(j, dict) and j.get('id'):
-                            j_map[j['id']] = j
-                    sorted_jobs = sorted(j_map.values(), key=lambda x: x.get('createdTs', 0), reverse=True)[:50]
-                    data['ai_generation_jobs'] = sorted_jobs
-                    _collection_last_synced[key] = now
-                    updated = True
-        except Exception:
-            pass
+                                    users_dict[target_key][f_k] = f_v
+                        elif u_email:
+                            # Only complete records can create a user; partial PATCH remnants are ignored
+                            users_dict[u_email] = dict(u)
+            elif key in ('revoked_users', 'revoked_tokens', 'deleted_scheduled_tasks'):
+                existing = data.setdefault(key, [])
+                live_set = REVOKED_USERS if key == 'revoked_users' else (REVOKED_TOKENS if key == 'revoked_tokens' else None)
+                for item in _as_items(cloud_data) if isinstance(cloud_data, list) else list(cloud_data):
+                    clean = str(item).strip().lower() if key == 'revoked_users' else str(item).strip()
+                    if clean and clean not in existing:
+                        existing.append(clean)
+                    if clean and live_set is not None:
+                        live_set.add(clean)
+            elif key in ('subscriptions', 'subscription_plans'):
+                if isinstance(cloud_data, dict):
+                    local = data.setdefault(key, {})
+                    for k, doc in cloud_data.items():
+                        if k not in local or _doc_ts(local[k]) <= _doc_ts(doc) or not _doc_ts(local[k]):
+                            local[k] = doc
+            elif key in ('xp_reset_settings', 'referral_settings', 'ai_autopilot_config', 'ai_worker_status'):
+                if isinstance(cloud_data, dict) and cloud_data:
+                    local = data.get(key)
+                    if key != 'ai_worker_status' or not isinstance(local, dict) or _doc_ts(local) <= _doc_ts(cloud_data):
+                        data[key] = cloud_data
+            elif key == 'payment_sessions':
+                s_map = {s.get('paymentSessionId') or s.get('id'): s for s in data.get('payment_sessions', []) if isinstance(s, dict) and (s.get('paymentSessionId') or s.get('id'))}
+                for s in _as_items(cloud_data):
+                    sid = isinstance(s, dict) and (s.get('paymentSessionId') or s.get('id'))
+                    if not sid:
+                        continue
+                    cur = s_map.get(sid)
+                    # a decided session never goes back to pending
+                    if cur and cur.get('status') in ('cancelled', 'approved', 'rejected', 'submitted') and s.get('status') == 'pending':
+                        continue
+                    s_map[sid] = s
+                data['payment_sessions'] = list(s_map.values())
+            elif key == 'payment_channels':
+                items = _as_items(cloud_data)
+                for c in items:
+                    if isinstance(c, dict) and 'subscriptionTier' not in c:
+                        c['subscriptionTier'] = 'all'
+                data['payment_channels'] = _merge_documents(data.get('payment_channels', []), items)
+            elif key == 'tests':
+                local_by_id = {t.get('id'): t for t in data.get('tests', []) if isinstance(t, dict)}
+                merged = _merge_documents(data.get('tests', []), _as_items(cloud_data))
+                for t in merged:
+                    cur = local_by_id.get(t.get('id'))
+                    if cur is not None and cur is not t and int(cur.get('totalQuestions', 0) or 0) > int(t.get('totalQuestions', 0) or 0):
+                        t['totalQuestions'] = cur['totalQuestions']
+                data['tests'] = merged
+            elif key in ('assignments', 'papers'):
+                # assignments and papers are the same collection in this app
+                items = _as_items(cloud_data)
+                merged = _merge_documents(data.get('papers', []), items)
+                data['papers'] = merged
+                data['assignments'] = list(merged)
+            elif key == 'subjects':
+                data['subjects'] = _merge_documents(data.get('subjects', []), _as_items(cloud_data))
+            elif key == 'ai_scheduled_tasks':
+                tombstones = set(data.get('deleted_scheduled_tasks', []))
+                merged = _merge_documents(data.get('ai_scheduled_tasks', []), _as_items(cloud_data))
+                data['ai_scheduled_tasks'] = [
+                    t for t in merged
+                    if t.get('id') not in tombstones and not t.get('isDeleted') and t.get('status') != 'deleted'
+                ]
+            elif key == 'ai_generation_jobs':
+                merged = _merge_documents(data.get('ai_generation_jobs', []), _as_items(cloud_data))
+                merged.sort(key=lambda x: x.get('createdTs', 0) or 0, reverse=True)
+                active = [j for j in merged[50:] if j.get('status') in ai_job_manager.ACTIVE_STATUSES]
+                data['ai_generation_jobs'] = merged[:50] + active
+            else:
+                # Generic document lists merged by id: notifications, admin_audit_logs, questions,
+                # test_attempts, xp_transactions, xp_reset_history, referrals, bookmarks, submissions,
+                # ai_source_documents, ai_generation_logs
+                key_field = mongodb_manager.list_key_field(key)
+                data[key] = _merge_documents(data.get(key, []), _as_items(cloud_data), key_field)
+
+            _collection_last_synced[key] = now
+            updated = True
+        except Exception as e:
+            print(f"[MONGODB_REFRESH_WARN] {key}: {e}", flush=True)
 
     if updated and os.path.exists(DATA_STORE_FILE):
         try:
@@ -1278,6 +1221,89 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
             pass
 
     return data
+
+
+# Legacy name kept until the Firebase naming cleanup (it has always read MongoDB)
+sync_collections_from_firebase = refresh_collections_from_mongo
+
+
+# ---------------------------------------------------------------------------
+# Write-through: every document a request changes reaches MongoDB Atlas
+# ---------------------------------------------------------------------------
+# Each dict returned by load_backend_data() remembers a fingerprint of every shared document as
+# loaded. save_backend_data(data) upserts (synchronously) exactly the documents that request
+# changed, so other server instances see them, and never overwrites other requests' changes with
+# stale copies. Nothing is ever deleted here: deletions stay explicit (sync_to_database DELETE).
+_load_snapshots = collections.OrderedDict()   # id(data) -> (data, {collection: {doc_key: fingerprint}})
+_SNAPSHOT_LIMIT = 64
+_snapshot_lock = threading.Lock()
+
+
+def _fingerprint(value):
+    return hashlib.sha1(json.dumps(value, default=str).encode('utf-8')).hexdigest()
+
+
+def _collection_fingerprints(name, value):
+    if name in mongodb_manager.STRING_LIST_COLLECTIONS:
+        return {str(v): '1' for v in (value or []) if v}
+    if name in mongodb_manager.SINGLETON_COLLECTIONS:
+        return {'__singleton__': _fingerprint(value)} if isinstance(value, dict) else {}
+    if name in mongodb_manager.KEYED_DICT_COLLECTIONS:
+        return {str(k): _fingerprint(v) for k, v in (value or {}).items() if isinstance(v, dict)} if isinstance(value, dict) else {}
+    key_field = mongodb_manager.list_key_field(name)
+    return {str(d.get(key_field)): _fingerprint(d) for d in (value or []) if isinstance(d, dict) and d.get(key_field)} if isinstance(value, list) else {}
+
+
+def _remember_load_snapshot(data):
+    snap = {name: _collection_fingerprints(name, data.get(name)) for name in SHARED_COLLECTIONS if name in data}
+    with _snapshot_lock:
+        _load_snapshots[id(data)] = (data, snap)
+        _load_snapshots.move_to_end(id(data))
+        while len(_load_snapshots) > _SNAPSHOT_LIMIT:
+            _load_snapshots.popitem(last=False)
+
+
+def _write_through_to_mongo(data):
+    """Upsert the documents this data dict changed since it was loaded (or last saved)."""
+    with _snapshot_lock:
+        entry = _load_snapshots.get(id(data))
+    if not entry or entry[0] is not data:
+        return  # not produced by load_backend_data: nothing to diff against
+    if mongodb_manager.get_database() is None:
+        return
+    before = entry[1]
+    after = {}
+    for name in SHARED_COLLECTIONS:
+        if name not in data:
+            continue
+        cur = _collection_fingerprints(name, data.get(name))
+        after[name] = cur
+        old = before.get(name, {})
+        changed = [k for k, fp in cur.items() if old.get(k) != fp]
+        if not changed:
+            continue
+        value = data[name]
+        if name in mongodb_manager.STRING_LIST_COLLECTIONS:
+            ok = mongodb_manager.upsert_documents(name, [{'_id': k, 'value': True} for k in changed], '_id')
+        elif name in mongodb_manager.SINGLETON_COLLECTIONS:
+            ok = bool(mongodb_manager.sync_document_to_mongo(name, value, sync=True))
+        elif name in mongodb_manager.KEYED_DICT_COLLECTIONS:
+            docs = []
+            for k in changed:
+                doc = dict(value[k])
+                doc['_id'] = mongodb_manager._mongo_id_for(name, k, doc)
+                docs.append(doc)
+            ok = mongodb_manager.upsert_documents(name, docs, '_id')
+        else:
+            key_field = mongodb_manager.list_key_field(name)
+            docs = [d for d in value if isinstance(d, dict) and str(d.get(key_field)) in set(changed)]
+            ok = mongodb_manager.upsert_documents(name, docs, key_field)
+        if not ok:
+            after[name] = old  # retry these documents on the next save
+            print(f"[WRITE_THROUGH_ERROR] {name}: {len(changed)} document(s) not written to MongoDB", flush=True)
+    with _snapshot_lock:
+        if id(data) in _load_snapshots:
+            _load_snapshots[id(data)] = (data, after)
 
 def sanitize_rtdb_binary_payloads(data):
     """
@@ -1370,172 +1396,8 @@ def load_backend_data(refresh_collections=None, min_interval=10.0):
                     with open(DATA_STORE_FILE, 'r', encoding='utf-8') as f:
                         cur_data = json.load(f)
                     
-                    import mongodb_manager
-                    # Cold start hydration: Fetch critical dynamic collections from MongoDB Atlas.
-                    keys_to_fetch = ['revoked_users', 'revoked_tokens', 'users', 'subscriptions', 'ai_autopilot_config', 'ai_providers', 'ai_scheduled_tasks']
-                    
-                    for key in keys_to_fetch:
-                        try:
-                            cloud_data = mongodb_manager.load_collection_from_mongo(key)
-                            if not cloud_data:
-                                continue
-
-                                if key == 'revoked_users':
-                                    if isinstance(cloud_data, (dict, list)):
-                                        rev_list = cur_data.setdefault('revoked_users', [])
-                                        cloud_keys = list(cloud_data.keys()) if isinstance(cloud_data, dict) else cloud_data
-                                        for r_k in cloud_keys:
-                                            if r_k:
-                                                clean_r = str(r_k).strip().lower()
-                                                REVOKED_USERS.add(clean_r)
-                                                if clean_r not in rev_list:
-                                                    rev_list.append(clean_r)
-                                elif key == 'revoked_tokens':
-                                    if isinstance(cloud_data, (dict, list)):
-                                        tok_list = cur_data.setdefault('revoked_tokens', [])
-                                        cloud_keys = list(cloud_data.keys()) if isinstance(cloud_data, dict) else cloud_data
-                                        for t_k in cloud_keys:
-                                            if t_k:
-                                                clean_t = str(t_k).strip()
-                                                REVOKED_TOKENS.add(clean_t)
-                                                if clean_t not in tok_list:
-                                                    tok_list.append(clean_t)
-                                elif key == 'users':
-                                    if isinstance(cloud_data, dict):
-                                        users_dict = cur_data.setdefault('users', {})
-                                        revoked_set = set(str(x).lower().strip() for x in cur_data.get('revoked_users', [])) | REVOKED_USERS
-                                        for uid, u in cloud_data.items():
-                                            if isinstance(u, dict):
-                                                u_email = str(u.get('email') or '').strip().lower()
-                                                u_id = str(u.get('id') or uid).strip()
-                                                u_uname = str(u.get('username') or '').strip().lower().lstrip('@')
-                                                if u_id.lower() in revoked_set or u_email in revoked_set or u_uname in revoked_set or u.get('isDeleted', False):
-                                                    continue
-                                                target_key = None
-                                                if u_email and u_email in users_dict:
-                                                    target_key = u_email
-                                                else:
-                                                    for k, exist_u in users_dict.items():
-                                                        if (exist_u.get('id') and exist_u.get('id') == u_id) or (u_email and exist_u.get('email') and exist_u.get('email').lower() == u_email):
-                                                            target_key = k
-                                                            break
-                                                if target_key:
-                                                    for f_k, f_v in u.items():
-                                                        if f_v is not None and (f_k != 'password' or f_v):
-                                                            if f_k == 'token' and (f_v in REVOKED_TOKENS or f_v in cur_data.get('revoked_tokens', [])):
-                                                                continue
-                                                            users_dict[target_key][f_k] = f_v
-                                                else:
-                                                    k_name = u_email if u_email else u_id
-                                                    users_dict[k_name] = dict(u)
-                                        # Purge any revoked users in current data
-                                        for k in [k for k, u in users_dict.items() if (str(u.get('id') or '').lower().strip() in revoked_set or str(u.get('email') or '').lower().strip() in revoked_set or str(u.get('username') or '').lower().lstrip('@').strip() in revoked_set or u.get('isDeleted', False))]:
-                                            del users_dict[k]
-                                elif key in ['subscriptions', 'subscription_plans']:
-                                    if isinstance(cloud_data, dict):
-                                        cur_data.setdefault(key, {}).update(cloud_data)
-                                elif key == 'payment_sessions':
-                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                                    if items:
-                                        s_map = {s.get('paymentSessionId') or s.get('id'): s for s in cur_data.get('payment_sessions', []) if isinstance(s, dict)}
-                                        for s in items:
-                                            if isinstance(s, dict):
-                                                sid = s.get('paymentSessionId') or s.get('id')
-                                                if sid:
-                                                    cur = s_map.get(sid)
-                                                    if cur and cur.get('status') in ('cancelled', 'approved', 'rejected', 'submitted') and s.get('status') == 'pending':
-                                                        continue
-                                                    s_map[sid] = s
-                                        cur_data['payment_sessions'] = list(s_map.values())
-                                elif key == 'payment_channels':
-                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                                    if items:
-                                        c_map = {c.get('id'): c for c in cur_data.get('payment_channels', []) if isinstance(c, dict) and c.get('id')}
-                                        for c in items:
-                                            if isinstance(c, dict) and c.get('id'):
-                                                c_map[c['id']] = c
-                                        cur_data['payment_channels'] = list(c_map.values())
-                                elif key == 'notifications':
-                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                                    if items:
-                                        n_map = {n.get('id'): n for n in cur_data.get('notifications', []) if isinstance(n, dict) and n.get('id')}
-                                        for n in items:
-                                            if isinstance(n, dict) and n.get('id'):
-                                                n_map[n['id']] = n
-                                        cur_data['notifications'] = list(n_map.values())
-                                elif key == 'admin_audit_logs':
-                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                                    if items:
-                                        l_map = {l.get('id'): l for l in cur_data.get('admin_audit_logs', []) if isinstance(l, dict) and l.get('id')}
-                                        for l in items:
-                                            if isinstance(l, dict) and l.get('id'):
-                                                l_map[l['id']] = l
-                                        cur_data['admin_audit_logs'] = list(l_map.values())
-                                elif key == 'tests':
-                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                                    if items:
-                                        t_map = {t.get('id'): t for t in cur_data.get('tests', []) if isinstance(t, dict) and t.get('id')}
-                                        for t in items:
-                                            if isinstance(t, dict) and t.get('id'):
-                                                t_map[t['id']] = t
-                                        cur_data['tests'] = list(t_map.values())
-                                elif key == 'questions':
-                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                                    if items:
-                                        q_map = {q.get('id'): q for q in cur_data.get('questions', []) if isinstance(q, dict) and q.get('id')}
-                                        for q in items:
-                                            if isinstance(q, dict) and q.get('id'):
-                                                q_map[q['id']] = q
-                                        cur_data['questions'] = list(q_map.values())
-                                elif key in ['papers', 'assignments']:
-                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                                    if items is not None:
-                                        p_map = {p.get('id'): p for p in items if isinstance(p, dict) and p.get('id')}
-                                        PROTECTED_IDS = ['asg-1789408695574', 'asg-1789409044746']
-                                        for p in cur_data.get('papers', []):
-                                            if p.get('id') in PROTECTED_IDS and p.get('id') not in p_map:
-                                                p_map[p.get('id')] = p
-                                        cur_data['papers'] = list(p_map.values())
-                                        cur_data['assignments'] = list(p_map.values())
-                                elif key == 'ai_source_documents':
-                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                                    if items is not None:
-                                        doc_map = {d.get('id'): d for d in cur_data.get('ai_source_documents', []) if isinstance(d, dict) and d.get('id')}
-                                        for d in items:
-                                            if isinstance(d, dict) and d.get('id'):
-                                                doc_map[d['id']] = d
-                                        cur_data['ai_source_documents'] = list(doc_map.values())
-                                elif key == 'ai_generation_logs':
-                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                                    if items is not None:
-                                        log_map = {l.get('id'): l for l in cur_data.get('ai_generation_logs', []) if isinstance(l, dict) and l.get('id')}
-                                        for l in items:
-                                            if isinstance(l, dict) and l.get('id'):
-                                                log_map[l['id']] = l
-                                        cur_data['ai_generation_logs'] = list(log_map.values())
-                                elif key == 'ai_providers':
-                                    if isinstance(cloud_data, (dict, list)):
-                                        items = list(cloud_data.values()) if isinstance(cloud_data, dict) else cloud_data
-                                        cur_data['ai_providers'] = items
-                                elif key == 'ai_autopilot_config':
-                                    if isinstance(cloud_data, dict):
-                                        cur_data['ai_autopilot_config'] = cloud_data
-                                elif key == 'subjects':
-                                    if isinstance(cloud_data, (dict, list)):
-                                        items = list(cloud_data.values()) if isinstance(cloud_data, dict) else cloud_data
-                                        cur_data['subjects'] = items
-                                elif key == 'ai_scheduled_tasks':
-                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                                    tombstones = set(cur_data.get('deleted_scheduled_tasks', []))
-                                    cur_data['ai_scheduled_tasks'] = [
-                                        t for t in items 
-                                        if isinstance(t, dict) and t.get('id') and t.get('id') not in tombstones and not t.get('isDeleted') and t.get('status') != 'deleted'
-                                    ]
-                                elif key == 'ai_generation_jobs':
-                                    items = list(cloud_data.values()) if isinstance(cloud_data, dict) else (cloud_data if isinstance(cloud_data, list) else [])
-                                    cur_data['ai_generation_jobs'] = items
-                        except Exception as err:
-                            print(f"[COLD_START] Failed to fetch {key} from Firebase: {err}", flush=True)
+                    # Cold start: merge every shared collection from MongoDB Atlas into the seed
+                    refresh_collections_from_mongo(cur_data, collections=SHARED_COLLECTIONS, min_interval=0.0)
 
                     with open(DATA_STORE_FILE, 'w', encoding='utf-8') as f:
                         json.dump(cur_data, f, indent=2)
@@ -1612,10 +1474,11 @@ def load_backend_data(refresh_collections=None, min_interval=10.0):
 
                 if refresh_collections:
                     try:
-                        sync_collections_from_firebase(d, collections=refresh_collections, min_interval=min_interval)
-                    except Exception:
-                        pass
+                        refresh_collections_from_mongo(d, collections=refresh_collections, min_interval=min_interval)
+                    except Exception as refresh_err:
+                        print(f"[MONGODB_REFRESH_WARN] {refresh_err}", flush=True)
 
+                _remember_load_snapshot(d)
                 return d
             else:
                 print(f"[DATA_STORE_ERROR] Failed to read {DATA_STORE_FILE} after retries. Preserving existing file contents.", flush=True)
@@ -1651,6 +1514,10 @@ def save_backend_data(data):
         except OSError:
             time.sleep(0.05)
             os.replace(tmp_file, DATA_STORE_FILE)
+    try:
+        _write_through_to_mongo(data)
+    except Exception as wt_err:
+        print(f"[WRITE_THROUGH_ERROR] {wt_err}", flush=True)
 
 _xp_reset_lock = threading.Lock()
 
