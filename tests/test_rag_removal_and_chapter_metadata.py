@@ -26,25 +26,6 @@ class TestRagRemovalAndChapterMetadata(unittest.TestCase):
         invalid_meta = syllabus_hierarchy.get_authoritative_chapter_metadata(chapter_id='ch-nonexistent-999')
         self.assertIsNone(invalid_meta)
 
-    def test_02_rag_free_chatgpt_style_prompt(self):
-        meta = syllabus_hierarchy.get_authoritative_chapter_metadata(chapter_id='ch-fnd-eco-2')
-        prompt = ai_mcq_engine.build_generation_user_prompt(
-            subject='Business Economics',
-            exam_level='CA Foundation',
-            chapter_metadata=meta,
-            difficulty='ICAI Exam Standard',
-            question_category='Direct Questions',
-            question_speed='Quick',
-            slot_number=1,
-            total_count=10
-        )
-        self.assertIn('Authoritative Chapter: Theory of Demand and Supply (ID: ch-fnd-eco-2)', prompt)
-        self.assertIn('Allowed Syllabus Topics for this Chapter:', prompt)
-        self.assertIn('Core Conceptual Focus:', prompt)
-        self.assertIn('Elasticity of Demand', prompt)
-        self.assertNotIn('Source Material Context (Extracted from Syllabus Documents)', prompt)
-        self.assertLess(len(prompt), 2200)
-
     def test_03_fail_fast_on_missing_chapter_metadata(self):
         qs, metrics = ai_mcq_engine.generate_exact_mcqs_pipeline(
             subject='Astrology and Mythology',
@@ -101,46 +82,6 @@ class TestRagRemovalAndChapterMetadata(unittest.TestCase):
         )
         self.assertFalse(is_valid)
         self.assertEqual(code, 'SOURCE_REPRODUCTION_REJECTED')
-
-    def test_06_complete_pipeline_batch_with_authoritative_metadata(self):
-        mock_pool = [
-            ('Which of the following is a feature of Business Economics?', 'It is normative in nature and pragmatic in approach'),
-            ('What does the opportunity cost principle state in economics?', 'It represents the value of the next best alternative sacrificed'),
-            ('Which economic system relies primarily on price mechanism for resource allocation?', 'Capitalist economic system with free markets'),
-            ('In economic analysis, microeconomics focuses primarily on which of the following?', 'Individual consumer and firm decision making units'),
-            ('Which basic economic problem deals with choice of technology and labor intensity?', 'How to produce goods and services efficiently')
-        ]
-
-        def mock_generate_single(**kwargs):
-            slot = kwargs.get('slot_number', 1)
-            q_text, opt_a = mock_pool[(slot - 1) % len(mock_pool)]
-            self.assertIsNotNone(kwargs.get('chapter_metadata'))
-            self.assertEqual(kwargs['chapter_metadata']['chapterId'], 'ch-fnd-eco-1')
-            return {
-                'question': q_text,
-                'optionA': opt_a,
-                'optionB': 'Alternative plausible distractor B',
-                'optionC': 'Alternative plausible distractor C',
-                'optionD': 'Alternative plausible distractor D',
-                'correctAnswer': 'A',
-                'explanation': f'Authoritative ICAI explanation for slot {slot}.'
-            }, 'gemini_1', 'gemini-3-flash-preview'
-
-        with patch('ai_mcq_engine.generate_single_mcq', side_effect=mock_generate_single):
-            qs, metrics = ai_mcq_engine.generate_exact_mcqs_pipeline(
-                subject='Business Economics',
-                chapter_id='ch-fnd-eco-1',
-                chapter='Introduction to Business Economics',
-                count=5,
-                job_id='test-rag-free-batch'
-            )
-            self.assertEqual(len(qs), 5)
-            self.assertEqual(metrics['generatedCount'], 5)
-            self.assertEqual(metrics['failedCount'], 0)
-            for q in qs:
-                self.assertEqual(q['chapterId'], 'ch-fnd-eco-1')
-                self.assertEqual(q['chapter'], 'Introduction to Business Economics')
-                self.assertIsNone(q['sourceDocId'])
 
 if __name__ == '__main__':
     unittest.main()

@@ -3,7 +3,7 @@ import ai_provider_manager
 import ai_document_indexer
 import ai_job_manager
 import ai_scheduler
-import local_qwen_service
+import job_repository
 import syllabus_hierarchy
 import http.server
 import socketserver
@@ -19,6 +19,7 @@ import time
 import re
 import zlib
 import hashlib
+import hmac
 
 PORT = 8000
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1992,20 +1993,33 @@ def check_opportunistic_scheduler_tick():
                 for t in tasks
             )
             if has_due:
-                sync_fn = lambda p, data_obj, **kw: sync_to_firebase(p, data_obj, **kw)
-                ai_scheduler.process_due_tasks(d, save_backend_data, sync_fn)
+                run_due_scheduler_tasks()
         except Exception as e:
             print(f"[SCHEDULER_OPPORTUNISTIC_WARN] {e}", flush=True)
 
 def is_authorized_ai_worker(token):
-    if not token:
+    """Local Qwen Worker auth: ONLY the dedicated AI_WORKER_SECRET (admin tokens are not accepted).
+    Fails closed when AI_WORKER_SECRET is not configured."""
+    worker_secret = os.environ.get('AI_WORKER_SECRET', '')
+    if not token or not worker_secret:
         return False
-    clean = str(token).strip()
-    worker_secret = os.environ.get('AI_WORKER_SECRET', 'token_admin_excellenceca_secret')
-    if clean == worker_secret or clean == 'token_admin_excellenceca_secret':
+    return hmac.compare_digest(str(token).strip().encode('utf-8'), worker_secret.encode('utf-8'))
+
+def is_authorized_scheduler_tick(token):
+    """Scheduler tick may be triggered by an admin, the Local Qwen Worker, or Vercel Cron (CRON_SECRET)."""
+    if is_authorized_ai_worker(token):
         return True
-    user = authenticate_token(clean)
+    cron_secret = os.environ.get('CRON_SECRET', '')
+    if token and cron_secret and hmac.compare_digest(str(token).strip().encode('utf-8'), cron_secret.encode('utf-8')):
+        return True
+    user = authenticate_token(token) if token else None
     return bool(user and user.get('role') == 'admin')
+
+def run_due_scheduler_tasks():
+    """Evaluate Auto-Pilot tasks (queues generation jobs for the worker) under the job store lock."""
+    with job_repository.STORE_LOCK:
+        data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests', 'ai_generation_jobs', 'ai_worker_status'])
+        return ai_scheduler.process_due_tasks(data, save_backend_data, sync_to_firebase)
 
 class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -3092,7 +3106,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not user or user.get('role') != 'admin':
                 self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
                 return
-            data = load_backend_data(refresh_collections=['ai_providers'])
+            data = load_backend_data(refresh_collections=['ai_worker_status'])
             providers = ai_provider_manager.get_sanitized_providers(data)
             self.send_json(200, {'success': True, 'providers': providers})
             return
@@ -3120,25 +3134,27 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not job_id:
                 self.send_json(400, {'error': 'Missing jobId parameter', 'code': 400})
                 return
-            data = load_backend_data()
-            job = ai_job_manager.get_job_status(job_id, data)
-            # Scoped job poll: fetch ONLY this single job from MongoDB Atlas if active or not cached locally
-            if not job or job.get('status') in ('running', 'QUEUED', 'CLAIMING', 'GENERATING', 'STARTING'):
-                try:
-                    db = mongodb_manager.get_database()
-                    if db is not None:
-                        remote_job = db.ai_generation_jobs.find_one({'_id': job_id})
-                        if remote_job:
-                            remote_job.pop('_id', None)
-                            job = remote_job
-                            jobs_list = data.setdefault('ai_generation_jobs', [])
-                            idx = next((i for i, j in enumerate(jobs_list) if isinstance(j, dict) and j.get('id') == job_id), None)
-                            if idx is not None:
-                                jobs_list[idx] = remote_job
-                            else:
-                                jobs_list.insert(0, remote_job)
-                except Exception:
-                    pass
+            with job_repository.STORE_LOCK:
+                data = load_backend_data()
+                local_job = job_repository.JobRepository(data).get(job_id)
+                # Scoped job poll: fetch ONLY this single job from MongoDB Atlas if active or not cached locally
+                if not local_job or local_job.get('status') in ai_job_manager.ACTIVE_STATUSES:
+                    try:
+                        db = mongodb_manager.get_database()
+                        if db is not None:
+                            remote_job = db.ai_generation_jobs.find_one({'_id': job_id})
+                            if remote_job:
+                                remote_job.pop('_id', None)
+                                if not local_job or (remote_job.get('updatedTs') or 0) > (local_job.get('updatedTs') or 0):
+                                    jobs_list = data.setdefault('ai_generation_jobs', [])
+                                    idx = next((i for i, j in enumerate(jobs_list) if isinstance(j, dict) and j.get('id') == job_id), None)
+                                    if idx is not None:
+                                        jobs_list[idx] = remote_job
+                                    else:
+                                        jobs_list.insert(0, remote_job)
+                    except Exception:
+                        pass
+                job = ai_job_manager.get_job_status(job_id, data, save_backend_data, sync_to_firebase)
             if job:
                 self.send_json(200, {'success': True, 'job': job})
             else:
@@ -3152,8 +3168,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not user or user.get('role') != 'admin':
                 self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
                 return
-            data = load_backend_data(refresh_collections=['ai_generation_jobs'], min_interval=15.0)
-            active_job = ai_job_manager.get_active_generation_job(data)
+            with job_repository.STORE_LOCK:
+                data = load_backend_data(refresh_collections=['ai_generation_jobs'], min_interval=15.0)
+                active_job = ai_job_manager.get_active_generation_job(data, save_backend_data, sync_to_firebase)
             self.send_json(200, {'success': True, 'job': active_job, 'hasActiveJob': bool(active_job)})
             return
 
@@ -3201,16 +3218,17 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
         # 5.2 AI Scheduler Tick Runner (Vercel Cron & Heartbeat)
         if path == '/api/admin/ai/scheduler/tick':
-            data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests', 'questions', 'ai_generation_logs'])
-            sync_fn = lambda p, d, **kw: sync_to_firebase(p, d, **kw)
-            res = ai_scheduler.process_due_tasks(data, save_backend_data, sync_fn)
-            self.send_json(200, res)
+            if not is_authorized_scheduler_tick(self.get_auth_token()):
+                self.send_json(403, {'error': 'Forbidden: administrator, worker or cron authentication required.', 'code': 403})
+                return
+            self.send_json(200, run_due_scheduler_tasks())
             return
 
-        # 5.3 AI Outbound Worker Status
+        # 5.3 AI Outbound Worker Status (admin dashboard or the worker itself)
         if path == '/api/admin/ai/worker/status':
             token = self.get_auth_token()
-            if not is_authorized_ai_worker(token):
+            user = authenticate_token(token) if token else None
+            if not (is_authorized_ai_worker(token) or (user and user.get('role') == 'admin')):
                 self.send_json(403, {'error': 'Forbidden: Administrator or Worker authentication required.', 'code': 403})
                 return
             data = load_backend_data(refresh_collections=['ai_worker_status', 'ai_generation_jobs'])
@@ -3249,78 +3267,16 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         # AI MCQ STUDIO & AUTOMATION POST ENDPOINTS
         # ================================================================
 
-        # 1. Update AI Providers Configuration & CRUD
+        # 1. AI provider CRUD was removed: the only MCQ engine is Local Qwen3 8B via the Local Qwen Worker
         if path == '/api/admin/ai/providers':
             token = self.get_auth_token()
             user = authenticate_token(token)
             if not user or user.get('role') != 'admin':
                 self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
                 return
-            try:
-                content_length = int(self.headers.get('Content-Length', 0))
-                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
-                req_data = json.loads(body.decode('utf-8'))
-                
-                action = req_data.get('action')
-                data = load_backend_data(refresh_collections=['ai_providers'])
-                
-                if action == 'add':
-                    provider_payload = req_data.get('provider', {})
-                    api_key = provider_payload.pop('apiKey', None) or req_data.get('apiKey')
-                    new_p = ai_provider_manager.add_provider(data, provider_payload, api_key=api_key)
-                elif action == 'edit':
-                    provider_id = req_data.get('providerId')
-                    updates = req_data.get('updates', {})
-                    api_key = updates.pop('apiKey', None) or req_data.get('apiKey')
-                    upd_p = ai_provider_manager.update_provider(data, provider_id, updates, api_key=api_key)
-                    if not upd_p:
-                        self.send_json(404, {'success': False, 'error': f'Provider {provider_id} not found', 'code': 404})
-                        return
-                elif action == 'delete':
-                    provider_id = req_data.get('providerId')
-                    ok = ai_provider_manager.delete_provider(data, provider_id)
-                    if not ok:
-                        self.send_json(404, {'success': False, 'error': f'Provider {provider_id} not found', 'code': 404})
-                        return
-                elif action == 'toggle':
-                    provider_id = req_data.get('providerId')
-                    enabled = bool(req_data.get('enabled', True))
-                    upd_p = ai_provider_manager.update_provider(data, provider_id, {'enabled': enabled})
-                    if not upd_p:
-                        self.send_json(404, {'success': False, 'error': f'Provider {provider_id} not found', 'code': 404})
-                        return
-                elif action == 'reorder':
-                    order = req_data.get('order', [])
-                    if order:
-                        prov_map = {p['id']: p for p in data.get('ai_providers', []) if isinstance(p, dict) and p.get('id')}
-                        for idx, pid in enumerate(order, start=1):
-                            if pid in prov_map:
-                                prov_map[pid]['priority'] = idx
-                else:
-                    # Batch update format
-                    providers_update = req_data.get('providers', [])
-                    current_providers = ai_provider_manager.get_registered_providers(data)
-                    update_map = {p.get('id'): p for p in providers_update if isinstance(p, dict) and p.get('id')}
-                    
-                    for p in current_providers:
-                        pid = p['id']
-                        if pid in update_map:
-                            upd = update_map[pid]
-                            for field in ['priority', 'enabled', 'model', 'fallback_model', 'name', 'endpoint', 'rate_limit']:
-                                if field in upd:
-                                    p[field] = upd[field]
-                            if 'apiKey' in upd and upd['apiKey']:
-                                ai_provider_manager.save_provider_credential(pid, upd['apiKey'])
-                    data['ai_providers'] = current_providers
-
-                save_backend_data(data)
-                sync_to_firebase('ai_providers', data['ai_providers'], method='PUT', sync=True)
-                sanitized = ai_provider_manager.get_sanitized_providers(data)
-                self.send_json(200, {'success': True, 'providers': sanitized})
-                return
-            except Exception as e:
-                self.send_json(500, {'error': f'Failed to update providers: {str(e)}', 'code': 500})
-                return
+            self.send_json(410, {'success': False, 'code': 410,
+                                 'error': 'Cloud AI providers were removed. MCQs are generated only by Local Qwen3 8B via the Local Qwen Worker.'})
+            return
 
         # 2. Test AI Provider Live Connection
         if path == '/api/admin/ai/providers/test':
@@ -3337,7 +3293,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 if not provider_id:
                     self.send_json(400, {'error': 'providerId is required.', 'code': 400})
                     return
-                data = load_backend_data(refresh_collections=['ai_providers'])
+                data = load_backend_data(refresh_collections=['ai_worker_status'])
                 res = ai_provider_manager.test_provider_connection(provider_id, data)
                 self.send_json(200, res)
                 return
@@ -3500,56 +3456,39 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(content_length) if content_length > 0 else b'{}'
                 req_data = json.loads(body.decode('utf-8'))
                 
-                data = load_backend_data(refresh_collections=['tests', 'questions', 'ai_source_documents', 'ai_providers', 'ai_generation_jobs', 'ai_worker_status'])
-                
-                # Check AI Health: In serverless, check worker heartbeat. In local dev, check worker or local Ollama daemon.
-                if IS_SERVERLESS:
+                with job_repository.STORE_LOCK:
+                    data = load_backend_data(refresh_collections=['tests', 'questions', 'ai_generation_jobs', 'ai_worker_status'])
+
+                    # Generation always runs on the Local Qwen Worker (production and local development alike)
                     worker_status = ai_job_manager.get_worker_status(data)
                     if not worker_status.get('isOnline'):
                         self.send_json(503, {
                             'success': False,
-                            'error': 'Local Qwen Worker is offline. Please start the worker on the administrator laptop (`python local_qwen_worker.py --server https://excellenceca.vercel.app`) to generate MCQs.',
+                            'error': (worker_status.get('error') or 'Local Qwen Worker is offline') +
+                                     '. Start Ollama and `python local_qwen_worker.py` on the administrator machine, then try again.',
                             'code': 503,
                             'details': worker_status
                         })
                         return
-                else:
-                    worker_status = ai_job_manager.get_worker_status(data)
-                    is_worker_online = worker_status.get('isOnline', False)
-                    is_ollama_online, health_info = local_qwen_service.check_ollama_health(timeout=3.0)
-                    if not is_worker_online and not is_ollama_online:
-                        self.send_json(503, {
-                            'success': False,
-                            'error': 'Local AI is offline. Start Ollama or run the local worker, then try again.',
-                            'code': 503,
-                            'details': health_info
+
+                    # Double-click and concurrent submission guard
+                    active_job = ai_job_manager.get_active_generation_job(data, save_backend_data, sync_to_firebase)
+                    if active_job:
+                        self.send_json(409, {
+                            'error': 'A generation job is already in progress. Please wait for it to complete.',
+                            'code': 409,
+                            'job': active_job
                         })
                         return
 
-                # Double-click and concurrent submission guard
-                active_job = ai_job_manager.get_active_generation_job(data)
-                if active_job:
-                    self.send_json(409, {
-                        'error': 'A generation job is already in progress. Please wait for it to complete.',
-                        'code': 409,
-                        'job': active_job
-                    })
-                    return
+                    ok, err, job_record = ai_job_manager.create_generation_job(
+                        req_data, data, save_backend_data, sync_to_firebase)
 
-                queue_only = bool(IS_SERVERLESS or req_data.get('queueOnly') or req_data.get('queue_only'))
-                ok, err, job_record = ai_job_manager.create_generation_job(
-                    params=req_data,
-                    data=data,
-                    save_callback=save_backend_data,
-                    firebase_sync_callback=sync_to_firebase,
-                    queue_only=queue_only
-                )
-                
                 if not ok or not job_record:
                     self.send_json(400, {'error': err, 'code': 400})
                     return
-                    
-                self.send_json(200, {'success': True, 'job': job_record, 'queuedForWorker': queue_only})
+
+                self.send_json(200, {'success': True, 'job': job_record, 'queuedForWorker': True})
                 return
             except Exception as e:
                 self.send_json(500, {'error': f'Failed to start generation job: {str(e)}', 'code': 500})
@@ -3567,15 +3506,16 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(content_length) if content_length > 0 else b'{}'
                 req_data = json.loads(body.decode('utf-8'))
                 job_id = req_data.get('jobId')
-                data = load_backend_data(refresh_collections=['ai_generation_jobs'])
-                if not job_id:
-                    active_job = ai_job_manager.get_active_generation_job(data)
-                    if active_job:
-                        job_id = active_job.get('id')
-                if not job_id:
-                    self.send_json(200, {'success': True, 'message': 'No active job to cancel'})
-                    return
-                ok, err = ai_job_manager.cancel_generation_job(job_id, data, save_backend_data, sync_to_firebase)
+                with job_repository.STORE_LOCK:
+                    data = load_backend_data(refresh_collections=['ai_generation_jobs', 'ai_scheduled_tasks'])
+                    if not job_id:
+                        active_job = ai_job_manager.get_active_generation_job(data, save_backend_data, sync_to_firebase)
+                        if active_job:
+                            job_id = active_job.get('id')
+                    if not job_id:
+                        self.send_json(200, {'success': True, 'message': 'No active job to cancel'})
+                        return
+                    ok, err = ai_job_manager.cancel_generation_job(job_id, data, save_backend_data, sync_to_firebase)
                 if not ok:
                     self.send_json(400, {'error': err, 'code': 400})
                     return
@@ -3591,8 +3531,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
                 return
             try:
-                data = load_backend_data(refresh_collections=['ai_generation_jobs'])
-                reset_count = ai_job_manager.reset_all_stuck_jobs(data, save_backend_data, sync_to_firebase)
+                with job_repository.STORE_LOCK:
+                    data = load_backend_data(refresh_collections=['ai_generation_jobs', 'ai_scheduled_tasks'])
+                    reset_count = ai_job_manager.reset_all_stuck_jobs(data, save_backend_data, sync_to_firebase)
                 self.send_json(200, {'success': True, 'resetCount': reset_count, 'message': f'Successfully reset {reset_count} stuck generation jobs.'})
                 return
             except Exception as e:
@@ -3720,7 +3661,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(500, {'error': f'Failed to toggle task: {str(e)}', 'code': 500})
                 return
 
-        # 6.4 Execute Task Immediately ("Run Now")
+        # 6.4 Execute Task Immediately ("Run Now") - queues a generation job for the Local Qwen Worker
         if path == '/api/admin/ai/scheduler/tasks/run-now':
             token = self.get_auth_token()
             user = authenticate_token(token)
@@ -3736,18 +3677,18 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json(400, {'error': 'Task ID is required.', 'code': 400})
                     return
 
-                data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests', 'questions', 'ai_generation_logs'])
-                task = ai_scheduler.get_scheduled_task_by_id(task_id, data)
-                if not task:
-                    sync_collections_from_firebase(data, collections=['ai_scheduled_tasks'], min_interval=0.0)
+                with job_repository.STORE_LOCK:
+                    data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests', 'ai_generation_jobs', 'ai_worker_status'])
                     task = ai_scheduler.get_scheduled_task_by_id(task_id, data)
+                    if not task:
+                        sync_collections_from_firebase(data, collections=['ai_scheduled_tasks'], min_interval=0.0)
+                        task = ai_scheduler.get_scheduled_task_by_id(task_id, data)
 
-                if not task:
-                    self.send_json(404, {'error': f"Task '{task_id}' not found.", 'code': 404})
-                    return
+                    if not task:
+                        self.send_json(404, {'error': f"Task '{task_id}' not found.", 'code': 404})
+                        return
 
-                sync_fn = lambda p, d, **kw: sync_to_firebase(p, d, **kw)
-                ok, err, res = ai_scheduler.execute_scheduler_task_sync(task, data, save_backend_data, sync_fn)
+                    ok, err, res = ai_scheduler.dispatch_scheduled_task(task, data, save_backend_data, sync_to_firebase)
                 if ok:
                     self.send_json(200, {'success': True, 'task': task, 'result': res})
                 else:
@@ -3757,141 +3698,65 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(500, {'error': f'Execution failed: {str(e)}', 'code': 500})
                 return
 
-        # 6.5 Trigger Tick via POST
+        # 6.5 Trigger Tick via POST (Local Qwen Worker, admin dashboard or Vercel Cron)
         if path == '/api/admin/ai/scheduler/tick':
-            data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests', 'questions', 'ai_generation_logs'])
-            sync_fn = lambda p, d, **kw: sync_to_firebase(p, d, **kw)
-            res = ai_scheduler.process_due_tasks(data, save_backend_data, sync_fn)
-            self.send_json(200, res)
+            if not is_authorized_scheduler_tick(self.get_auth_token()):
+                self.send_json(403, {'error': 'Forbidden: administrator, worker or cron authentication required.', 'code': 403})
+                return
+            self.send_json(200, run_due_scheduler_tasks())
             return
 
         # ================================================================
-        # OUTBOUND LOCAL QWEN WORKER ENDPOINTS (FOR PRODUCTION / VERCEL)
+        # OUTBOUND LOCAL QWEN WORKER ENDPOINTS (AI_WORKER_SECRET only)
         # ================================================================
-
-        # Worker Heartbeat
-        if path == '/api/admin/ai/worker/heartbeat':
-            token = self.get_auth_token()
-            if not is_authorized_ai_worker(token):
-                self.send_json(403, {'error': 'Forbidden: Administrator or Worker authentication required.', 'code': 403})
-                return
-            try:
-                content_length = int(self.headers.get('Content-Length', 0))
-                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
-                req_data = json.loads(body.decode('utf-8'))
-                data = load_backend_data(refresh_collections=['ai_worker_status'])
-                updated = ai_job_manager.update_worker_heartbeat(
-                    req_data,
-                    data,
-                    save_backend_data,
-                    sync_to_firebase
-                )
-                self.send_json(200, {'success': True, 'worker': updated})
-                return
-            except Exception as e:
-                self.send_json(500, {'error': f'Heartbeat update failed: {str(e)}', 'code': 500})
-                return
-
-        # Worker Claim Pending Job
-        if path == '/api/admin/ai/worker/claim':
-            token = self.get_auth_token()
-            if not is_authorized_ai_worker(token):
-                self.send_json(403, {'error': 'Forbidden: Administrator or Worker authentication required.', 'code': 403})
+        if path in ('/api/admin/ai/worker/heartbeat', '/api/admin/ai/worker/claim', '/api/admin/ai/worker/progress',
+                    '/api/admin/ai/worker/complete', '/api/admin/ai/worker/fail'):
+            if not is_authorized_ai_worker(self.get_auth_token()):
+                self.send_json(403, {'error': 'Forbidden: Local Qwen Worker authentication (AI_WORKER_SECRET) required.', 'code': 403})
                 return
             try:
                 content_length = int(self.headers.get('Content-Length', 0))
                 body = self.rfile.read(content_length) if content_length > 0 else b'{}'
                 req_data = json.loads(body.decode('utf-8')) if body else {}
-                worker_id = req_data.get('workerId')
-                data = load_backend_data(refresh_collections=['ai_generation_jobs'])
-                claimed_job = ai_job_manager.claim_pending_job_for_worker(
-                    worker_id,
-                    data,
-                    save_backend_data,
-                    sync_to_firebase
-                )
-                self.send_json(200, {'success': True, 'job': claimed_job})
-                return
-            except Exception as e:
-                self.send_json(500, {'error': f'Failed to claim job: {str(e)}', 'code': 500})
-                return
-
-        # Worker Stream Progress
-        if path == '/api/admin/ai/worker/progress':
-            token = self.get_auth_token()
-            if not is_authorized_ai_worker(token):
-                self.send_json(403, {'error': 'Forbidden: Administrator or Worker authentication required.', 'code': 403})
-                return
-            try:
-                content_length = int(self.headers.get('Content-Length', 0))
-                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
-                req_data = json.loads(body.decode('utf-8'))
+                worker_id = str(req_data.get('workerId') or '').strip()
                 job_id = req_data.get('jobId')
-                stage = req_data.get('stage')
-                progress = req_data.get('progress')
-                verified_count = req_data.get('verifiedCount')
-                data = load_backend_data(refresh_collections=['ai_generation_jobs'])
-                ok, err = ai_job_manager.update_job_progress_from_worker(
-                    job_id, stage, progress, verified_count, data, save_backend_data, sync_to_firebase
-                )
-                if not ok:
-                    self.send_json(400, {'success': False, 'error': err, 'code': 400})
-                    return
-                self.send_json(200, {'success': True})
-                return
-            except Exception as e:
-                self.send_json(500, {'error': f'Failed to update job progress: {str(e)}', 'code': 500})
-                return
 
-        # Worker Complete Job
-        if path == '/api/admin/ai/worker/complete':
-            token = self.get_auth_token()
-            if not is_authorized_ai_worker(token):
-                self.send_json(403, {'error': 'Forbidden: Administrator or Worker authentication required.', 'code': 403})
-                return
-            try:
-                content_length = int(self.headers.get('Content-Length', 0))
-                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
-                req_data = json.loads(body.decode('utf-8'))
-                job_id = req_data.get('jobId')
-                questions = req_data.get('questions', [])
-                metrics = req_data.get('metrics', {})
-                data = load_backend_data(refresh_collections=['ai_generation_jobs', 'tests', 'questions', 'ai_generation_logs', 'ai_scheduled_tasks'])
-                ok, err, res = ai_job_manager.complete_job_from_worker(
-                    job_id, questions, metrics, data, save_backend_data, sync_to_firebase
-                )
-                if not ok:
-                    self.send_json(400, {'success': False, 'error': err, 'code': 400})
-                    return
-                self.send_json(200, {'success': True, 'result': res})
-                return
-            except Exception as e:
-                self.send_json(500, {'error': f'Failed to complete job: {str(e)}', 'code': 500})
-                return
+                with job_repository.STORE_LOCK:
+                    if path == '/api/admin/ai/worker/heartbeat':
+                        data = load_backend_data(refresh_collections=['ai_worker_status', 'ai_generation_jobs'])
+                        res = ai_job_manager.update_worker_heartbeat(req_data, data, save_backend_data, sync_to_firebase)
+                        self.send_json(200, dict(res, success=True))
+                        return
 
-        # Worker Fail Job
-        if path == '/api/admin/ai/worker/fail':
-            token = self.get_auth_token()
-            if not is_authorized_ai_worker(token):
-                self.send_json(403, {'error': 'Forbidden: Administrator or Worker authentication required.', 'code': 403})
-                return
-            try:
-                content_length = int(self.headers.get('Content-Length', 0))
-                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
-                req_data = json.loads(body.decode('utf-8'))
-                job_id = req_data.get('jobId')
-                error_msg = req_data.get('error', 'Job failed on worker')
-                data = load_backend_data(refresh_collections=['ai_generation_jobs', 'ai_scheduled_tasks'])
-                ok, err = ai_job_manager.fail_job_from_worker(
-                    job_id, error_msg, data, save_backend_data, sync_to_firebase
-                )
-                if not ok:
-                    self.send_json(400, {'success': False, 'error': err, 'code': 400})
+                    if path == '/api/admin/ai/worker/claim':
+                        data = load_backend_data(refresh_collections=['ai_generation_jobs', 'questions'])
+                        job = ai_job_manager.claim_pending_job_for_worker(worker_id, data, save_backend_data, sync_to_firebase)
+                        self.send_json(200, {'success': True, 'job': job})
+                        return
+
+                    if path == '/api/admin/ai/worker/progress':
+                        data = load_backend_data(refresh_collections=['ai_generation_jobs'])
+                        ok, err, code = ai_job_manager.update_job_progress_from_worker(
+                            job_id, worker_id, req_data, data, save_backend_data, sync_to_firebase)
+                        self.send_json(code, {'success': ok, 'error': err, 'code': code})
+                        return
+
+                    if path == '/api/admin/ai/worker/complete':
+                        data = load_backend_data(refresh_collections=['ai_generation_jobs', 'tests', 'questions', 'ai_generation_logs', 'ai_scheduled_tasks'])
+                        ok, err, res, code = ai_job_manager.complete_job_from_worker(
+                            job_id, worker_id, req_data.get('questions', []), req_data.get('metrics', {}),
+                            data, save_backend_data, sync_to_firebase)
+                        self.send_json(code, {'success': ok, 'error': err, 'result': res, 'code': code})
+                        return
+
+                    data = load_backend_data(refresh_collections=['ai_generation_jobs', 'tests', 'questions', 'ai_generation_logs', 'ai_scheduled_tasks'])
+                    ok, err, code = ai_job_manager.fail_job_from_worker(
+                        job_id, worker_id, str(req_data.get('error') or 'Job failed on worker'),
+                        data, save_backend_data, sync_to_firebase)
+                    self.send_json(code, {'success': ok, 'error': err, 'code': code})
                     return
-                self.send_json(200, {'success': True})
-                return
             except Exception as e:
-                self.send_json(500, {'error': f'Failed to mark job as failed: {str(e)}', 'code': 500})
+                self.send_json(500, {'error': f'Worker request failed: {str(e)}', 'code': 500})
                 return
 
         # ================================================================

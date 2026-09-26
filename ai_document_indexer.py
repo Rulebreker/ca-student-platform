@@ -6,8 +6,51 @@ import hashlib
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple, Callable
 
-import ai_provider_manager
 import syllabus_hierarchy
+
+
+def extract_pdf_text_locally(pdf_bytes: bytes) -> Dict[str, Any]:
+    """
+    Extract text from a text-based PDF on this server (no external OCR service).
+    Uses pypdf when installed, otherwise decodes Flate-compressed text streams.
+    Scanned/image-only PDFs yield no text and are rejected by the caller.
+    """
+    started = time.time()
+    pages: List[Dict[str, Any]] = []
+    try:
+        import io
+        import pypdf
+        reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+        for i, page in enumerate(reader.pages, start=1):
+            txt = (page.extract_text() or '').strip()
+            if txt:
+                pages.append({'page_number': i, 'markdown': txt, 'images': []})
+        engine = 'pypdf'
+    except Exception:
+        import zlib
+        chunks = []
+        for stream in re.findall(rb'stream[\r\n]+([\s\S]*?)[\r\n]+endstream', pdf_bytes):
+            try:
+                content = zlib.decompress(stream)
+            except Exception:
+                content = stream  # uncompressed content stream
+            for m in re.finditer(rb'\((.*?)\)\s*Tj|\[(.*?)\]\s*TJ', content, re.S):
+                if m.group(1) is not None:
+                    chunks.append(m.group(1).decode('latin-1', errors='ignore'))
+                else:
+                    chunks.append(''.join(p.decode('latin-1', errors='ignore') for p in re.findall(rb'\((.*?)\)', m.group(2))))
+        text = " ".join(chunks).strip()
+        if text:
+            pages.append({'page_number': 1, 'markdown': text, 'images': []})
+        engine = 'local-stream-decoder'
+    return {
+        'success': True,
+        'pages': pages,
+        'page_count': len(pages),
+        'full_text': "\n\n".join(p['markdown'] for p in pages),
+        'latency_ms': (time.time() - started) * 1000.0,
+        'engine': engine
+    }
 
 try:
     from server import validate_and_sanitize_upload
@@ -118,7 +161,7 @@ def index_pdf_document(
     status_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None
 ) -> Tuple[bool, Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """
-    Validate, check SHA-256 hash deduplication, run Mistral OCR once, and index document chunks
+    Validate, check SHA-256 hash deduplication, extract text locally once, and index document chunks
     with full syllabus hierarchy metadata: Exam Level -> Subject -> Chapter -> Topic -> Source Chunks.
     If already indexed and content has not changed, skips OCR and returns the existing document record.
     """
@@ -185,16 +228,16 @@ def index_pdf_document(
     if status_callback:
         status_callback('PROCESSING', {'filename': filename, 'contentHash': content_hash})
 
-    # 5. One-Time OCR Processing (Mistral OCR or deterministic local fallback)
+    # 5. One-Time local text extraction (no external OCR service)
     try:
-        ocr_result = ai_provider_manager.call_mistral_ocr(binary_data, filename=filename)
+        ocr_result = extract_pdf_text_locally(binary_data)
     except Exception as e:
         err_msg = str(e)
         if status_callback:
             status_callback('FAILED', {'error': err_msg})
         return False, {
-            'code': 'OCR_PROVIDER_ERROR',
-            'message': f"Mistral OCR Processing Failed: {err_msg}"
+            'code': 'TEXT_EXTRACTION_ERROR',
+            'message': f"PDF text extraction failed: {err_msg}"
         }, None
 
     if status_callback:
@@ -208,7 +251,7 @@ def index_pdf_document(
             status_callback('FAILED', {'error': 'No legible text extracted'})
         return False, {
             'code': 'OCR_EMPTY_TEXT',
-            'message': "Mistral OCR completed, but no legible text was extracted from this PDF."
+            'message': "No legible text could be extracted from this PDF. Upload a text-based (not scanned) PDF."
         }, None
 
     if status_callback:
@@ -340,7 +383,7 @@ def index_pdf_document(
         'topicId': topic_id or '',
         'chapterList': sorted(list(detected_chapters)) if detected_chapters else ([canonical_chapter_name] if canonical_chapter_name else []),
         'topicList': sorted(list(unique_headings)) if unique_headings else [topic or 'General Concepts'],
-        'ocrEngine': ocr_result.get('engine', 'mistral-ocr-latest'),
+        'ocrEngine': ocr_result.get('engine', 'local'),
         'processingStatus': 'COMPLETED',
         'status': 'COMPLETED',
         'uploadedAt': now_iso,

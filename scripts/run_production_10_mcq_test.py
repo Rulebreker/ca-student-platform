@@ -92,7 +92,7 @@ while True:
         print(f"  Requested: {metrics.get('requestedCount')}")
         print(f"  Generated: {metrics.get('generatedCount')}")
         print(f"  Failed: {metrics.get('failedCount')}")
-        print(f"  Gemini Generation Calls: {metrics.get('geminiGenerationCalls')}")
+        print(f"  Qwen Generation Calls: {metrics.get('qwenGenerationCalls')}")
         print(f"  Validation Calls: {metrics.get('validationCalls')}")
         print(f"  Validation Provider: {metrics.get('validationProvider')}")
         print(f"  Validation Providers Used: {metrics.get('validationProvidersUsed')}")

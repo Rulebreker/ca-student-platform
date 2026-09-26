@@ -7436,7 +7436,7 @@ class AdminDashboard {
             </span>
           </div>
           <p class="text-xs text-slate-500 mt-1">
-            Automated CA MCQ generation, Mistral OCR document indexing, multi-provider failover, and server-side Auto-Pilot hosting.
+            Automated CA MCQ generation with Local Qwen3 8B, syllabus PDF indexing, and worker-driven Auto-Pilot hosting.
           </p>
         </div>
       </div>
@@ -7891,15 +7891,8 @@ class AdminDashboard {
       const data = await resp.json();
       if (data.hasActiveJob && data.job) {
         const job = data.job;
-        // Ignore stale jobs whose heartbeat or creation is older than 90s
-        const lastHb = job.lastHeartbeatAt ? new Date(job.lastHeartbeatAt).getTime() : 0;
-        const now = Date.now();
-        if (lastHb > 0 && (now - lastHb) > 90000) {
-          console.warn('[STALE_JOB_DETECTED] Automatically releasing stuck job:', job.id);
-          this.forceResetPipeline(true);
-          return;
-        }
-
+        // Stale jobs are handled server-side (worker lease expiry -> re-queue / EXPIRED), so an
+        // active job reported here is genuinely in progress: resume showing its progress.
         this.aiActiveJobId = job.id;
         const idlePanel = document.getElementById('ai-idle-state');
         const activePanel = document.getElementById('ai-active-pipeline');
@@ -8077,7 +8070,7 @@ class AdminDashboard {
 
     // Trigger Generation Job
     try {
-      if (stageText) stageText.innerText = 'Dispatching Generation Request across AI Gateway...';
+      if (stageText) stageText.innerText = 'Queuing generation job for the Local Qwen Worker...';
       const response = await fetch('/api/admin/ai/jobs/generate', {
         method: 'POST',
         headers: {
@@ -8152,13 +8145,43 @@ class AdminDashboard {
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
     const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const ACTIVE_STATUSES = ['QUEUED', 'CLAIMED', 'GENERATING', 'VALIDATING', 'PUBLISHING'];
+    const MAX_CONSECUTIVE_POLL_ERRORS = 40; // ~60s of failed polls
+    let pollErrors = 0;
+
+    const stopPollingWithError = (message) => {
+      this._isGenerating = false;
+      clearInterval(this.aiJobPollInterval);
+      this.aiJobPollInterval = null;
+      const badge = document.getElementById('ai-pipeline-badge');
+      const stageText = document.getElementById('ai-pipeline-stage-text');
+      const btn = document.getElementById('ai-btn-generate');
+      if (badge) {
+        badge.innerText = 'FAILED';
+        badge.className = 'px-2.5 py-1 text-xs font-black rounded-lg bg-rose-100 text-rose-800 border border-rose-200';
+      }
+      if (stageText) stageText.innerText = message;
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="sparkles" class="w-4 h-4"></i> Generate & Host Test Now`;
+        if (window.lucide) window.lucide.createIcons();
+      }
+      window.app.showToast(message, 'error');
+    };
 
     this.aiJobPollInterval = setInterval(async () => {
       try {
         const resp = await fetch(`/api/admin/ai/jobs/status?jobId=${jobId}&_t=${Date.now()}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
-        if (!resp.ok) return;
+        if (!resp.ok) {
+          pollErrors += 1;
+          if (resp.status === 404 || pollErrors >= MAX_CONSECUTIVE_POLL_ERRORS) {
+            stopPollingWithError(resp.status === 404 ? 'Generation job not found on the server.' : `Lost contact with the server (HTTP ${resp.status}).`);
+          }
+          return;
+        }
+        pollErrors = 0;
 
         const data = await resp.json();
         const job = data.job;
@@ -8220,9 +8243,9 @@ class AdminDashboard {
           }).join('');
         }
 
-        if (job.status === 'GENERATING') {
+        if (ACTIVE_STATUSES.includes(job.status)) {
           if (badge) {
-            badge.innerText = 'GENERATING';
+            badge.innerText = job.status;
             badge.className = 'px-2.5 py-1 text-xs font-black rounded-lg bg-rose-100 text-rose-800 border border-rose-200';
           }
           const verified = (typeof job.generatedCount === 'number') ? job.generatedCount : (job.currentQuestionIndex || 0);
@@ -8317,12 +8340,12 @@ class AdminDashboard {
           if (window.store && window.store.refreshTests) window.store.refreshTests();
           window.app.showToast(`Test created with ${finalQs.length} verified MCQs.`, 'warning');
           if (window.lucide) window.lucide.createIcons();
-        } else if (job.status === 'FAILED') {
+        } else if (job.status === 'FAILED' || job.status === 'EXPIRED') {
           this._isGenerating = false;
           clearInterval(this.aiJobPollInterval);
           this.aiJobPollInterval = null;
           if (badge) {
-            badge.innerText = 'FAILED';
+            badge.innerText = job.status;
             badge.className = 'px-2.5 py-1 text-xs font-black rounded-lg bg-rose-100 text-rose-800 border border-rose-200';
           }
           if (stageText) stageText.innerText = `Pipeline Error: ${job.error || 'Failed'}`;
@@ -8335,6 +8358,10 @@ class AdminDashboard {
 
       } catch (pollErr) {
         console.warn('[AI_POLL_WARNING]', pollErr);
+        pollErrors += 1;
+        if (pollErrors >= MAX_CONSECUTIVE_POLL_ERRORS) {
+          stopPollingWithError(`Lost contact with the server: ${pollErr.message}`);
+        }
       }
     }, 1500);
   }
@@ -8421,7 +8448,7 @@ class AdminDashboard {
             class="px-5 py-2.5 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-2"
           >
             <i data-lucide="upload" class="w-4 h-4"></i>
-            Process with Mistral OCR & Index
+            Extract Text & Index
           </button>
         </div>
 
@@ -8512,7 +8539,7 @@ class AdminDashboard {
                 </td>
                 <td class="py-3 px-4">
                   <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
-                    ${d.ocrEngine || 'mistral-ocr-latest'}
+                    ${d.ocrEngine || 'local'}
                   </span>
                 </td>
                 <td class="py-3 px-4 text-slate-500 text-[11px]">
@@ -8569,7 +8596,7 @@ class AdminDashboard {
     const btn = document.getElementById('ai-btn-lib-upload');
     if (btn) {
       btn.disabled = true;
-      btn.innerHTML = `<span class="inline-block animate-spin mr-2">⚙</span> Uploading & Running Mistral OCR...`;
+      btn.innerHTML = `<span class="inline-block animate-spin mr-2">⚙</span> Uploading & Extracting Text...`;
     }
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
@@ -8612,7 +8639,7 @@ class AdminDashboard {
       if (res.alreadyProcessed) {
         window.app.showToast(`Document "${file.name}" was already indexed (v${res.document?.contentVersion || 1}). Reusing existing structured knowledge base.`, 'info');
       } else {
-        window.app.showToast(`Document "${file.name}" indexed successfully with Mistral OCR!`, 'success');
+        window.app.showToast(`Document "${file.name}" indexed successfully!`, 'success');
       }
       this.renderAiLibrarySubTab(document.getElementById('ai-subtab-container'));
 
@@ -8620,7 +8647,7 @@ class AdminDashboard {
       window.app.showToast(`Upload failed: ${err.message}`, 'error');
       if (btn) {
         btn.disabled = false;
-        btn.innerHTML = `<i data-lucide="upload" class="w-4 h-4"></i> Process with Mistral OCR & Index`;
+        btn.innerHTML = `<i data-lucide="upload" class="w-4 h-4"></i> Extract Text & Index`;
         if (window.lucide) window.lucide.createIcons();
       }
     }
@@ -9597,7 +9624,8 @@ class AdminDashboard {
         throw new Error(data.error || 'Failed to execute scheduled task');
       }
 
-      window.app.showToast(`Success! Test "${data.testTitle || data.testId}" generated and hosted into ExcellenceCA database (${data.questionCount || 0} MCQs).`, 'success');
+      const queuedJob = data.result && data.result.job;
+      window.app.showToast(`Queued "${queuedJob ? queuedJob.title : 'scheduled test'}" for the Local Qwen Worker. It will be generated and hosted automatically.`, 'success');
       await this.renderAiAutopilotSubTab(document.getElementById('ai-subtab-container'));
     } catch (err) {
       window.app.showToast(`Execution failed: ${err.message}`, 'error');
@@ -9636,7 +9664,7 @@ class AdminDashboard {
 
       const count = res.executedCount || 0;
       if (count > 0) {
-        window.app.showToast(`Executed and hosted ${count} due test(s) successfully!`, 'success');
+        window.app.showToast(`Processed ${count} due schedule event(s); due tests were queued for the Local Qwen Worker.`, 'success');
       } else {
         window.app.showToast('Scheduler check complete: No tasks were currently due.', 'info');
       }
@@ -9686,9 +9714,9 @@ class AdminDashboard {
           </div>
 
           <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Failover Protection</span>
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Pipeline Recovery</span>
             <span class="text-2xl font-black text-emerald-700 mt-1 block">100%</span>
-            <span class="text-[11px] text-emerald-600 font-semibold mt-1 block">Zero Pipeline Outages</span>
+            <span class="text-[11px] text-emerald-600 font-semibold mt-1 block">Worker lease auto-recovery</span>
           </div>
         </div>
 
@@ -9811,30 +9839,31 @@ class AdminDashboard {
 
     container.innerHTML = `
       <div class="space-y-6 max-w-4xl">
-        <!-- Architecture Banner -->
         <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3">
           <i data-lucide="shield-check" class="w-5 h-5 text-emerald-700 mt-0.5 flex-shrink-0"></i>
           <div class="text-xs text-emerald-950 space-y-1">
-            <span class="font-black text-sm block">Local AI Infrastructure: Qwen3 8B via Ollama</span>
+            <span class="font-black text-sm block">MCQ Engine: Local Qwen3 8B via Ollama</span>
             <p class="text-emerald-800">
-              MCQ generation is powered 100% locally by Qwen3 8B running through the Ollama inference engine at <code class="font-mono bg-emerald-100 px-1 py-0.5 rounded">http://127.0.0.1:11434</code>. Zero external cloud API calls, zero third-party quotas, and zero rate limits.
+              All MCQs are generated by Qwen3 8B running in Ollama on the administrator machine. The Local Qwen Worker connects
+              outbound to this server, claims generation jobs (Generate &amp; Host Now and Auto-Pilot) and returns verified questions.
+              No cloud AI providers are used.
             </p>
           </div>
         </div>
 
-        <!-- Providers Management Grid -->
         <div class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200">
             <div>
               <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <i data-lucide="cpu" class="w-4 h-4 text-rose-600"></i>
-                Local AI Engine & Models
+                Local Qwen Worker
               </h3>
-              <p class="text-xs text-slate-500 mt-0.5">
-                Verify local Ollama engine status, test live round-trip latency, and inspect runtime health.
-              </p>
+              <p class="text-xs text-slate-500 mt-0.5">Live status from the worker heartbeat.</p>
             </div>
             <div class="flex items-center gap-2">
+              <button onclick="window.adminDashboard.renderAiProvidersSubTab(document.getElementById('ai-subtab-container'))" class="px-3 py-2 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5">
+                <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
+              </button>
               <button onclick="window.adminDashboard.testAiProvider('local_qwen', this)" class="px-4 py-2 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5">
                 <i data-lucide="activity" class="w-3.5 h-3.5"></i> Test Connection
               </button>
@@ -9842,157 +9871,80 @@ class AdminDashboard {
           </div>
 
           <div id="ai-providers-grid" class="space-y-4">
-            <div class="py-8 text-center text-slate-400 text-xs">Checking local engine status...</div>
+            <div class="py-8 text-center text-slate-400 text-xs">Checking Local Qwen Worker status...</div>
           </div>
+          <div id="prov-test-feedback-local_qwen" class="hidden text-[11px] pt-2 border-t border-slate-100"></div>
         </div>
       </div>
     `;
 
     if (window.lucide) window.lucide.createIcons();
 
+    const grid = document.getElementById('ai-providers-grid');
     try {
       const resp = await fetch(`/api/admin/ai/providers?_t=${Date.now()}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await resp.json();
-      const providers = data.providers || [];
-      this._cachedAiProviders = providers;
-
-      const grid = document.getElementById('ai-providers-grid');
-      if (!grid) return;
-
-      if (providers.length === 0) {
-        grid.innerHTML = `
-          <div class="py-12 text-center text-slate-400 text-xs">
-            <i data-lucide="cpu" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
-            No AI providers configured.
-          </div>
-        `;
-        if (window.lucide) window.lucide.createIcons();
-        return;
-      }
-
-      grid.innerHTML = providers.map(p => {
-        const isOllama = p.provider === 'ollama' || p.id === 'local_qwen';
-        const isHealthy = p.status === 'Configured — Healthy' || p.status === 'healthy' || p.online === true;
-        const details = p.details || {};
-        const isServerless = details.isServerless;
-        const workerStatus = details.worker_status || {};
-        
-        let badgeClass = isHealthy
-          ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-          : 'bg-rose-100 text-rose-800 border-rose-200';
-        let badgeText = isHealthy ? (isServerless ? 'Worker Online' : 'Online') : (isServerless ? 'Worker Offline' : 'Offline');
-
-        const typeBadge = isOllama ? 'LOCAL' : (p.provider || 'ai').substring(0, 3).toUpperCase();
-
-        return `
-          <div class="p-4 border border-slate-200 rounded-xl bg-slate-50 hover:bg-white transition-all space-y-3" id="provider-card-${p.id}">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-lg ${isOllama ? 'bg-purple-100 text-purple-800' : 'bg-rose-100 text-rose-800'} flex items-center justify-center font-black text-xs uppercase flex-shrink-0">
-                  ${typeBadge}
-                </div>
-                <div>
-                  <div class="flex items-center gap-2">
-                    <span class="font-bold text-slate-900 text-xs block">${p.name}</span>
-                    <span class="text-[10px] text-slate-400 font-mono">(${p.id})</span>
-                  </div>
-                  <span class="text-[10px] text-slate-500 font-mono block">Model: <b>${p.model}</b> • Runtime: <b>${isOllama ? (isServerless ? 'Outbound Worker (Admin Laptop)' : 'Ollama (127.0.0.1:11434)') : p.provider}</b></span>
-                </div>
-              </div>
-
-              <div class="flex items-center gap-2">
-                <span id="prov-status-${p.id}" class="px-2.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider border ${badgeClass}">
-                  ${badgeText}
-                </span>
-
-                <button 
-                  id="btn-test-prov-${p.id}"
-                  onclick="window.adminDashboard.testAiProvider('${p.id}', this)"
-                  class="px-2.5 py-1 text-xs font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition-all flex items-center gap-1 shadow-sm"
-                  title="Ping provider endpoint and measure live round-trip latency"
-                >
-                  <i data-lucide="activity" class="w-3.5 h-3.5 text-rose-600"></i>
-                  Test Connection
-                </button>
-              </div>
-            </div>
-
-            ${isOllama && isServerless && !isHealthy ? `
-              <div class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 space-y-1.5">
-                <div class="font-bold flex items-center gap-1.5 text-amber-800">
-                  <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-600"></i>
-                  Local Qwen Worker Offline
-                </div>
-                <div class="text-[11px] text-slate-600">
-                  Production runs in Vercel serverless and connects to your local Qwen3 model via an authenticated outbound worker. Run this command on your machine to start generating:
-                </div>
-                <div class="bg-slate-900 text-emerald-400 p-2.5 rounded font-mono text-[11px] select-all overflow-x-auto shadow-inner">
-                  python local_qwen_worker.py --server https://excellenceca.vercel.app
-                </div>
-              </div>
-            ` : ''}
-
-            ${isOllama && isServerless && isHealthy ? `
-              <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-900 flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                <div class="flex items-center gap-2">
-                  <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span class="font-bold text-emerald-800">Local Qwen Worker Connected</span>
-                  <span class="text-[11px] text-emerald-700 font-mono">(${workerStatus.workerId || 'Admin Laptop'})</span>
-                </div>
-                <span class="text-[10px] text-emerald-700 font-mono">Heartbeat: ${workerStatus.lastHeartbeatSecondsAgo || 0}s ago</span>
-              </div>
-            ` : ''}
-
-            ${isOllama && !isServerless && !isHealthy ? `
-              <div class="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800 font-medium space-y-1">
-                <div class="font-bold">Local Ollama is offline.</div>
-                <div>Start Ollama on your machine (<code class="bg-rose-100 px-1 rounded">ollama serve</code>) or start the worker (<code class="bg-rose-100 px-1 rounded">python local_qwen_worker.py --server http://localhost:8000</code>).</div>
-              </div>
-            ` : ''}
-
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200 text-xs">
-              <div>
-                <span class="text-[10px] font-bold text-slate-500 uppercase block">Inference Host / Daemon</span>
-                <span class="font-mono text-slate-800 font-bold">${isOllama ? (isServerless ? 'Ollama 127.0.0.1:11434 (Outbound Worker)' : 'http://127.0.0.1:11434') : (p.maskedKey || 'Configured')}</span>
-              </div>
-
-              <div class="flex items-center sm:justify-end gap-2">
-                <span class="text-[10px] font-bold text-slate-500 uppercase">Engine Status:</span>
-                <span class="text-xs font-bold ${isHealthy ? 'text-emerald-700' : 'text-rose-700'}">${isHealthy ? (isServerless ? 'Worker Active & Ready' : 'Active & Ready') : (isServerless ? 'Worker Offline' : 'Unreachable')}</span>
-              </div>
-            </div>
-
-            <div id="prov-test-feedback-${p.id}" class="hidden text-[11px] pt-2 border-t border-slate-100"></div>
-          </div>
-        `;
-      }).join('');
-
-      if (window.lucide) window.lucide.createIcons();
+      const card = (data.providers || []).find(p => p.id === 'local_qwen') || {};
+      const w = (card.details && card.details.worker_status) || {};
+      if (grid) grid.innerHTML = this._renderLocalQwenWorkerCard(w);
     } catch (err) {
-      console.error('[AI_PROVIDERS_FETCH_ERROR]', err);
-      const grid = document.getElementById('ai-providers-grid');
-      if (grid) {
-        grid.innerHTML = `
-          <div class="p-4 border border-rose-200 rounded-xl bg-rose-50 space-y-2 text-xs">
-            <div class="flex items-center justify-between">
-              <span class="font-bold text-rose-900 flex items-center gap-1.5">
-                <i data-lucide="cpu" class="w-4 h-4 text-rose-600"></i>
-                Local Qwen3 8B Engine
-              </span>
-              <span class="px-2.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider border bg-rose-100 text-rose-800 border-rose-200">
-                Offline
-              </span>
-            </div>
-            <p class="text-rose-700 text-[11px]">
-              Local Ollama daemon is currently unreachable. Start Ollama at http://127.0.0.1:11434 and click "Test Connection" to retry.
-            </p>
-          </div>
-        `;
-        if (window.lucide) window.lucide.createIcons();
-      }
+      console.error('[AI_WORKER_STATUS_ERROR]', err);
+      if (grid) grid.innerHTML = this._renderLocalQwenWorkerCard({ status: 'unknown', error: `Could not load worker status: ${err.message}` });
     }
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  _renderLocalQwenWorkerCard(w) {
+    const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const online = w.online === true;
+    const connected = w.workerOnline === true;
+    const badge = online
+      ? { text: 'Worker Online', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' }
+      : connected
+        ? { text: 'Ollama Offline', cls: 'bg-amber-100 text-amber-800 border-amber-200' }
+        : { text: 'Worker Offline', cls: 'bg-rose-100 text-rose-800 border-rose-200' };
+    const latency = (typeof w.lastLatencyMs === 'number') ? `${w.lastLatencyMs} ms` : 'N/A';
+    const heartbeat = (typeof w.lastHeartbeatSecondsAgo === 'number') ? `${w.lastHeartbeatSecondsAgo}s ago` : 'Never';
+    const currentJob = w.currentJobId ? `${esc(w.currentJobTitle || '')} <span class="font-mono text-slate-500">(${esc(w.currentJobId)})</span>` : 'Idle';
+    const serverUrl = window.location.origin;
+    const row = (label, value) => `
+      <div>
+        <span class="text-[10px] font-bold text-slate-500 uppercase block">${label}</span>
+        <span class="text-xs font-bold text-slate-800 break-all">${value}</span>
+      </div>`;
+
+    return `
+      <div class="p-4 border border-slate-200 rounded-xl bg-slate-50 space-y-4" id="provider-card-local_qwen">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-purple-100 text-purple-800 flex items-center justify-center font-black text-xs">QWEN</div>
+            <div>
+              <span class="font-bold text-slate-900 text-xs block">Local Qwen3 8B (Ollama)</span>
+              <span class="text-[10px] text-slate-500 font-mono block">Outbound worker on the administrator machine</span>
+            </div>
+          </div>
+          <span id="prov-status-local_qwen" class="px-2.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider border ${badge.cls}">${badge.text}</span>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-200">
+          ${row('Worker ID', w.workerId ? `<span class="font-mono">${esc(w.workerId)}</span>` : 'Not connected')}
+          ${row('Model', esc(w.model || 'qwen3:8b'))}
+          ${row('Runtime', 'Ollama')}
+          ${row('Last Heartbeat', heartbeat)}
+          ${row('Ollama Latency', `<span id="prov-latency-local_qwen">${latency}</span>`)}
+          ${row('Current Job', currentJob)}
+        </div>
+
+        ${!online ? `
+          <div class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 space-y-1.5">
+            <div class="font-bold text-amber-800">${esc(w.error || 'Local Qwen Worker Offline')}</div>
+            <div class="text-[11px] text-slate-600">On the administrator machine, start Ollama with qwen3:8b pulled, set <code>AI_WORKER_SECRET</code>, then run:</div>
+            <div class="bg-slate-900 text-emerald-400 p-2.5 rounded font-mono text-[11px] select-all overflow-x-auto">python local_qwen_worker.py --server ${esc(serverUrl)}</div>
+          </div>` : ''}
+      </div>
+    `;
   }
 
   async testAiProvider(providerId, btnElement) {
@@ -10002,6 +9954,7 @@ class AdminDashboard {
 
     const feedbackEl = document.getElementById(`prov-test-feedback-${providerId}`);
     const statusEl = document.getElementById(`prov-status-${providerId}`);
+    const latencyEl = document.getElementById(`prov-latency-${providerId}`);
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
     const token = currentUser ? (currentUser.token || currentUser.email) : '';
@@ -10015,375 +9968,39 @@ class AdminDashboard {
         },
         body: JSON.stringify({ providerId: providerId })
       });
-
       const res = await resp.json();
-      btnElement.disabled = false;
-      btnElement.innerHTML = origHtml;
+      const latency = (typeof res.latency_ms === 'number') ? `${res.latency_ms} ms` : 'N/A';
+      if (latencyEl) latencyEl.innerText = latency;
 
       if (res.success) {
         if (statusEl) {
-          statusEl.innerText = 'Configured — Healthy';
+          statusEl.innerText = res.status || 'Worker Online';
           statusEl.className = 'px-2.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider border bg-emerald-100 text-emerald-800 border-emerald-200';
         }
         if (feedbackEl) {
           feedbackEl.classList.remove('hidden');
           feedbackEl.className = 'text-[11px] pt-2 border-t border-emerald-100 text-emerald-800 font-bold';
-          feedbackEl.innerText = `✓ Verified Active (${res.latency_ms}ms round-trip). Live Model Response: "${res.response_snippet || res.model}"`;
+          feedbackEl.innerText = `✓ ${res.message || 'Local Qwen Worker online'} (Ollama latency: ${latency})`;
         }
-        window.app.showToast(`Provider "${providerId}" healthy! (${res.latency_ms}ms)`, 'success');
+        window.app.showToast(`Local Qwen Worker online (latency ${latency})`, 'success');
       } else {
         if (statusEl) {
-          statusEl.innerText = 'Connection Failed';
+          statusEl.innerText = res.status || 'Worker Offline';
           statusEl.className = 'px-2.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider border bg-rose-100 text-rose-800 border-rose-200';
         }
         if (feedbackEl) {
           feedbackEl.classList.remove('hidden');
           feedbackEl.className = 'text-[11px] pt-2 border-t border-rose-100 text-rose-800 font-bold';
-          feedbackEl.innerText = `✗ Live test failed: ${res.error}`;
+          feedbackEl.innerText = `✗ ${res.error || 'Connection test failed'}`;
         }
-        window.app.showToast(`Test failed: ${res.error}`, 'error');
+        window.app.showToast(`Test failed: ${res.error || 'Worker offline'}`, 'error');
       }
-
-      if (window.lucide) window.lucide.createIcons();
     } catch (err) {
+      window.app.showToast(`Network error: ${err.message}`, 'error');
+    } finally {
       btnElement.disabled = false;
       btnElement.innerHTML = origHtml;
-      window.app.showToast(`Network error: ${err.message}`, 'error');
-    }
-  }
-
-  async saveAiProvidersSettings() {
-    const priorityInputs = document.querySelectorAll('.prov-priority-input');
-    const enabledInputs = document.querySelectorAll('.prov-enabled-input');
-    const updates = [];
-
-    priorityInputs.forEach(pInput => {
-      const pid = pInput.dataset.id;
-      const enabledInput = document.querySelector(`.prov-enabled-input[data-id="${pid}"]`);
-      if (pid) {
-        updates.push({
-          id: pid,
-          priority: parseInt(pInput.value, 10) || 1,
-          enabled: enabledInput ? enabledInput.checked : true
-        });
-      }
-    });
-
-    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
-
-    try {
-      const resp = await fetch('/api/admin/ai/providers', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ providers: updates })
-      });
-
-      const res = await resp.json();
-      if (!resp.ok || !res.success) {
-        throw new Error(res.error || 'Failed to update');
-      }
-
-      window.app.showToast('AI Provider priority & configuration saved successfully!', 'success');
-      this.renderAiProvidersSubTab(document.getElementById('ai-subtab-container'));
-    } catch (err) {
-      window.app.showToast(`Failed saving providers: ${err.message}`, 'error');
-    }
-  }
-
-  openAddProviderModal() {
-    const modalContent = document.getElementById('admin-generic-modal-content');
-    if (!modalContent) return;
-
-    modalContent.innerHTML = `
-      <div class="space-y-4">
-        <div class="flex items-center justify-between pb-3 border-b border-slate-200">
-          <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <i data-lucide="plus-circle" class="w-4 h-4 text-rose-600"></i>
-            Add New AI Provider
-          </h3>
-          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
-            <i data-lucide="x" class="w-4 h-4"></i>
-          </button>
-        </div>
-
-        <form id="add-provider-form" onsubmit="event.preventDefault(); window.adminDashboard.submitAddProvider();" class="space-y-3 text-xs">
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Provider ID <span class="text-rose-600">*</span></label>
-              <input type="text" id="add-prov-id" placeholder="e.g. gemini_3, custom_vllm" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-            </div>
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Display Name <span class="text-rose-600">*</span></label>
-              <input type="text" id="add-prov-name" placeholder="e.g. Gemini Account 3" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Provider Type <span class="text-rose-600">*</span></label>
-              <select id="add-prov-type" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none">
-                <option value="gemini">Google Gemini</option>
-                <option value="openrouter">OpenRouter</option>
-                <option value="groq">Groq</option>
-                <option value="mistral">Mistral OCR</option>
-              </select>
-            </div>
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Primary Model <span class="text-rose-600">*</span></label>
-              <input type="text" id="add-prov-model" placeholder="e.g. gemini-2.5-flash" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Fallback Model</label>
-              <input type="text" id="add-prov-fallback" placeholder="e.g. gemini-1.5-flash" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-            </div>
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Priority (1 = Highest)</label>
-              <input type="number" id="add-prov-priority" value="6" min="1" max="20" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-            </div>
-          </div>
-
-          <div>
-            <label class="block font-bold text-slate-700 mb-1">API Key / Secret Token <span class="text-rose-600">*</span></label>
-            <input type="password" id="add-prov-key" placeholder="Enter provider API key (will be encrypted server-side)" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none font-mono" />
-            <span class="text-[10px] text-slate-400 block mt-0.5">Encrypted with PBKDF2-HMAC-SHA256 vault storage. Never exposed to browser clients.</span>
-          </div>
-
-          <div class="flex items-center justify-between pt-2">
-            <label class="flex items-center gap-2 font-bold text-slate-700 cursor-pointer">
-              <input type="checkbox" id="add-prov-enabled" checked class="rounded text-rose-600 focus:ring-rose-500" />
-              Enable Immediately in Failover Chain
-            </label>
-          </div>
-
-          <div class="flex items-center justify-end gap-2 pt-4 border-t border-slate-200">
-            <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">
-              Cancel
-            </button>
-            <button type="submit" class="px-5 py-2 bg-rose-700 hover:bg-rose-800 text-white font-bold rounded-lg shadow-sm">
-              Register Provider
-            </button>
-          </div>
-        </form>
-      </div>
-    `;
-
-    if (window.lucide) window.lucide.createIcons();
-    window.app.openModal('admin-generic-modal');
-  }
-
-  async submitAddProvider() {
-    const id = document.getElementById('add-prov-id')?.value.trim();
-    const name = document.getElementById('add-prov-name')?.value.trim();
-    const provider = document.getElementById('add-prov-type')?.value;
-    const model = document.getElementById('add-prov-model')?.value.trim();
-    const fallbackModel = document.getElementById('add-prov-fallback')?.value.trim();
-    const priority = parseInt(document.getElementById('add-prov-priority')?.value || '1', 10);
-    const apiKey = document.getElementById('add-prov-key')?.value.trim();
-    const enabled = document.getElementById('add-prov-enabled')?.checked ?? true;
-
-    if (!id || !name || !model || !apiKey) {
-      window.app.showToast('Please fill all required fields.', 'error');
-      return;
-    }
-
-    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
-
-    try {
-      const resp = await fetch('/api/admin/ai/providers', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          action: 'add',
-          provider: {
-            id: id,
-            name: name,
-            provider: provider,
-            model: model,
-            fallback_model: fallbackModel,
-            priority: priority,
-            enabled: enabled,
-            apiKey: apiKey
-          }
-        })
-      });
-
-      const res = await resp.json();
-      if (!resp.ok || !res.success) {
-        throw new Error(res.error || 'Failed to add provider');
-      }
-
-      window.app.closeModal('admin-generic-modal');
-      window.app.showToast(`Provider "${name}" registered successfully!`, 'success');
-      this.renderAiProvidersSubTab(document.getElementById('ai-subtab-container'));
-    } catch (err) {
-      window.app.showToast(`Error: ${err.message}`, 'error');
-    }
-  }
-
-  openEditProviderModal(providerId) {
-    const prov = (this._cachedAiProviders || []).find(p => p.id === providerId);
-    if (!prov) {
-      window.app.showToast('Provider not found', 'error');
-      return;
-    }
-
-    const modalContent = document.getElementById('admin-generic-modal-content');
-    if (!modalContent) return;
-
-    modalContent.innerHTML = `
-      <div class="space-y-4">
-        <div class="flex items-center justify-between pb-3 border-b border-slate-200">
-          <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <i data-lucide="edit-3" class="w-4 h-4 text-rose-600"></i>
-            Edit AI Provider: ${prov.name}
-          </h3>
-          <button onclick="window.app.closeModal('admin-generic-modal')" class="text-slate-400 hover:text-slate-600">
-            <i data-lucide="x" class="w-4 h-4"></i>
-          </button>
-        </div>
-
-        <form onsubmit="event.preventDefault(); window.adminDashboard.submitEditProvider('${prov.id}');" class="space-y-3 text-xs">
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Display Name</label>
-              <input type="text" id="edit-prov-name" value="${prov.name || ''}" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-            </div>
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Primary Model</label>
-              <input type="text" id="edit-prov-model" value="${prov.model || ''}" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Fallback Model</label>
-              <input type="text" id="edit-prov-fallback" value="${prov.fallback_model || ''}" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-            </div>
-            <div>
-              <label class="block font-bold text-slate-700 mb-1">Execution Priority</label>
-              <input type="number" id="edit-prov-priority" value="${prov.priority || 1}" min="1" max="20" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
-            </div>
-          </div>
-
-          <div>
-            <label class="block font-bold text-slate-700 mb-1">Update API Key (Optional)</label>
-            <input type="password" id="edit-prov-key" placeholder="Leave empty to retain existing encrypted vault key" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none font-mono" />
-            <span class="text-[10px] text-slate-400 block mt-0.5">Current Vault Key: <code class="font-bold">${prov.maskedKey || 'Not Configured'}</code></span>
-          </div>
-
-          <div class="flex items-center justify-between pt-2">
-            <label class="flex items-center gap-2 font-bold text-slate-700 cursor-pointer">
-              <input type="checkbox" id="edit-prov-enabled" ${prov.enabled !== false ? 'checked' : ''} class="rounded text-rose-600 focus:ring-rose-500" />
-              Enabled in Failover Chain
-            </label>
-          </div>
-
-          <div class="flex items-center justify-end gap-2 pt-4 border-t border-slate-200">
-            <button type="button" onclick="window.app.closeModal('admin-generic-modal')" class="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">
-              Cancel
-            </button>
-            <button type="submit" class="px-5 py-2 bg-rose-700 hover:bg-rose-800 text-white font-bold rounded-lg shadow-sm">
-              Save Changes
-            </button>
-          </div>
-        </form>
-      </div>
-    `;
-
-    if (window.lucide) window.lucide.createIcons();
-    window.app.openModal('admin-generic-modal');
-  }
-
-  async submitEditProvider(providerId) {
-    const name = document.getElementById('edit-prov-name')?.value.trim();
-    const model = document.getElementById('edit-prov-model')?.value.trim();
-    const fallbackModel = document.getElementById('edit-prov-fallback')?.value.trim();
-    const priority = parseInt(document.getElementById('edit-prov-priority')?.value || '1', 10);
-    const newApiKey = document.getElementById('edit-prov-key')?.value.trim();
-    const enabled = document.getElementById('edit-prov-enabled')?.checked ?? true;
-
-    const updates = {
-      name: name,
-      model: model,
-      fallback_model: fallbackModel,
-      priority: priority,
-      enabled: enabled
-    };
-    if (newApiKey) {
-      updates.apiKey = newApiKey;
-    }
-
-    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
-
-    try {
-      const resp = await fetch('/api/admin/ai/providers', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          action: 'edit',
-          providerId: providerId,
-          updates: updates
-        })
-      });
-
-      const res = await resp.json();
-      if (!resp.ok || !res.success) {
-        throw new Error(res.error || 'Failed to update provider');
-      }
-
-      window.app.closeModal('admin-generic-modal');
-      window.app.showToast(`Provider "${providerId}" updated successfully!`, 'success');
-      this.renderAiProvidersSubTab(document.getElementById('ai-subtab-container'));
-    } catch (err) {
-      window.app.showToast(`Error: ${err.message}`, 'error');
-    }
-  }
-
-  async deleteAiProvider(providerId) {
-    if (!confirm(`Are you sure you want to delete AI provider "${providerId}"? This will remove it from the failover chain.`)) {
-      return;
-    }
-
-    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
-
-    try {
-      const resp = await fetch('/api/admin/ai/providers', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          action: 'delete',
-          providerId: providerId
-        })
-      });
-
-      const res = await resp.json();
-      if (!resp.ok || !res.success) {
-        throw new Error(res.error || 'Failed to delete provider');
-      }
-
-      window.app.showToast(`Provider "${providerId}" deleted.`, 'info');
-      this.renderAiProvidersSubTab(document.getElementById('ai-subtab-container'));
-    } catch (err) {
-      window.app.showToast(`Delete failed: ${err.message}`, 'error');
+      if (window.lucide) window.lucide.createIcons();
     }
   }
 

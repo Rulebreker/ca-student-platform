@@ -234,36 +234,6 @@ class TestProductionCriticalGate(unittest.TestCase):
         self.assertIsInstance(data, list)
         self.assertGreaterEqual(len(data), 6)
 
-    # TEST 14: AI provider priority is correct and Groq is LAST
-    def test_14_ai_provider_priority_groq_last(self):
-        status, res = http_request(
-            f"{BASE_URL}/api/admin/ai/providers",
-            headers={'Authorization': f'Bearer {ADMIN_TOKEN}'}
-        )
-        self.assertEqual(status, 200)
-        providers = res.get('providers', [])
-        self.assertTrue(providers, "No providers returned")
-
-        groq_prov = next((p for p in providers if p.get('id') == 'groq'), None)
-        openrouter_prov = next((p for p in providers if p.get('id') == 'openrouter'), None)
-        
-        self.assertIsNotNone(groq_prov, "Groq provider missing")
-        self.assertIsNotNone(openrouter_prov, "OpenRouter provider missing")
-        
-        self.assertGreater(groq_prov.get('priority', 0), openrouter_prov.get('priority', 0), "Groq must have lower priority than OpenRouter")
-        self.assertGreaterEqual(groq_prov.get('priority', 0), 9, "Groq priority should be 9 or greater")
-        
-        groq_idx = next(i for i, p in enumerate(providers) if p.get('id') == 'groq')
-        openrouter_idx = next(i for i, p in enumerate(providers) if p.get('id') == 'openrouter')
-        self.assertGreater(groq_idx, openrouter_idx, "Groq must appear after OpenRouter in candidate list")
-
-    # TEST 15: Fallback does not make unnecessary parallel API calls or trigger avoidable rate limits
-    def test_15_sequential_failover_safety(self):
-        import ai_provider_manager
-        candidates = ai_provider_manager.get_registered_providers()
-        groq_prov = next(p for p in candidates if p.get('id') == 'groq')
-        self.assertNotIn('generation', groq_prov.get('roles', []), "Groq must never be assigned generation role")
-
     # TEST 16: Refresh browser / reload data verifies persistent data remains correct
     def test_16_browser_refresh_data_persistence(self):
         status1, data1 = http_request(

@@ -971,18 +971,21 @@ def get_authoritative_chapter_metadata(
                         'allowedConcepts': ch.get('allowedConcepts') or [ch.get('name') or 'Core Principles']
                     }
 
-    # 3. Lookup across CANONICAL_SUBJECTS chapters
-    for s in CANONICAL_SUBJECTS:
+    # 3. Lookup across CANONICAL_SUBJECTS chapters.
+    # Pass 1 matches by chapterId or exact/contained chapter name; pass 2 falls back to fuzzy
+    # token overlap. A requested subject is always honoured, so a fuzzy match can never pull a
+    # chapter from a different subject (e.g. "Theory of Demand..." -> Accounting "Theoretical...").
+    for fuzzy_pass in (False, True):
+      for s in CANONICAL_SUBJECTS:
         s_name = s.get('name', '')
         s_id = s.get('id', '')
         s_lvl = s.get('level', 'CA Foundation')
         s_lvl_id = s.get('levelId', 'foundation')
 
-        # If subject was provided, check compatibility
+        # If subject was provided, skip other subjects unless the chapterId explicitly belongs to them
         if clean_sub and clean_sub not in s_name.lower() and s_name.lower() not in clean_sub:
-            # Check if this subject contains the requested chapter_id
             ch_ids = [ch['id'] for ch in s.get('chapters', [])]
-            if clean_ch_id and clean_ch_id not in ch_ids:
+            if not (clean_ch_id and clean_ch_id in ch_ids):
                 continue
 
         for ch in s.get('chapters', []):
@@ -995,7 +998,7 @@ def get_authoritative_chapter_metadata(
             elif clean_ch_name:
                 if clean_ch_name == ch_name.lower() or clean_ch_name in ch_name.lower() or ch_name.lower() in clean_ch_name:
                     matched = True
-                else:
+                elif fuzzy_pass:
                     cand_tokens = {w[:5] for w in re.findall(r'\b[a-zA-Z]{4,}\b', clean_ch_name)}
                     ch_tokens = {w[:5] for w in re.findall(r'\b[a-zA-Z]{4,}\b', ch_name.lower())}
                     if cand_tokens and ch_tokens and cand_tokens.intersection(ch_tokens):

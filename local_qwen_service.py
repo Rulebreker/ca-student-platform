@@ -96,17 +96,20 @@ def build_mcq_user_prompt(
     question_category: str = 'Direct Questions',
     question_speed: str = 'Quick',
     admin_description: str = '',
-    previous_concepts: Optional[List[str]] = None
+    previous_concepts: Optional[List[str]] = None,
+    syllabus_scope: str = ''
 ) -> str:
     """Build structured prompt for Qwen3 8B."""
     avoid_block = ""
     if previous_concepts and len(previous_concepts) > 0:
-        cleaned = [f"- {c.strip()[:100]}" for c in previous_concepts[-8:] if c.strip()]
+        cleaned = [f"- {c.strip()[:100]}" for c in previous_concepts[-20:] if c.strip()]
         if cleaned:
-            avoid_block = "\nAvoid duplicating these recently generated concepts/questions:\n" + "\n".join(cleaned)
+            avoid_block = ("\nThese questions ALREADY EXIST. Do NOT repeat or paraphrase any of them; "
+                           "test a different concept, rule or example instead:\n" + "\n".join(cleaned))
 
     topic_str = f" - Sub-topic: {topic}" if topic and topic.strip() else ""
     extra_instructions = f"\nAdditional Admin Guidelines: {admin_description.strip()}" if admin_description and admin_description.strip() else ""
+    scope_block = f"\nICAI Syllabus Scope (stay strictly within it):\n{syllabus_scope.strip()}" if syllabus_scope and syllabus_scope.strip() else ""
 
     prompt = f"""Generate exactly {count} multiple choice questions (MCQs) for:
 Exam Level: {exam_level}
@@ -114,11 +117,15 @@ Subject: {subject}
 Chapter: {chapter}{topic_str}
 Difficulty Standard: {difficulty}
 Question Type: {question_category} ({question_speed})
+{scope_block}
 {extra_instructions}
 {avoid_block}
 
 CRITICAL RULES:
 - Every question must be directly from "{subject} -> {chapter}".
+- Each question must test a DIFFERENT specific rule, fact, formula or example. Prefer concrete stems
+  (a small numerical, "Which of the following is NOT...", cause-and-effect, identify-the-example)
+  over generic "Which of the following best describes X?" stems.
 - Exactly 4 options per question (keys: "A", "B", "C", "D").
 - Answer must be the single uppercase letter: "A", "B", "C", or "D".
 - Explanation must thoroughly verify why that option is correct.
@@ -306,7 +313,9 @@ def generate_mcqs(
     question_speed: str = 'Quick',
     admin_description: str = '',
     previous_concepts: Optional[List[str]] = None,
-    timeout: Optional[float] = None
+    timeout: Optional[float] = None,
+    syllabus_scope: str = '',
+    temperature: Optional[float] = None
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Generate multiple MCQs via local Ollama Qwen3 8B.
@@ -333,7 +342,8 @@ def generate_mcqs(
         question_category=question_category,
         question_speed=question_speed,
         admin_description=admin_description,
-        previous_concepts=previous_concepts
+        previous_concepts=previous_concepts,
+        syllabus_scope=syllabus_scope
     )
 
     payload = {
@@ -346,7 +356,7 @@ def generate_mcqs(
         "format": "json",
         "think": False,
         "options": {
-            "temperature": 0.6,
+            "temperature": 0.6 if temperature is None else float(temperature),
             "top_p": 0.95
         }
     }

@@ -1,12 +1,10 @@
+import os
 import re
 import json
 import time
 import uuid
-import unittest
-from unittest.mock import Mock, MagicMock
-from typing import Dict, Any, List, Optional, Tuple, Set
+from typing import Callable, Dict, Any, List, Optional, Tuple, Set
 
-import ai_provider_manager
 import ai_document_indexer
 import syllabus_hierarchy
 import local_qwen_service
@@ -172,311 +170,6 @@ def verify_source_chunk_grounding(
         return False, f"Question introduces external concepts not grounded in source chunk text (match score: {best_score:.2f} < {min_keyword_overlap}).", None, best_score
 
 # ----------------- Dynamic Prompt Builders -----------------
-
-def build_generation_system_instruction(
-    question_category: str = 'Direct Questions',
-    question_speed: str = 'Quick'
-) -> str:
-    category_instructions = {
-        'Direct Questions': (
-            "QUESTION CATEGORY: DIRECT QUESTIONS (MANDATORY RULE)\n"
-            "- Generate straightforward, concise, factual, and direct CA examination questions.\n"
-            "- Focus on definition-based, meaning-based, fact-based, formula-based, or core concept identification.\n"
-            "- Desired style example: 'Who is known as the Father of Economics? A) Adam Smith B) Alfred Marshall C) J.M. Keynes D) David Ricardo'\n"
-            "- Another example: 'Under the Companies Act, 2013, the minimum number of members required for a public company is: A) 2 B) 7 C) 10 D) 50'\n"
-            "- STRICT PROHIBITION: DO NOT create long case studies, multi-paragraph stories, narrative scenarios, hypothetical individuals (e.g. 'Mr. X entered into an agreement with Y...'), or verbose question stems."
-        ),
-        'Direct + Case Based Questions': (
-            "QUESTION CATEGORY: DIRECT + CASE BASED QUESTIONS\n"
-            "- You may formulate either straightforward direct questions or realistic, practical case-based scenarios relevant to the ICAI curriculum."
-        ),
-        'Conceptual Questions': (
-            "QUESTION CATEGORY: CONCEPTUAL QUESTIONS\n"
-            "- Focus on deep understanding of statutory mechanics, accounting principles, and economic logic.\n"
-            "- Test whether the student understands WHY a provision or standard operates as it does, without requiring lengthy narrative stories."
-        ),
-        'Application Based Questions': (
-            "QUESTION CATEGORY: APPLICATION BASED QUESTIONS\n"
-            "- Focus on applying legal provisions, accounting standards, or mathematical formulas to specific practical problems."
-        )
-    }
-
-    speed_instructions = {
-        'Quick': (
-            "QUESTION SPEED: QUICK (FAST TO ANSWER)\n"
-            "- Short wording, concise question stem (under 60 words).\n"
-            "- Minimal reading time and straightforward option identification.\n"
-            "- Suitable for rapid student revision and practice."
-        ),
-        'Medium': (
-            "QUESTION SPEED: MEDIUM (STANDARD PACING)\n"
-            "- Moderate conceptual reasoning and interpretation.\n"
-            "- Balanced stem length (under 85 words), solvable within standard exam pacing."
-        ),
-        'Thinking': (
-            "QUESTION SPEED: THINKING (DEEPER REASONING)\n"
-            "- Requires deeper analytical reasoning, multi-step calculation, or statutory interpretation.\n"
-            "- Challenging problem-solving testing thorough conceptual mastery."
-        )
-    }
-
-    cat_text = category_instructions.get(question_category, category_instructions['Direct Questions'])
-    spd_text = speed_instructions.get(question_speed, speed_instructions['Quick'])
-
-    return f"""You are an elite Chartered Accountancy (ICAI) Examination Specialist and Senior Professor.
-Your task is to generate ORIGINAL, high-quality Multiple Choice Questions (MCQs) for Indian CA students (CA Foundation, CA Intermediate, or CA Final).
-
-{cat_text}
-
-{spd_text}
-
-MANDATORY RULES:
-1. ORIGINALITY: Formulate brand-new questions derived conceptually from the provided syllabus context. NEVER copy verbatim from textbook exercises.
-2. OPTIONS: Exactly four distinct, mutually exclusive options (A, B, C, D). None of the options should be identical or trivial ("All of the above" / "None of the above" must be avoided).
-3. SINGLE CORRECT ANSWER: Exactly one unequivocally correct answer based strictly on ICAI standard syllabus, Companies Act 2013, relevant Ind AS / AS, Income Tax Act 1961, or economic / mathematical laws.
-4. NUMERICAL VERIFICATION: If the question involves numerical calculations, compute all intermediate values explicitly so the numerical result is exact and unambiguous.
-5. EXPLANATION: Provide an exhaustive, step-by-step reasoning citing applicable standards, sections, or mathematical formulas.
-6. JSON FORMAT: Output MUST be strictly valid JSON matching the required schema with no extra conversational text or markdown code blocks.
-"""
-
-def build_generation_user_prompt(
-    subject: str,
-    exam_level: str,
-    topic: str = '',
-    difficulty: str = 'ICAI Exam Standard',
-    question_category: str = 'Direct Questions',
-    question_speed: str = 'Quick',
-    context: str = '',
-    previous_concepts_summary: str = '',
-    slot_number: int = 1,
-    total_count: int = 1,
-    rejected_questions: Optional[List[str]] = None,
-    attempt_number: int = 1,
-    chapter_metadata: Optional[Dict[str, Any]] = None,
-    chapter_name: str = '',
-    chapter_id: str = '',
-    admin_description: str = ''
-) -> str:
-    focal_angles = [
-        "Core definitions, essential terminology, and statutory meanings",
-        "Classification, taxonomies, forms, or categories of concepts",
-        "Conditions, criteria, prerequisites, or statutory thresholds",
-        "Key objectives, underlying purpose, or economic/legal rationale",
-        "Application, accounting/legal treatment, and practical procedural effects",
-        "Quantitative calculations, measurement formulas, or arithmetic criteria",
-        "Statutory time limits, compliance requirements, or numerical boundaries",
-        "Comparison, contrast, and differences between related principles",
-        "Legal consequences, non-compliance penalties, or operational impacts",
-        "Authoritative regulatory standards, sections, or governance framework"
-    ]
-    slot_angle = focal_angles[(slot_number - 1 + (attempt_number - 1) * 3) % len(focal_angles)]
-
-    rejected_clause = ""
-    if rejected_questions:
-        items = "\n".join([f"- \"{rq.strip()}\"" for rq in rejected_questions if rq and rq.strip()])
-        if items:
-            rejected_clause = f"""
-STRICT PROHIBITION (PREVIOUS ATTEMPT REJECTED AS DUPLICATE):
-The following question(s) were ALREADY proposed and REJECTED because they duplicated existing questions:
-{items}
-You MUST NOT generate or rephrase questions testing those exact facts.
-Select a completely DIFFERENT concept, section, or formula from this chapter's syllabus.
-"""
-
-    prev_clause = ""
-    if previous_concepts_summary and previous_concepts_summary.strip() != "None yet.":
-        prev_clause = f"""
-QUESTIONS ALREADY GENERATED IN THIS EXAM SET (DO NOT DUPLICATE):
-{previous_concepts_summary}
-You MUST generate a question testing a DIFFERENT concept or provision than all of the above.
-"""
-
-    # Resolve chapter syllabus information from chapter_metadata if present
-    ch_id = chapter_id
-    ch_name = chapter_name or topic or 'General'
-    ch_desc = f"Authoritative ICAI syllabus coverage for {ch_name}."
-    allowed_topics_str = f"- {ch_name}"
-    allowed_concepts_str = f"- Core principles and provisions of {ch_name}"
-
-    if chapter_metadata and isinstance(chapter_metadata, dict):
-        ch_id = chapter_metadata.get('chapterId') or ch_id
-        ch_name = chapter_metadata.get('chapterName') or ch_name
-        ch_desc = chapter_metadata.get('chapterDescription') or ch_desc
-        t_list = chapter_metadata.get('allowedTopics') or []
-        c_list = chapter_metadata.get('allowedConcepts') or []
-        if t_list:
-            allowed_topics_str = "\n".join([f"- {t}" for t in t_list[:6]])
-        if c_list:
-            allowed_concepts_str = "\n".join([f"- {c}" for c in c_list[:6]])
-
-    guidance_clause = ""
-    if admin_description and admin_description.strip():
-        guidance_clause = f"\nAdministrative Focus Guidance:\n\"\"\"{admin_description.strip()[:400]}\"\"\"\n"
-
-    # Authoritative syllabus source material grounding clause
-    grounded_source_clause = ""
-    if context and context.strip() and not context.startswith("Standard ICAI syllabus concepts"):
-        grounded_source_clause = f"""
-AUTHORITATIVE SYLLABUS SOURCE MATERIAL (GROUNDED KNOWLEDGE BASE):
-\"\"\"
-{context.strip()[:3000]}
-\"\"\"
-
-MANDATORY SOURCE-GROUNDED GENERATION RULES:
-1. You are generating examination questions strictly from the supplied syllabus/source material above.
-2. Do NOT introduce concepts, terminology, formulas, subtopics or advanced material that are not supported by the supplied source content.
-3. If the source material is insufficient to formulate a valid, high-quality question for this slot, return "INSUFFICIENT_SOURCE" in the question field rather than inventing content.
-4. Do NOT silently fall back to general ungrounded knowledge outside this authoritative scope.
-"""
-
-    task_instruction = f"Task: Using your expert knowledge of the ICAI syllabus and statutory reasoning, formulate exactly 1 original, challenging CA-style MCQ testing '{ch_name}'."
-    rules_instruction = """Rules:
-- Derive all question logic, scenarios, and options from authoritative syllabus principles.
-- Do NOT copy or paraphrase any prompt guidance verbatim.
-- Respond with ONLY the required JSON object."""
-    if grounded_source_clause:
-        task_instruction = f"Task: Using your expert knowledge of the ICAI syllabus and statutory reasoning grounded in authoritative source material, formulate exactly 1 original, challenging CA-style MCQ testing '{ch_name}'."
-        rules_instruction = """Rules:
-- Derive all question logic, scenarios, and options strictly from supplied source material.
-- If source material is provided and insufficient to formulate a valid question, output "INSUFFICIENT_SOURCE".
-- Do NOT copy or paraphrase any prompt guidance or source verbatim.
-- Respond with ONLY the required JSON object."""
-
-    return f"""Exam Level: {exam_level}
-Subject: {subject}
-Authoritative Chapter: {ch_name}{f' (ID: {ch_id})' if ch_id else ''}
-Chapter Scope: {ch_desc}
-
-Allowed Syllabus Topics for this Chapter:
-{allowed_topics_str}
-
-Core Conceptual Focus:
-{allowed_concepts_str}
-{guidance_clause}{grounded_source_clause}
-Question Slot: {slot_number} of {total_count} (Attempt: {attempt_number})
-Focal Angle for this Slot: {slot_angle}
-Category: {question_category}
-Target Speed: {question_speed}
-Difficulty: {difficulty}
-{prev_clause}{rejected_clause}
-{task_instruction}
-{rules_instruction}
-
-Respond with ONLY this JSON object:
-{{
-  "question": "Clear, direct question text here...",
-  "optionA": "Option A text",
-  "optionB": "Option B text",
-  "optionC": "Option C text",
-  "optionD": "Option D text",
-  "correctAnswer": "A",
-  "explanation": "Detailed step-by-step explanation with section/standard references...",
-  "category": "{question_category}",
-  "difficulty": "{difficulty}",
-  "estimatedThinkingLevel": "{question_speed}"
-}}
-"""
-
-def build_batched_generation_user_prompt(
-    subject: str,
-    exam_level: str,
-    topic: str = '',
-    count: int = 5,
-    difficulty: str = 'ICAI Exam Standard',
-    question_category: str = 'Direct Questions',
-    question_speed: str = 'Quick',
-    context: str = '',
-    chapter_metadata: Optional[Dict[str, Any]] = None,
-    chapter_name: str = '',
-    chapter_id: str = '',
-    admin_description: str = '',
-    previous_concepts_summary: str = '',
-    missing_slots_info: Optional[List[Dict[str, Any]]] = None
-) -> str:
-    ch_id = chapter_id
-    ch_name = chapter_name or topic or 'General'
-    ch_desc = f"Authoritative ICAI syllabus coverage for {ch_name}."
-    allowed_topics_str = f"- {ch_name}"
-    allowed_concepts_str = f"- Core principles and provisions of {ch_name}"
-
-    if chapter_metadata and isinstance(chapter_metadata, dict):
-        ch_id = chapter_metadata.get('chapterId') or ch_id
-        ch_name = chapter_metadata.get('chapterName') or ch_name
-        ch_desc = chapter_metadata.get('chapterDescription') or ch_desc
-        t_list = chapter_metadata.get('allowedTopics') or []
-        c_list = chapter_metadata.get('allowedConcepts') or []
-        if t_list:
-            allowed_topics_str = "\n".join([f"- {t}" for t in t_list[:8]])
-        if c_list:
-            allowed_concepts_str = "\n".join([f"- {c}" for c in c_list[:8]])
-
-    guidance_clause = ""
-    if admin_description and admin_description.strip():
-        guidance_clause = f"\nAdministrative Focus Guidance:\n\"\"\"{admin_description.strip()[:400]}\"\"\"\n"
-
-    grounded_source_clause = ""
-    if context and context.strip() and not context.startswith("Standard ICAI syllabus concepts"):
-        grounded_source_clause = f"""
-AUTHORITATIVE SYLLABUS SOURCE MATERIAL (GROUNDED KNOWLEDGE BASE):
-\"\"\"
-{context.strip()[:4000]}
-\"\"\"
-
-MANDATORY SOURCE-GROUNDED GENERATION RULES:
-1. Formulate all questions and explanations strictly from the supplied syllabus/source material above.
-2. Every question MUST test a distinct concept, statutory section, or principle supported by the source material.
-3. Do NOT introduce external concepts or formulas not supported by the supplied source content.
-4. If the source material is insufficient to formulate valid questions, return "INSUFFICIENT_SOURCE" in the question field.
-"""
-
-    prev_clause = ""
-    if previous_concepts_summary and previous_concepts_summary.strip() != "None yet.":
-        prev_clause = f"\nALREADY GENERATED QUESTIONS IN THIS EXAM SET (DO NOT DUPLICATE):\n{previous_concepts_summary}\n"
-
-    task_desc = f"Task: Using your expert knowledge of the ICAI syllabus and statutory reasoning, formulate exactly {count} distinct, original CA-style Multiple Choice Questions testing '{ch_name}'."
-    if grounded_source_clause:
-        task_desc = f"Task: Using your expert knowledge of the ICAI syllabus and statutory reasoning grounded in authoritative source material, formulate exactly {count} distinct, original CA-style Multiple Choice Questions testing '{ch_name}'."
-
-    return f"""Exam Level: {exam_level}
-Subject: {subject}
-Authoritative Chapter: {ch_name}{f' (ID: {ch_id})' if ch_id else ''}
-Chapter Scope: {ch_desc}
-
-Allowed Syllabus Topics for this Chapter:
-{allowed_topics_str}
-
-Core Conceptual Focus:
-{allowed_concepts_str}
-{guidance_clause}{grounded_source_clause}
-Target Question Count: {count}
-Category: {question_category}
-Target Speed: {question_speed}
-Difficulty: {difficulty}
-{prev_clause}
-{task_desc}
-Rules:
-- Each question MUST have exactly 4 distinct, mutually exclusive options (A, B, C, D) and exactly 1 correct answer.
-- All {count} questions MUST test different concepts within '{ch_name}'. No duplicates.
-- Provide a detailed step-by-step explanation with section/standard references for each question.
-- Do NOT repeat or paraphrase prompt instructions.
-- Output MUST be strictly a valid JSON array of question objects matching the required schema.
-
-Respond with ONLY this JSON array:
-[
-  {{
-    "question": "Question 1 text...",
-    "optionA": "Option A text",
-    "optionB": "Option B text",
-    "optionC": "Option C text",
-    "optionD": "Option D text",
-    "correctAnswer": "A",
-    "explanation": "Detailed step-by-step explanation with section/standard references...",
-    "category": "{question_category}",
-    "difficulty": "{difficulty}",
-    "estimatedThinkingLevel": "{question_speed}"
-  }}
-]
-"""
 
 VALIDATOR_SYSTEM_PROMPT = """You are an Independent ICAI Exam Validator and Chief Quality Auditor.
 Your job is to independently verify a candidate MCQ against rigorous CA academic standards.
@@ -919,160 +612,6 @@ def validate_mcq_locally_deterministic(
 
     return True, "Passed local deterministic validation.", None
 
-# ----------------- Core Engine Methods -----------------
-
-def generate_single_mcq(
-    subject: str,
-    topic: str = '',
-    exam_level: str = 'CA Foundation',
-    difficulty: str = 'ICAI Exam Standard',
-    question_category: str = 'Direct Questions',
-    question_speed: str = 'Quick',
-    context_chunks: Optional[List[Dict[str, Any]]] = None,
-    previous_concepts: Optional[List[str]] = None,
-    data: Optional[Dict[str, Any]] = None,
-    slot_number: int = 1,
-    total_count: int = 1,
-    on_provider_event: Optional[Any] = None,
-    rejected_questions: Optional[List[str]] = None,
-    attempt_number: int = 1,
-    job_id: Optional[str] = None,
-    question_number: Optional[int] = None,
-    chapter_metadata: Optional[Dict[str, Any]] = None,
-    chapter: str = '',
-    chapter_id: str = '',
-    admin_description: str = '',
-    preferred_provider: Optional[str] = None,
-    temperature: Optional[float] = None
-) -> Tuple[Dict[str, Any], str, str]:
-    """
-    Generate a single candidate MCQ matching category, speed, and chapter syllabus constraints.
-    Returns (parsed_json_dict, provider_id, model_name).
-    """
-    # 1. Resolve chapter metadata if not explicitly provided
-    if not chapter_metadata:
-        chapter_metadata = syllabus_hierarchy.get_authoritative_chapter_metadata(
-            chapter_id=chapter_id,
-            chapter_name=chapter or topic,
-            subject=subject,
-            exam_level=exam_level,
-            data=data
-        )
-
-    if chapter_metadata:
-        chapter_id = chapter_metadata.get('chapterId', chapter_id)
-        chapter = chapter_metadata.get('chapterName', chapter)
-        subject = chapter_metadata.get('subject', subject)
-        exam_level = chapter_metadata.get('examLevel', exam_level)
-
-    # 2. Authoritative Syllabus Source Grounding & Traceability
-    context_text = ""
-    source_doc_id = None
-    source_content_id = None
-    source_page = None
-    source_chapter = chapter
-    source_topic = topic
-    if context_chunks and len(context_chunks) > 0:
-        chunk_idx = (slot_number - 1 + (attempt_number - 1)) % len(context_chunks)
-        selected_chunk = context_chunks[chunk_idx]
-        raw_text = selected_chunk.get('extractedText') or selected_chunk.get('text', '')
-        if len(raw_text) > 1500 and attempt_number > 1:
-            offset = ((attempt_number - 1) * 350) % max(1, len(raw_text) - 900)
-            context_text = raw_text[offset:offset + 3000]
-        else:
-            context_text = raw_text[:3000]
-        source_doc_id = selected_chunk.get('sourceDocumentId') or selected_chunk.get('docId')
-        source_content_id = selected_chunk.get('contentId') or selected_chunk.get('chunkId')
-        source_page = selected_chunk.get('sourcePage') or (selected_chunk.get('pages', [1])[0] if selected_chunk.get('pages') else 1)
-        source_chapter = selected_chunk.get('chapter') or chapter
-        source_topic = selected_chunk.get('topic') or selected_chunk.get('heading') or topic
-
-    prev_summary = "None yet."
-    if previous_concepts:
-        clean_prev = [p.strip() for p in previous_concepts if p and p.strip()]
-        if clean_prev:
-            prev_summary = "\n".join([f"- {p[:140]}" for p in clean_prev[-10:]])
-
-    system_instruction = build_generation_system_instruction(
-        question_category=question_category,
-        question_speed=question_speed
-    )
-
-    user_prompt = build_generation_user_prompt(
-        subject=subject,
-        exam_level=exam_level,
-        topic=topic,
-        difficulty=difficulty,
-        question_category=question_category,
-        question_speed=question_speed,
-        context=context_text,
-        previous_concepts_summary=prev_summary,
-        slot_number=slot_number,
-        total_count=total_count,
-        rejected_questions=rejected_questions,
-        attempt_number=attempt_number,
-        chapter_metadata=chapter_metadata,
-        chapter_name=chapter,
-        chapter_id=chapter_id,
-        admin_description=admin_description
-    )
-
-    # Safe temperature variation per specification: 0.7 + ((attempt_number - 1) % 3) * 0.1
-    calculated_temp = temperature if temperature is not None else round(0.7 + ((attempt_number - 1) % 3) * 0.1, 2)
-
-    try:
-        valid_mcqs, telemetry = local_qwen_service.generate_mcqs(
-            subject=subject,
-            chapter=chapter or (chapter_metadata.get('chapterName') if chapter_metadata else topic),
-            count=1,
-            exam_level=exam_level,
-            difficulty=difficulty,
-            topic=topic,
-            question_category=question_category,
-            question_speed=question_speed,
-            admin_description=admin_description,
-            previous_concepts=previous_concepts
-        )
-        if valid_mcqs:
-            q_data = valid_mcqs[0]
-            provider_id = 'local_qwen'
-            model_name = 'qwen3:8b'
-        else:
-            raise ValueError("Local Qwen returned empty MCQ payload.")
-    except Exception as e:
-        print(f"[LOCAL_QWEN_SINGLE_ERROR] {e}", flush=True)
-        raise
-
-    # Normalize fields (support question or text, correctAnswer or correctOption)
-    q_text = str(q_data.get('question') or q_data.get('text') or '').strip()
-    if not q_text:
-        raise ValueError("Model output missing question text.")
-    q_data['text'] = q_text
-    q_data['question'] = q_text
-
-    correct_opt = str(q_data.get('correctAnswer') or q_data.get('correctOption') or '').strip().upper()
-    if correct_opt not in ['A', 'B', 'C', 'D']:
-        match = re.search(r'\b([A-D])\b', correct_opt)
-        if match:
-            correct_opt = match.group(1)
-        else:
-            raise ValueError(f"Invalid correctOption '{correct_opt}', must be A, B, C, or D.")
-    q_data['correctOption'] = correct_opt
-    q_data['correctAnswer'] = correct_opt
-    q_data['category'] = question_category
-    q_data['difficulty'] = difficulty
-    q_data['estimatedThinkingLevel'] = question_speed
-    if chapter_id:
-        q_data['chapterId'] = chapter_id
-    if chapter:
-        q_data['chapter'] = chapter
-    q_data['sourceDocId'] = source_doc_id
-    q_data['sourceContentId'] = source_content_id
-    q_data['sourceChapter'] = source_chapter
-    q_data['sourceTopic'] = source_topic
-    q_data['sourcePage'] = source_page
-
-    return q_data, provider_id, model_name
 
 def validate_mcq_independently(
     q_data: Dict[str, Any],
@@ -1094,14 +633,9 @@ def validate_mcq_independently(
     require_grounding: bool = False
 ) -> Tuple[bool, str, Optional[Dict[str, Any]], str]:
     """
-    Two-stage validation architecture:
-    Stage 1 (Primary): Local deterministic validation (0 API calls, 0 Gemini calls).
-                       Verifies 4 options, 1 answer, valid index, non-empty question,
-                       subject/chapter consistency, difficulty, word constraints, duplicates,
-                       source reproduction protection, and source chunk grounding.
-    Stage 2 (Fallback/Audit): Secondary AI provider (Groq/OpenRouter) ONLY when local validation
-                             cannot reliably determine validity or when force_ai_validation is True.
-                             Gemini is NEVER used for validation.
+    Local deterministic validation (no AI calls): 4 options, 1 answer, valid index, non-empty
+    question, subject/chapter consistency, difficulty, word constraints, duplicates, source
+    reproduction protection, and source chunk grounding.
     Returns: (is_valid: bool, reason: str, suggested_fix: dict or None, validator_provider: str)
     """
     # Stage 1: Local deterministic validation first
@@ -1128,131 +662,125 @@ def validate_mcq_independently(
     # Stage 2: Pure deterministic local validation (zero external cloud dependencies)
     return True, "Passed local deterministic validation.", None, "local"
 
+# ----------------- Canonical Local Qwen Generation Pipeline -----------------
+
+QWEN_BATCH_SIZE = max(1, int(os.environ.get('QWEN_BATCH_SIZE', '2')))
+QWEN_BATCH_TIMEOUT = float(os.environ.get('QWEN_BATCH_TIMEOUT', '240'))
+MAX_ATTEMPTS_PER_BATCH = 2  # first attempt + at most one retry for the missing questions
+AVOID_LIST_SIZE = 20  # existing/earlier questions sent to Qwen as "do not repeat"
+RETRY_TEMPERATURE = 0.85  # more variety on the single retry so it does not reproduce the rejected output
+
+
+class GenerationCancelled(Exception):
+    """Raised between batches when the caller (e.g. a worker that lost its job lease) cancels."""
+
+
+def _build_syllabus_scope(chapter_metadata: Optional[Dict[str, Any]]) -> str:
+    """Compact syllabus scope (chapter description + allowed topics) passed to Qwen."""
+    if not chapter_metadata:
+        return ''
+    parts = []
+    if chapter_metadata.get('chapterDescription'):
+        parts.append(str(chapter_metadata['chapterDescription']).strip())
+    topics = [str(t).strip() for t in (chapter_metadata.get('allowedTopics') or []) if str(t).strip()]
+    if topics:
+        parts.append("Allowed topics: " + "; ".join(topics[:8]))
+    return "\n".join(parts)
+
+
 def generate_batched_mcqs(
     subject: str,
+    chapter: str,
+    count: int,
     topic: str = '',
-    count: int = 5,
     exam_level: str = 'CA Foundation',
     difficulty: str = 'ICAI Exam Standard',
     question_category: str = 'Direct Questions',
     question_speed: str = 'Quick',
-    context_chunks: Optional[List[Dict[str, Any]]] = None,
-    chapter_metadata: Optional[Dict[str, Any]] = None,
-    chapter: str = '',
-    chapter_id: str = '',
     admin_description: str = '',
+    syllabus_scope: str = '',
     previous_concepts: Optional[List[str]] = None,
-    data: Optional[Dict[str, Any]] = None,
-    on_provider_event: Optional[Any] = None,
-    job_id: Optional[str] = None,
-    preferred_provider: Optional[str] = None,
-    missing_slots_info: Optional[List[Dict[str, Any]]] = None
+    timeout: Optional[float] = None,
+    temperature: Optional[float] = None
 ) -> Tuple[List[Dict[str, Any]], str, str]:
     """
-    Generate multiple candidate MCQs in a single batched API call.
-    Returns (list_of_parsed_dicts, provider_id, model_name).
+    One Ollama call for a single small batch of candidate MCQs.
+    Returns (normalized_candidates, provider_id, model_name). Raises on timeout / Ollama errors.
     """
-    context_text = ""
-    if context_chunks:
-        c_parts = []
-        for c in context_chunks:
-            hd = c.get('heading', '')
-            txt = c.get('text', '') or c.get('content', '') or c.get('extractedText', '')
-            c_parts.append(f"### {hd}\n{txt}" if hd else txt)
-        context_text = "\n\n".join(c_parts)[:4000]
-
-    prev_summary = ""
-    if previous_concepts:
-        prev_summary = "\n".join([f"- {s}" for s in previous_concepts[-8:]])
-
-    user_prompt = build_batched_generation_user_prompt(
+    valid_mcqs, telemetry = local_qwen_service.generate_mcqs(
         subject=subject,
-        exam_level=exam_level,
-        topic=topic,
+        chapter=chapter,
         count=count,
+        exam_level=exam_level,
         difficulty=difficulty,
+        topic=topic,
         question_category=question_category,
         question_speed=question_speed,
-        context=context_text,
-        chapter_metadata=chapter_metadata,
-        chapter_name=chapter,
-        chapter_id=chapter_id,
         admin_description=admin_description,
-        previous_concepts_summary=prev_summary,
-        missing_slots_info=missing_slots_info
+        syllabus_scope=syllabus_scope,
+        previous_concepts=previous_concepts,
+        timeout=timeout,
+        temperature=temperature
     )
+    return valid_mcqs, 'local_qwen', telemetry.get('model') or local_qwen_service.OLLAMA_MODEL
 
-    sys_inst = build_generation_system_instruction(
-        question_category=question_category,
-        question_speed=question_speed
-    )
-
-    try:
-        valid_mcqs, telemetry = local_qwen_service.generate_mcqs(
-            subject=subject,
-            chapter=chapter or (chapter_metadata.get('chapterName') if chapter_metadata else topic),
-            count=count,
-            exam_level=exam_level,
-            difficulty=difficulty,
-            topic=topic,
-            question_category=question_category,
-            question_speed=question_speed,
-            admin_description=admin_description,
-            previous_concepts=previous_concepts
-        )
-        return valid_mcqs, 'local_qwen', 'qwen3:8b'
-    except Exception as batch_err:
-        print(f"[LOCAL_QWEN_BATCHED_GEN_ERROR] {batch_err}", flush=True)
-        raise
 
 def _build_question_record(
     q_data: Dict[str, Any],
-    slot_num: int,
+    number: int,
     test_id: Optional[str],
     job_id: Optional[str],
-    marks_per_correct: float,
-    negative_marks: float,
+    subject: str,
+    chapter: str,
+    chapter_id: str,
+    topic: str,
+    exam_level: str,
+    difficulty: str,
     question_category: str,
     question_speed: str,
-    difficulty: str,
-    canonical_ch_name: str,
-    canonical_ch_id: str,
-    topic: str,
+    marks_per_correct: float,
+    negative_marks_per_wrong: float,
+    platform_xp: float,
     gen_prov: str,
     gen_model: str,
-    val_prov: str,
-    platform_xp: float = 10.0,
-    **kwargs
+    val_prov: str
 ) -> Dict[str, Any]:
     q_text = str(q_data.get('question') or q_data.get('text') or '').strip()
-    c_ans = str(q_data.get('correctAnswer') or q_data.get('correctOption', 'A')).strip().upper()
+    c_ans = str(q_data.get('correctAnswer') or q_data.get('correctOption') or 'A').strip().upper()
+    options = {k: q_data.get(f'option{k}', '') for k in ('A', 'B', 'C', 'D')}
     now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
     return {
         'id': f"q-ai-{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}",
         'testId': test_id or "tst-ai-pending",
-        'number': slot_num,
+        'number': number,
         'text': q_text,
         'question': q_text,
         'questionType': 'text',
         'questionImage': None,
-        'optionA': q_data.get('optionA', ''),
-        'optionB': q_data.get('optionB', ''),
-        'optionC': q_data.get('optionC', ''),
-        'optionD': q_data.get('optionD', ''),
+        'optionA': options['A'],
+        'optionB': options['B'],
+        'optionC': options['C'],
+        'optionD': options['D'],
+        'options': options,
         'optionTypes': {'A': 'text', 'B': 'text', 'C': 'text', 'D': 'text'},
         'optionImages': {'A': None, 'B': None, 'C': None, 'D': None},
         'correctOption': c_ans,
         'correctAnswer': c_ans,
         'marks': float(marks_per_correct),
-        'negativeMarks': float(negative_marks),
+        'negativeMarks': float(negative_marks_per_wrong),
         'points': float(platform_xp),
         'xp': float(platform_xp),
         'explanation': q_data.get('explanation', ''),
         'category': question_category,
+        'questionCategory': question_category,
         'difficulty': difficulty,
         'estimatedThinkingLevel': question_speed,
-        'chapter': canonical_ch_name,
-        'chapterId': canonical_ch_id,
+        'questionSpeed': question_speed,
+        'subject': subject,
+        'chapter': chapter,
+        'chapterId': chapter_id,
+        'topic': topic,
+        'examLevel': exam_level,
         'isDraft': False,
         'aiSuggestedAnswer': c_ans,
         'isDuplicate': False,
@@ -1261,7 +789,7 @@ def _build_question_record(
         'generationJobId': job_id or f"job-{int(time.time()*1000)}",
         'sourceDocId': q_data.get('sourceDocId'),
         'sourceContentId': q_data.get('sourceContentId'),
-        'sourceChapter': q_data.get('sourceChapter') or canonical_ch_name,
+        'sourceChapter': q_data.get('sourceChapter') or chapter,
         'sourceTopic': q_data.get('sourceTopic') or topic,
         'sourcePage': q_data.get('sourcePage'),
         'groundingScore': q_data.get('groundingScore'),
@@ -1273,64 +801,73 @@ def _build_question_record(
         'updatedAt': now_iso
     }
 
+
 def generate_exact_mcqs_pipeline(
+    *,
     subject: str,
+    chapter: str = '',
     topic: str = '',
     count: int = 5,
     exam_level: str = 'CA Foundation',
     difficulty: str = 'ICAI Exam Standard',
     question_category: str = 'Direct Questions',
     question_speed: str = 'Quick',
-    test_id: Optional[str] = None,
-    source_documents: Optional[List[Dict[str, Any]]] = None,
-    existing_questions: Optional[List[Dict[str, Any]]] = None,
-    job_id: Optional[str] = None,
     marks_per_correct: float = 2.0,
-    negative_marks: float = 0.5,
-    negative_marks_per_wrong: Optional[float] = None,
-    platform_xp: Optional[float] = None,
-    progress_callback: Optional[Any] = None,
-    data: Optional[Dict[str, Any]] = None,
-    exam_level_id: str = '',
-    subject_id: str = '',
-    chapter: str = '',
+    negative_marks_per_wrong: float = 0.5,
+    platform_xp: float = 10.0,
+    test_id: Optional[str] = None,
+    job_id: Optional[str] = None,
     chapter_id: str = '',
-    on_question_verified: Optional[Any] = None,
-    admin_description: str = '',
     chapter_metadata: Optional[Dict[str, Any]] = None,
-    allow_ungrounded: bool = True,
-    **kwargs
+    admin_description: str = '',
+    existing_questions: Optional[List[Dict[str, Any]]] = None,
+    source_documents: Optional[List[Dict[str, Any]]] = None,
+    data: Optional[Dict[str, Any]] = None,
+    start_number: int = 1,
+    batch_size: Optional[int] = None,
+    batch_timeout: Optional[float] = None,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    on_question_verified: Optional[Callable[..., None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
-    Resilient production generation pipeline:
-    - Powered by Local Qwen3 8B via Ollama.
-    - Bounded execution (Pass 1 batched call + at most 1 repair pass).
-    - Learned syllabus knowledge based on Subject + Chapter + CA level (PDF upload not required).
-    - Never stalls: failing slots are marked FAILED and the job finishes with COMPLETED, PARTIAL, or FAILED.
-    - Zero infinite loops: strictly bounded attempts.
-    """
-    if negative_marks_per_wrong is not None:
-        try:
-            negative_marks = float(negative_marks_per_wrong)
-        except (ValueError, TypeError):
-            pass
+    The single canonical MCQ generation pipeline (Local Qwen3 8B via Ollama).
 
-    if existing_questions is None:
-        existing_questions = []
+    Keyword-only arguments: an unknown or misspelled parameter raises TypeError instead of
+    being silently ignored.
+
+    Questions are generated in small batches (QWEN_BATCH_SIZE, default 2). Each batch is:
+    generate -> parse -> validate -> deduplicate -> on_question_verified (save) -> progress_callback.
+    A batch that yields fewer valid questions than requested is retried once for the missing
+    questions only; successful questions are never regenerated. Every Ollama call is bounded by
+    batch_timeout. The run ends COMPLETED, PARTIAL or FAILED - it never loops indefinitely.
+
+    start_number offsets question numbering when resuming a job that already has saved questions.
+    cancel_check is polled before every Ollama call; returning True raises GenerationCancelled.
+    """
+    size = max(1, int(batch_size or QWEN_BATCH_SIZE))
+    per_call_timeout = float(batch_timeout or QWEN_BATCH_TIMEOUT)
+    existing_questions = list(existing_questions or [])
 
     generated_questions: List[Dict[str, Any]] = []
-    concept_summaries: List[str] = []
-    question_statuses: List[Dict[str, Any]] = []
+    existing_texts: List[str] = [
+        str(q.get('text') or q.get('question') or '')[:120] for q in existing_questions if isinstance(q, dict)
+    ]
+    existing_texts = [t for t in existing_texts if t.strip()]
 
-    for s in range(1, count + 1):
-        question_statuses.append({
-            'number': s,
-            'status': 'pending',
-            'error': None,
-            'provider': None
-        })
+    def _avoid_list() -> List[str]:
+        """Questions Qwen must not repeat: everything from this run plus the newest bank questions."""
+        own = [q['text'][:120] for q in generated_questions]
+        room = max(0, AVOID_LIST_SIZE - len(own))
+        return (existing_texts[-room:] if room else []) + own[-AVOID_LIST_SIZE:]
 
-    metrics = {
+    question_statuses: List[Dict[str, Any]] = [
+        {'number': start_number + i, 'status': 'pending', 'error': None, 'provider': None}
+        for i in range(count)
+    ]
+    batch_sizes: List[int] = [min(size, count - i) for i in range(0, count, size)]
+
+    metrics: Dict[str, Any] = {
         'requestedCount': count,
         'generatedCount': 0,
         'failedCount': 0,
@@ -1338,10 +875,13 @@ def generate_exact_mcqs_pipeline(
         'rejectedValidation': 0,
         'regenerationAttempts': 0,
         'regenerationCount': 0,
-        'geminiGenerationCalls': 0,
         'qwenGenerationCalls': 0,
         'validationCalls': 0,
         'validationProvider': 'local',
+        'batchSize': size,
+        'batchesTotal': len(batch_sizes),
+        'batchesFailed': 0,
+        'topUpCalls': 0,
         'providersUsed': set(),
         'validationProvidersUsed': set(),
         'questionStatuses': question_statuses,
@@ -1351,7 +891,39 @@ def generate_exact_mcqs_pipeline(
         'endTime': None
     }
 
-    # 1. Authoritative Chapter Metadata Resolution & Fail-Fast
+    def _finish(final_status: Optional[str] = None, error: Optional[str] = None):
+        metrics['generatedCount'] = len(generated_questions)
+        metrics['failedCount'] = count - len(generated_questions)
+        metrics['regenerationCount'] = metrics['regenerationAttempts']
+        metrics['endTime'] = time.time()
+        metrics['durationSeconds'] = round(metrics['endTime'] - metrics['startTime'], 1)
+        metrics['providersUsed'] = sorted(metrics['providersUsed'])
+        metrics['validationProvidersUsed'] = sorted(metrics['validationProvidersUsed'])
+        if error:
+            metrics['error'] = error
+        metrics['finalStatus'] = final_status or (
+            'COMPLETED' if len(generated_questions) == count else ('PARTIAL' if generated_questions else 'FAILED'))
+        print(f"[BATCH_COMPLETED] batchId={job_id} total={count} verified={len(generated_questions)} "
+              f"failed={metrics['failedCount']} duration={metrics['durationSeconds']}s status={metrics['finalStatus']}", flush=True)
+        return generated_questions, metrics
+
+    def _report(stage: str, status_text: str, batch_index: int):
+        if not progress_callback:
+            return
+        verified = len(generated_questions)
+        progress_callback({
+            'stage': stage,
+            'status': status_text,
+            'verifiedCount': verified,
+            'total': count,
+            'current': min(count, verified + 1),
+            'batchIndex': batch_index,
+            'totalBatches': len(batch_sizes),
+            'progressPct': min(95, 5 + int((verified / count) * 90)) if count else 95,
+            'questionStatuses': [dict(s) for s in question_statuses]
+        })
+
+    # 1. Authoritative chapter metadata (subject/chapter protection) - fail fast if unresolvable
     resolved_ch_meta = chapter_metadata or syllabus_hierarchy.get_authoritative_chapter_metadata(
         chapter_id=chapter_id,
         chapter_name=chapter or topic,
@@ -1359,27 +931,36 @@ def generate_exact_mcqs_pipeline(
         exam_level=exam_level,
         data=data
     )
-
     if not resolved_ch_meta:
-        err_msg = f"CHAPTER_METADATA_MISSING: Authoritative syllabus metadata is missing or could not be resolved for chapterId='{chapter_id}', chapter='{chapter}', subject='{subject}'."
+        err_msg = (f"CHAPTER_METADATA_MISSING: Authoritative syllabus metadata could not be resolved for "
+                   f"chapterId='{chapter_id}', chapter='{chapter}', subject='{subject}'.")
         print(f"[CHAPTER_METADATA_ERROR] {err_msg}", flush=True)
         for s in question_statuses:
             s['status'] = 'failed'
             s['error'] = err_msg
-        metrics['failedCount'] = count
-        metrics['endTime'] = time.time()
-        metrics['durationSeconds'] = round(metrics['endTime'] - metrics['startTime'], 1)
-        metrics['error'] = err_msg
-        metrics['finalStatus'] = 'FAILED'
-        return [], metrics
+        return _finish('FAILED', err_msg)
 
     canonical_ch_id = resolved_ch_meta['chapterId']
     canonical_ch_name = resolved_ch_meta['chapterName']
     canonical_subject = resolved_ch_meta.get('subject', subject)
     canonical_exam_level = resolved_ch_meta.get('examLevel', exam_level)
+    syllabus_scope = _build_syllabus_scope(resolved_ch_meta)
 
-    # 2. Retrieve Stored Syllabus Knowledge Base Chunks if available (Optional Grounded Context)
-    all_docs = source_documents if (source_documents is not None) else (data.get('ai_source_documents', []) if data and isinstance(data, dict) else [])
+    # Sub-topic rotation: when the admin asked for the whole chapter (topic empty or = chapter name),
+    # each batch focuses on a different allowed topic so batches and consecutive jobs don't converge
+    # on the same classic questions (which the duplicate check would then reject).
+    allowed_topics = [str(t).strip() for t in (resolved_ch_meta.get('allowedTopics') or []) if str(t).strip()]
+    rotate_topics = bool(allowed_topics) and (not topic.strip() or topic.strip().lower() == canonical_ch_name.lower())
+    topic_offset = len(existing_texts) // size
+
+    def _focus_topic(batch_index: int, attempt: int) -> str:
+        if not rotate_topics:
+            return topic
+        return allowed_topics[(topic_offset + batch_index - 1 + attempt - 1) % len(allowed_topics)]
+
+    # 2. Optional grounding chunks from uploaded syllabus documents (server-side callers only)
+    all_docs = source_documents if source_documents is not None else (
+        data.get('ai_source_documents', []) if isinstance(data, dict) else [])
     active_chunks = ai_document_indexer.retrieve_relevant_chunks(
         documents=all_docs,
         query_topic=topic,
@@ -1388,188 +969,53 @@ def generate_exact_mcqs_pipeline(
         chapter_id=canonical_ch_id,
         exam_level=canonical_exam_level,
         max_chunks=6
-    )
+    ) if all_docs else []
 
-    is_mocked_generator = (
-        hasattr(generate_single_mcq, 'mock') or
-        isinstance(generate_single_mcq, unittest.mock.Mock) or
-        type(generate_single_mcq).__name__ in ('MagicMock', 'Mock')
-    )
-    if not active_chunks:
-        print(f"[LOCAL_QWEN_GENERATION] Generating from Qwen3 8B learned syllabus knowledge for '{canonical_ch_name}' ({canonical_ch_id}).", flush=True)
-    else:
-        print(f"[GROUNDED_SYLLABUS] Retrieved {len(active_chunks)} authoritative syllabus chunks for '{canonical_ch_name}' ({canonical_ch_id}).", flush=True)
+    print(f"[BATCH START] batchId={job_id} total={count} batches={batch_sizes} chapter='{canonical_ch_name}' "
+          f"({canonical_ch_id}) subject='{canonical_subject}' timeout={per_call_timeout}s", flush=True)
 
-    print(f"[BATCH START] batchId={job_id} total={count} chapter='{canonical_ch_name}' ({canonical_ch_id}) category={question_category} speed={question_speed}", flush=True)
-
-    # --- Mode A: Mocked generator loop for unit test compatibility ---
-    if is_mocked_generator:
-        MAX_ATTEMPTS_PER_SLOT = 2
-        for slot_idx in range(1, count + 1):
-            slot_status_obj = question_statuses[slot_idx - 1]
-            slot_success = False
-            for attempt in range(1, MAX_ATTEMPTS_PER_SLOT + 1):
-                slot_status_obj['attempt'] = attempt
-                slot_status_obj['status'] = 'retrying' if attempt > 1 else 'generating'
-                if progress_callback:
-                    try:
-                        progress_callback({
-                            'stage': slot_status_obj['status'],
-                            'current': slot_idx,
-                            'verifiedCount': len(generated_questions),
-                            'total': count,
-                            'status': f"Generating question {slot_idx} of {count}...",
-                            'progressPct': min(95, int((len(generated_questions) / count) * 85) + 5),
-                            'questionStatuses': list(question_statuses)
-                        })
-                    except Exception:
-                        pass
-                try:
-                    q_candidate, gen_prov, gen_model = generate_single_mcq(
-                        subject=canonical_subject,
-                        topic=topic,
-                        exam_level=canonical_exam_level,
-                        difficulty=difficulty,
-                        question_category=question_category,
-                        question_speed=question_speed,
-                        context_chunks=active_chunks if active_chunks else None,
-                        chapter_metadata=resolved_ch_meta,
-                        chapter=canonical_ch_name,
-                        chapter_id=canonical_ch_id,
-                        previous_concepts=concept_summaries,
-                        data=data,
-                        slot_number=slot_idx,
-                        total_count=count,
-                        attempt_number=attempt,
-                        job_id=job_id,
-                        question_number=slot_idx,
-                        admin_description=admin_description
-                    )
-                    metrics['providersUsed'].add(gen_prov)
-                    metrics['geminiGenerationCalls'] += 1
-                except Exception as gen_err:
-                    slot_status_obj['error'] = f"Generation error: {gen_err}"
-                    metrics['regenerationAttempts'] += 1
-                    continue
-
-                slot_status_obj['status'] = 'validating'
-                is_valid, val_reason, fix, val_prov = validate_mcq_independently(
-                    q_data=q_candidate,
-                    subject=canonical_subject,
-                    topic=topic,
-                    exam_level=canonical_exam_level,
-                    difficulty=difficulty,
-                    question_category=question_category,
-                    question_speed=question_speed,
-                    existing_questions=existing_questions,
-                    current_batch_questions=generated_questions,
-                    data=data,
-                    chapter=canonical_ch_name,
-                    chapter_id=canonical_ch_id,
-                    admin_description=admin_description,
-                    source_chunks=active_chunks
-                )
-                metrics['validationCalls'] += 1
-                metrics['validationProvidersUsed'].add(val_prov)
-
-                if is_valid:
-                    final_q = q_candidate
-                    if fix and isinstance(fix, dict):
-                        final_q.update(fix)
-                    q_rec = _build_question_record(
-                        q_data=final_q,
-                        slot_num=len(generated_questions) + 1,
-                        test_id=test_id,
-                        job_id=job_id,
-                        marks_per_correct=marks_per_correct,
-                        negative_marks=negative_marks,
-                        question_category=question_category,
-                        question_speed=question_speed,
-                        difficulty=difficulty,
-                        canonical_ch_name=canonical_ch_name,
-                        canonical_ch_id=canonical_ch_id,
-                        topic=topic,
-                        gen_prov=gen_prov,
-                        gen_model=gen_model,
-                        val_prov=val_prov,
-                        platform_xp=platform_xp if platform_xp is not None else 10.0
-                    )
-                    generated_questions.append(q_rec)
-                    concept_summaries.append(q_rec['text'][:120])
-                    slot_status_obj['status'] = 'saved'
-                    slot_status_obj['provider'] = gen_prov
-                    slot_status_obj['error'] = None
-                    slot_success = True
-                    if on_question_verified:
-                        try:
-                            on_question_verified(q_rec, generated_questions, len(generated_questions), count)
-                        except Exception:
-                            pass
-                    break
-                else:
-                    slot_status_obj['error'] = val_reason
-                    metrics['rejectedValidation'] += 1
-                    metrics['regenerationAttempts'] += 1
-
-            if not slot_success:
-                slot_status_obj['status'] = 'failed'
-                if not slot_status_obj.get('error'):
-                    slot_status_obj['error'] = f"Exceeded maximum repair attempts ({MAX_ATTEMPTS_PER_SLOT}) on Question {slot_idx}."
-
-    # --- Mode B: Production Batched Generation (Pass 1 + At Most 1 Repair Pass) ---
-    else:
-        # Pass 1: Batched generation for all requested questions
-        for s in question_statuses:
-            s['status'] = 'generating'
-        if progress_callback:
-            try:
-                progress_callback({
-                    'stage': 'generating',
-                    'current': 1,
-                    'verifiedCount': 0,
-                    'total': count,
-                    'status': f"Generating {count} MCQs in single batched request...",
-                    'progressPct': 10,
-                    'questionStatuses': list(question_statuses)
-                })
-            except Exception:
-                pass
-
-        candidate_questions: List[Dict[str, Any]] = []
-        gen_prov = 'local_qwen'
-        gen_model = 'qwen3:8b'
+    def _attempt(slots: List[Dict[str, Any]], request_count: int, temperature: Optional[float],
+                 focus_topic: str, label: str, batch_index: int) -> Tuple[int, Optional[str]]:
+        """One Ollama call: generate -> validate -> dedupe -> save into the given empty slots.
+        Returns (accepted, last_error)."""
+        if cancel_check and cancel_check():
+            raise GenerationCancelled(f"Generation cancelled before {label}.")
+        for s in slots:
+            s['status'] = 'retrying' if temperature else 'generating'
+        done = len(generated_questions)
+        _report('generating',
+                f"{label}: generating questions {start_number + done}-{start_number + done + len(slots) - 1} "
+                f"of {start_number + count - 1} with Local Qwen3...", batch_index)
+        metrics['qwenGenerationCalls'] += 1
         try:
-            candidate_questions, gen_prov, gen_model = generate_batched_mcqs(
+            candidates, gen_prov, gen_model = generate_batched_mcqs(
                 subject=canonical_subject,
-                topic=topic,
-                count=count,
+                chapter=canonical_ch_name,
+                count=request_count,
+                temperature=temperature,
+                topic=focus_topic,
                 exam_level=canonical_exam_level,
                 difficulty=difficulty,
                 question_category=question_category,
                 question_speed=question_speed,
-                context_chunks=active_chunks if active_chunks else None,
-                chapter_metadata=resolved_ch_meta,
-                chapter=canonical_ch_name,
-                chapter_id=canonical_ch_id,
                 admin_description=admin_description,
-                previous_concepts=concept_summaries,
-                data=data,
-                job_id=job_id
+                syllabus_scope=syllabus_scope,
+                previous_concepts=_avoid_list(),
+                timeout=per_call_timeout
             )
             metrics['providersUsed'].add(gen_prov)
-            metrics['qwenGenerationCalls'] = metrics.get('qwenGenerationCalls', 0) + 1
-        except Exception as batch_err:
-            print(f"[BATCH_GEN_PASS1_ERROR] {batch_err}", flush=True)
-            candidate_questions = []
+        except Exception as gen_err:
+            print(f"[BATCH_GEN_ERROR] {label}: {gen_err}", flush=True)
+            return 0, f"Generation error: {gen_err}"
 
-        # Validation Pass 1
-        for idx, cand_q in enumerate(candidate_questions):
-            if len(generated_questions) >= count:
+        _report('validating', f"{label}: validating {len(candidates)} candidate MCQ(s)...", batch_index)
+        accepted = 0
+        last_error = None
+        for cand_q in candidates:
+            if accepted >= len(slots):
                 break
-            slot_idx = len(generated_questions) + 1
-            slot_status_obj = question_statuses[slot_idx - 1]
-            slot_status_obj['status'] = 'validating'
-
+            slot = slots[accepted]
+            slot['status'] = 'validating'
             is_valid, val_reason, fix, val_prov = validate_mcq_independently(
                 q_data=cand_q,
                 subject=canonical_subject,
@@ -1588,161 +1034,98 @@ def generate_exact_mcqs_pipeline(
             )
             metrics['validationCalls'] += 1
             metrics['validationProvidersUsed'].add(val_prov)
-
-            if is_valid:
-                final_q = cand_q
-                if fix and isinstance(fix, dict):
-                    final_q.update(fix)
-                q_rec = _build_question_record(
-                    q_data=final_q,
-                    slot_num=len(generated_questions) + 1,
-                    test_id=test_id,
-                    job_id=job_id,
-                    marks_per_correct=marks_per_correct,
-                    negative_marks=negative_marks,
-                    question_category=question_category,
-                    question_speed=question_speed,
-                    difficulty=difficulty,
-                    canonical_ch_name=canonical_ch_name,
-                    canonical_ch_id=canonical_ch_id,
-                    topic=topic,
-                    gen_prov=gen_prov,
-                    gen_model=gen_model,
-                    val_prov=val_prov,
-                    platform_xp=platform_xp if platform_xp is not None else 10.0
-                )
-                generated_questions.append(q_rec)
-                concept_summaries.append(q_rec['text'][:120])
-                slot_status_obj['status'] = 'saved'
-                slot_status_obj['provider'] = gen_prov
-                slot_status_obj['error'] = None
-
-                if on_question_verified:
-                    try:
-                        on_question_verified(q_rec, generated_questions, len(generated_questions), count)
-                    except Exception:
-                        pass
-                print(f"[QUESTION_VERIFIED] batchId={job_id} questionNumber={slot_idx} provider={gen_prov} verifiedTotal={len(generated_questions)}/{count}", flush=True)
-            else:
-                slot_status_obj['status'] = 'retrying'
-                slot_status_obj['error'] = val_reason
-                metrics['rejectedValidation'] += 1
-
-        # Pass 2: Bounded Repair / Fill Pass (at most ONE repair call)
-        missing_count = count - len(generated_questions)
-        if missing_count > 0:
-            print(f"[BATCH_REPAIR_PASS] Requesting {missing_count} repair/fill MCQs...", flush=True)
-            repair_candidates: List[Dict[str, Any]] = []
-            try:
-                repair_candidates, r_prov, r_model = generate_batched_mcqs(
-                    subject=canonical_subject,
-                    topic=topic,
-                    count=missing_count,
-                    exam_level=canonical_exam_level,
-                    difficulty=difficulty,
-                    question_category=question_category,
-                    question_speed=question_speed,
-                    context_chunks=active_chunks if active_chunks else None,
-                    chapter_metadata=resolved_ch_meta,
-                    chapter=canonical_ch_name,
-                    chapter_id=canonical_ch_id,
-                    admin_description=admin_description,
-                    previous_concepts=concept_summaries,
-                    data=data,
-                    job_id=job_id
-                )
-                metrics['providersUsed'].add(r_prov)
-                metrics['qwenGenerationCalls'] = metrics.get('qwenGenerationCalls', 0) + 1
-                metrics['regenerationAttempts'] += 1
-                metrics['regenerationCount'] += 1
-            except Exception as r_err:
-                print(f"[BATCH_REPAIR_PASS_ERROR] {r_err}", flush=True)
-                repair_candidates = []
-
-            for cand_q in repair_candidates:
-                if len(generated_questions) >= count:
-                    break
-                slot_idx = len(generated_questions) + 1
-                slot_status_obj = question_statuses[slot_idx - 1]
-                slot_status_obj['status'] = 'validating'
-
-                is_valid, val_reason, fix, val_prov = validate_mcq_independently(
-                    q_data=cand_q,
-                    subject=canonical_subject,
-                    topic=topic,
-                    exam_level=canonical_exam_level,
-                    difficulty=difficulty,
-                    question_category=question_category,
-                    question_speed=question_speed,
-                    existing_questions=existing_questions,
-                    current_batch_questions=generated_questions,
-                    data=data,
-                    chapter=canonical_ch_name,
-                    chapter_id=canonical_ch_id,
-                    admin_description=admin_description,
-                    source_chunks=active_chunks
-                )
-                metrics['validationCalls'] += 1
-                metrics['validationProvidersUsed'].add(val_prov)
-
-                if is_valid:
-                    final_q = cand_q
-                    if fix and isinstance(fix, dict):
-                        final_q.update(fix)
-                    q_rec = _build_question_record(
-                        q_data=final_q,
-                        slot_num=len(generated_questions) + 1,
-                        test_id=test_id,
-                        job_id=job_id,
-                        marks_per_correct=marks_per_correct,
-                        negative_marks=negative_marks,
-                        question_category=question_category,
-                        question_speed=question_speed,
-                        difficulty=difficulty,
-                        canonical_ch_name=canonical_ch_name,
-                        canonical_ch_id=canonical_ch_id,
-                        topic=topic,
-                        gen_prov=r_prov,
-                        gen_model=r_model,
-                        val_prov=val_prov,
-                        platform_xp=platform_xp if platform_xp is not None else 10.0
-                    )
-                    generated_questions.append(q_rec)
-                    concept_summaries.append(q_rec['text'][:120])
-                    slot_status_obj['status'] = 'saved'
-                    slot_status_obj['provider'] = r_prov
-                    slot_status_obj['error'] = None
-
-                    if on_question_verified:
-                        try:
-                            on_question_verified(q_rec, generated_questions, len(generated_questions), count)
-                        except Exception:
-                            pass
-                    print(f"[QUESTION_VERIFIED] batchId={job_id} questionNumber={slot_idx} provider={r_prov} verifiedTotal={len(generated_questions)}/{count}", flush=True)
+            if not is_valid:
+                print(f"[QUESTION_REJECTED] batchId={job_id} {label} reason={val_reason}", flush=True)
+                last_error = val_reason
+                slot['status'] = 'retrying'
+                slot['error'] = val_reason
+                if 'duplicate' in str(val_reason).lower():
+                    metrics['rejectedDuplicates'] += 1
                 else:
-                    slot_status_obj['status'] = 'failed'
-                    slot_status_obj['error'] = val_reason
+                    metrics['rejectedValidation'] += 1
+                continue
 
-        # Mark all unfulfilled slots as failed
-        for s in question_statuses:
-            if s.get('status') != 'saved':
+            if fix and isinstance(fix, dict):
+                cand_q.update(fix)
+            q_rec = _build_question_record(
+                q_data=cand_q,
+                number=slot['number'],
+                test_id=test_id,
+                job_id=job_id,
+                subject=canonical_subject,
+                chapter=canonical_ch_name,
+                chapter_id=canonical_ch_id,
+                topic=topic,
+                exam_level=canonical_exam_level,
+                difficulty=difficulty,
+                question_category=question_category,
+                question_speed=question_speed,
+                marks_per_correct=marks_per_correct,
+                negative_marks_per_wrong=negative_marks_per_wrong,
+                platform_xp=platform_xp,
+                gen_prov=gen_prov,
+                gen_model=gen_model,
+                val_prov=val_prov
+            )
+            generated_questions.append(q_rec)
+            accepted += 1
+            slot.update({'status': 'saved', 'provider': gen_prov, 'error': None})
+            print(f"[QUESTION_VERIFIED] batchId={job_id} questionNumber={q_rec['number']} "
+                  f"verifiedTotal={len(generated_questions)}/{count}", flush=True)
+            if on_question_verified:
+                on_question_verified(q_rec, generated_questions, len(generated_questions), count)
+        return accepted, last_error
+
+    # 3. Main batches: first attempt + at most one retry, filling only the batch's empty slots
+    slot_cursor = 0
+    for batch_index, batch_target in enumerate(batch_sizes, start=1):
+        batch_slots = question_statuses[slot_cursor:slot_cursor + batch_target]
+        slot_cursor += batch_target
+        filled = 0
+        last_error: Optional[str] = None
+
+        for attempt in range(1, MAX_ATTEMPTS_PER_BATCH + 1):
+            if filled >= batch_target:
+                break
+            if attempt > 1:
+                metrics['regenerationAttempts'] += 1
+            # A retry requests a full batch (still <= batch size) at a higher temperature, so a
+            # duplicate/invalid candidate has a spare; only the empty slots are filled.
+            accepted, err = _attempt(
+                batch_slots[filled:],
+                request_count=(batch_target - filled) if attempt == 1 else size,
+                temperature=RETRY_TEMPERATURE if attempt > 1 else None,
+                focus_topic=_focus_topic(batch_index, attempt),
+                label=f"Batch {batch_index}/{len(batch_sizes)}{' (retry)' if attempt > 1 else ''}",
+                batch_index=batch_index)
+            filled += accepted
+            last_error = err or last_error
+
+        if filled < batch_target:
+            metrics['batchesFailed'] += 1
+            for s in batch_slots[filled:]:
                 s['status'] = 'failed'
-                if not s.get('error'):
-                    s['error'] = 'Repair budget exhausted / validation rejected'
+                s['error'] = last_error or 'Batch retry budget exhausted'
 
-    metrics['generatedCount'] = len(generated_questions)
-    metrics['failedCount'] = count - len(generated_questions)
-    metrics['regenerationCount'] = metrics['regenerationAttempts']
-    metrics['questionStatuses'] = question_statuses
-    metrics['endTime'] = time.time()
-    metrics['durationSeconds'] = round(metrics['endTime'] - metrics['startTime'], 1)
-    metrics['providersUsed'] = list(metrics['providersUsed'])
-    metrics['validationProvidersUsed'] = list(metrics['validationProvidersUsed'])
+        _report('batch_complete',
+                f"Verified {len(generated_questions)} of {count} MCQs (batch {batch_index}/{len(batch_sizes)} done)",
+                batch_index)
 
-    final_status = 'COMPLETED' if len(generated_questions) == count else ('PARTIAL' if len(generated_questions) > 0 else 'FAILED')
-    metrics['finalStatus'] = final_status
+    # 4. Bounded top-up: at most one extra call per failed batch, to fill slots whose batch
+    #    exhausted its retry (typically duplicates of the question bank). Never loops.
+    for topup_index in range(1, metrics['batchesFailed'] + 1):
+        empty = [s for s in question_statuses if s['status'] == 'failed']
+        if not empty:
+            break
+        metrics['topUpCalls'] += 1
+        metrics['regenerationAttempts'] += 1
+        _attempt(empty[:size], request_count=size, temperature=RETRY_TEMPERATURE,
+                 focus_topic=_focus_topic(len(batch_sizes) + topup_index, 2),
+                 label=f"Top-up {topup_index}/{metrics['batchesFailed']}", batch_index=len(batch_sizes))
+        for s in empty[:size]:
+            if s['status'] != 'saved':
+                s['status'] = 'failed'
+        _report('batch_complete', f"Verified {len(generated_questions)} of {count} MCQs (top-up {topup_index} done)",
+                len(batch_sizes))
 
-    print(f"[BATCH_COMPLETED] batchId={job_id} total={count} verified={len(generated_questions)} failed={metrics['failedCount']} totalDuration={metrics['durationSeconds']}s status={final_status}", flush=True)
-    print(f"[BATCH COMPLETE] batchId={job_id} totalGenerated={len(generated_questions)} totalFailed={metrics['failedCount']} duration={metrics['durationSeconds']}s status={final_status}", flush=True)
-
-    return generated_questions, metrics
+    return _finish()

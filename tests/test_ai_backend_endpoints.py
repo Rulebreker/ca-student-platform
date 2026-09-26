@@ -32,16 +32,12 @@ def test_ai_suite():
     print(f"Status: {status}, Success: {res.get('success')}")
     assert status == 200, f"Expected 200, got {status}"
     providers = res.get('providers', [])
-    assert len(providers) >= 5, f"Expected at least 5 providers, got {len(providers)}"
+    assert [p['id'] for p in providers] == ['local_qwen'], f"Only Local Qwen may be listed, got {[p['id'] for p in providers]}"
     for p in providers:
-        print(f"  Provider {p['id']}: name={p['name']}, maskedKey={p.get('maskedKey')}, status={p.get('status')}")
-        # Masking verification: raw keys must NEVER appear
-        assert 'AQ.Ab8' not in p.get('maskedKey', ''), "Security breach: raw key exposed!"
-        assert 'sk-or' not in p.get('maskedKey', ''), "Security breach: raw key exposed!"
-        assert 'gsk_' not in p.get('maskedKey', ''), "Security breach: raw key exposed!"
+        print(f"  Provider {p['id']}: name={p['name']}, status={p.get('status')}, latency={p.get('lastLatencyMs')}")
 
-    print("\n=== STEP 2: Test POST /api/admin/ai/providers/test ===")
-    status, res = api_request('/api/admin/ai/providers/test', method='POST', body={'providerId': 'groq'})
+    print("\n=== STEP 2: Test POST /api/admin/ai/providers/test (requires a running Local Qwen Worker) ===")
+    status, res = api_request('/api/admin/ai/providers/test', method='POST', body={'providerId': 'local_qwen'})
     print(f"Status: {status}, Result: {res}")
     assert status == 200, f"Expected 200, got {status}"
     assert res.get('success') is True, f"Provider test failed: {res}"
@@ -106,7 +102,7 @@ def test_ai_suite():
 
     print("\n=== STEP 7: Polling Job Status ===")
     completed = False
-    for attempt in range(40):
+    for attempt in range(150):
         time.sleep(2)
         s_code, s_res = api_request(f'/api/admin/ai/jobs/status?jobId={job_id}')
         job = s_res.get('job', {})
@@ -114,7 +110,7 @@ def test_ai_suite():
         if job.get('status') == 'COMPLETED':
             completed = True
             break
-        elif job.get('status') == 'FAILED':
+        elif job.get('status') in ('FAILED', 'EXPIRED', 'PARTIAL'):
             raise AssertionError(f"Job failed: {job.get('error')}")
 
     assert completed, "Job did not complete in time"

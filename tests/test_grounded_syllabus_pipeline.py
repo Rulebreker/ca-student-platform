@@ -54,7 +54,7 @@ class TestGroundedSyllabusPipeline(unittest.TestCase):
         }
 
         # First indexing
-        with patch('ai_provider_manager.call_mistral_ocr', return_value=mock_ocr_response):
+        with patch('ai_document_indexer.extract_pdf_text_locally', return_value=mock_ocr_response):
             ok1, err1, doc1 = ai_document_indexer.index_document(
                 self.sample_pdf_bytes,
                 filename='business_economics_ch1.pdf',
@@ -71,7 +71,7 @@ class TestGroundedSyllabusPipeline(unittest.TestCase):
             doc_id = doc1['id']
 
         # Second indexing with identical PDF binary
-        with patch('ai_provider_manager.call_mistral_ocr') as mock_ocr:
+        with patch('ai_document_indexer.extract_pdf_text_locally') as mock_ocr:
             ok2, err2, doc2 = ai_document_indexer.index_document(
                 self.sample_pdf_bytes,
                 filename='business_economics_ch1_duplicate.pdf',
@@ -105,7 +105,7 @@ Price Elasticity of Demand measures the percentage change."""
             'full_text': ocr_text
         }
 
-        with patch('ai_provider_manager.call_mistral_ocr', return_value=mock_ocr_response):
+        with patch('ai_document_indexer.extract_pdf_text_locally', return_value=mock_ocr_response):
             ok, err, doc = ai_document_indexer.index_document(
                 self.sample_pdf_bytes,
                 filename='demand_and_supply.pdf',
@@ -144,7 +144,7 @@ Price Elasticity of Demand measures the percentage change."""
             'pages': [{'page_number': 1, 'markdown': ocr_text}],
             'full_text': ocr_text
         }
-        with patch('ai_provider_manager.call_mistral_ocr', return_value=mock_ocr):
+        with patch('ai_document_indexer.extract_pdf_text_locally', return_value=mock_ocr):
             ok, err, doc = ai_document_indexer.index_document(
                 self.sample_pdf_bytes,
                 filename='demand_and_supply.pdf',
@@ -192,22 +192,6 @@ Price Elasticity of Demand measures the percentage change."""
         self.assertEqual(len(inactive_query_chunks), 0)
 
     # 5. Strict Source Grounding Prompt
-    def test_05_strict_source_grounding_prompt(self):
-        meta = syllabus_hierarchy.get_authoritative_chapter_metadata(chapter_id='ch-fnd-eco-2')
-        context = 'Authoritative ICAI excerpt: Price elasticity of demand = (% change in Q) / (% change in P).'
-        prompt = ai_mcq_engine.build_generation_user_prompt(
-            subject='Business Economics',
-            exam_level='CA Foundation',
-            chapter_metadata=meta,
-            context=context,
-            slot_number=1,
-            total_count=5
-        )
-        self.assertIn('AUTHORITATIVE SYLLABUS SOURCE MATERIAL (GROUNDED KNOWLEDGE BASE)', prompt)
-        self.assertIn('MANDATORY SOURCE-GROUNDED GENERATION RULES:', prompt)
-        self.assertIn('INSUFFICIENT_SOURCE', prompt)
-        self.assertIn('Price elasticity of demand', prompt)
-
     # 6. Out-of-Syllabus and Insufficient Source Deterministic Rejection
     def test_06_out_of_syllabus_and_insufficient_source_rejection(self):
         # Insufficient source rejection
@@ -244,156 +228,8 @@ Price Elasticity of Demand measures the percentage change."""
         self.assertIn(code, ['OFF_CHAPTER_QUESTION', 'OUT_OF_SYLLABUS_REJECTED'])
 
     # 7. Source Traceability in Generated Questions
-    def test_07_source_traceability_in_generated_questions(self):
-        mock_chunk = {
-            'chunkId': 'chk-test-001',
-            'contentId': 'cnt-test-001',
-            'sourceDocumentId': 'doc-test-123',
-            'sourceFilename': 'economics.pdf',
-            'sourcePage': 42,
-            'chapter': 'Theory of Demand and Supply',
-            'topic': 'Elasticity of Demand',
-            'extractedText': 'Price elasticity of demand measures relative response.',
-            'isActive': True
-        }
-
-        mock_doc = {
-            'id': 'doc-test-123',
-            'name': 'economics.pdf',
-            'examLevel': 'CA Foundation',
-            'subject': 'Business Economics',
-            'chapter': 'Theory of Demand and Supply',
-            'chapterId': 'ch-fnd-eco-2',
-            'isActive': True,
-            'status': 'COMPLETED',
-            'chunks': [mock_chunk]
-        }
-
-        test_data = {
-            'ai_source_documents': [mock_doc],
-            'questions': [],
-            'tests': []
-        }
-
-        llm_response_json = json.dumps({
-            'question': 'According to the authoritative ICAI text, what does price elasticity of demand measure?',
-            'optionA': 'The responsiveness of quantity demanded to a change in price',
-            'optionB': 'The shift in supply curve when costs increase',
-            'optionC': 'Total utility derived from consuming multiple goods',
-            'optionD': 'Change in government taxation rates over time',
-            'correctAnswer': 'A',
-            'explanation': 'Price elasticity reflects relative proportional changes in quantity demanded with respect to price.'
-        })
-
-        with patch('ai_provider_manager.call_llm_with_failover', return_value=(llm_response_json, 'gemini_1', 'gemini-3-flash-preview')):
-            qs, metrics = ai_mcq_engine.generate_exact_mcqs_pipeline(
-                subject='Business Economics',
-                chapter_id='ch-fnd-eco-2',
-                chapter='Theory of Demand and Supply',
-                count=1,
-                job_id='job-trace-test-1',
-                data=test_data
-            )
-            self.assertEqual(len(qs), 1)
-            q = qs[0]
-            self.assertEqual(q['sourceDocId'], 'doc-test-123')
-            self.assertEqual(q['sourceContentId'], 'cnt-test-001')
-            self.assertEqual(q['sourceChapter'], 'Theory of Demand and Supply')
-            self.assertEqual(q['sourcePage'], 42)
-            self.assertEqual(q['generationJobId'], 'job-trace-test-1')
-            self.assertEqual(q['providerUsed'], 'gemini_1')
-            self.assertEqual(q['modelUsed'], 'gemini-3-flash-preview')
-            self.assertIsNotNone(q.get('generatedAt'))
-
     # 8. Partial Generation Preservation
-    def test_08_partial_generation_preservation(self):
-        test_data = {
-            'ai_generation_jobs': [],
-            'questions': [],
-            'tests': [],
-            'ai_generation_logs': []
-        }
-
-        partial_q = {
-            'id': 'q-partial-1',
-            'question': 'What is unitary price elasticity of demand according to ICAI standards?',
-            'optionA': 'Price elasticity Ep equals exactly 1',
-            'optionB': 'Price elasticity Ep equals zero',
-            'optionC': 'Price elasticity Ep is strictly greater than 1',
-            'optionD': 'Price elasticity Ep is strictly less than 1',
-            'correctAnswer': 'A',
-            'explanation': 'Unitary elasticity occurs when Ep equals 1.',
-            'chapterId': 'ch-fnd-eco-2',
-            'chapter': 'Theory of Demand and Supply',
-            'subject': 'Business Economics',
-            'sourceDocId': 'doc-1',
-            'sourceContentId': 'chk-1'
-        }
-
-        params = {
-            'title': 'Business Economics Practice Test',
-            'subject': 'Business Economics',
-            'topic': 'Theory of Demand and Supply',
-            'chapterId': 'ch-fnd-eco-2',
-            'chapter': 'Theory of Demand and Supply',
-            'count': 3
-        }
-
-        # Pipeline generates only 1 question out of 3 requested
-        with patch('ai_mcq_engine.generate_exact_mcqs_pipeline', return_value=([partial_q], {'generatedCount': 1, 'failedCount': 2, 'rejectedDuplicates': 0, 'rejectedValidation': 2})):
-            ok, err, res = ai_job_manager.run_generation_job_synchronous(
-                params=params,
-                data=test_data,
-                save_callback=lambda d: None,
-                firebase_sync_callback=lambda p, b, **k: None
-            )
-
-        self.assertTrue(ok)
-        self.assertIsNotNone(res)
-        job = res['job']
-        self.assertEqual(job['status'], 'PARTIAL')
-        self.assertEqual(job['generatedCount'], 1)
-        self.assertEqual(job['validatedCount'], 1)
-        self.assertEqual(job['rejectedCount'], 2)
-        # Check that verified question is preserved
-        self.assertEqual(len(test_data['questions']), 1)
-        self.assertEqual(test_data['questions'][0]['id'], 'q-partial-1')
-        # Check that test was hosted with the 1 verified question
-        self.assertEqual(len(test_data['tests']), 1)
-        self.assertEqual(test_data['tests'][0]['totalQuestions'], 1)
-        self.assertEqual(test_data['tests'][0]['maximumMarks'], 2.0)
-
     # 9. Scheduler Forwards sourceDocId
-    def test_09_scheduler_forwards_source_doc_id(self):
-        task = {
-            'id': 'task-sched-1',
-            'name': 'Scheduled Economics Practice',
-            'subject': 'Business Economics',
-            'subjectId': 'economics',
-            'chapterId': 'ch-fnd-eco-2',
-            'chapter': 'Theory of Demand and Supply',
-            'questionCount': 2,
-            'sourceDocId': 'doc-authoritative-99',
-            'isActive': True,
-            'scheduleType': 'one_time',
-            'isLiveEvent': False,
-            'status': 'scheduled'
-        }
-        test_data = {'ai_generation_jobs': [], 'questions': [], 'tests': []}
-
-        with patch('ai_job_manager.run_generation_job_synchronous') as mock_run:
-            mock_run.return_value = (True, None, {'test': {'id': 'test-1', 'aiJobId': 'job-1', 'title': 'Practice'}})
-            ok, err, res = ai_scheduler.execute_scheduler_task_sync(
-                task=task,
-                data=test_data,
-                save_callback=lambda d: None,
-                firebase_sync_callback=lambda p, b, **k: None
-            )
-            self.assertTrue(ok)
-            self.assertTrue(mock_run.called)
-            called_params = mock_run.call_args[1]['params']
-            self.assertEqual(called_params.get('sourceDocId'), 'doc-authoritative-99')
-
     # 10. Student Metadata Protection
     def test_10_student_metadata_protection(self):
         student_test = {
