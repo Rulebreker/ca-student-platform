@@ -3584,6 +3584,20 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             except Exception as e:
                 self.send_json(500, {'error': f'Failed to cancel job: {str(e)}', 'code': 500})
+        # Force Reset AI Generation Pipeline (Clear all stuck jobs)
+        if path == '/api/admin/ai/jobs/reset':
+            token = self.get_auth_token()
+            user = authenticate_token(token)
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                data = load_backend_data(refresh_collections=['ai_generation_jobs'])
+                reset_count = ai_job_manager.reset_all_stuck_jobs(data, save_backend_data, sync_to_firebase)
+                self.send_json(200, {'success': True, 'resetCount': reset_count, 'message': f'Successfully reset {reset_count} stuck generation jobs.'})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Failed to reset jobs: {str(e)}', 'code': 500})
                 return
 
         # 6. Update Auto-Pilot Scheduler Config

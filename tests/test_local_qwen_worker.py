@@ -379,20 +379,22 @@ class TestLocalQwenWorker(unittest.TestCase):
             self.assertTrue(sent_body[0]['queuedForWorker'])
             self.assertEqual(sent_body[0]['job']['status'], 'QUEUED')
 
-    @patch('ai_mcq_engine.generate_batched_mcqs')
-    def test_09_worker_process_job_signature_compatibility(self, mock_batch_gen):
+    @patch('local_qwen_engine._query_ollama')
+    def test_09_worker_process_job_signature_compatibility(self, mock_query):
         """Worker process_job passes parameters without unexpected keyword argument errors and preserves negative marking."""
-        mock_batch_gen.return_value = ([
+        mock_query.return_value = [
             {
                 'question': 'Which of the following describes the nature of Business Economics?',
-                'optionA': 'It is purely theoretical and abstract in nature',
-                'optionB': 'It is pragmatic and applied microeconomics with macro perspective',
-                'optionC': 'It ignores macroeconomic developments and focuses solely on costs',
-                'optionD': 'It is entirely based on mathematical models without business application',
-                'correctAnswer': 'B',
+                'options': {
+                    'A': 'It is purely theoretical and abstract in nature',
+                    'B': 'It is pragmatic and applied microeconomics with macro perspective',
+                    'C': 'It ignores macroeconomic developments and focuses solely on costs',
+                    'D': 'It is entirely based on mathematical models without business application'
+                },
+                'answer': 'B',
                 'explanation': 'Business Economics is pragmatic and incorporates both micro and macro economic aspects to solve business problems.'
             }
-        ], 'local_qwen', 'qwen3:8b')
+        ]
 
         worker = local_qwen_worker.LocalQwenWorker(
             server_url='http://127.0.0.1:8000',

@@ -191,9 +191,68 @@ def get_active_generation_job(data: Optional[Dict[str, Any]] = None) -> Optional
                     for t in data.get('tests', []):
                         if t.get('id') == test_id:
                             t['questions'] = list(verified_qs)
+
+            # Persist the expired job to MongoDB Atlas so it never resurfaces as stuck
+            try:
+                import mongodb_manager
+                mongodb_manager.sync_document_to_mongo(f"ai_generation_jobs/{j_id}", j, method='PUT')
+            except Exception:
+                pass
             continue
 
     return None
+
+def reset_all_stuck_jobs(
+    data: Optional[Dict[str, Any]] = None,
+    save_callback: Optional[Any] = None,
+    sync_callback: Optional[Any] = None
+) -> int:
+    """Forcefully cancel all QUEUED, PROCESSING, or GENERATING jobs and clear memory cache."""
+    active_statuses = {'QUEUED', 'PROCESSING', 'GENERATING', 'CLAIMED', 'STARTING'}
+    reset_count = 0
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    with _jobs_lock:
+        for j_id, j in list(_active_jobs.items()):
+            if j.get('status') in active_statuses:
+                j['status'] = 'FAILED'
+                j['error'] = 'Pipeline reset by administrator'
+                j['currentStage'] = 'Reset by administrator'
+                j['updatedAt'] = now_iso
+                reset_count += 1
+                if sync_callback:
+                    try: sync_callback(f"ai_generation_jobs/{j_id}", j, method='PUT')
+                    except Exception: pass
+        _active_jobs.clear()
+
+    if data and isinstance(data, dict):
+        for j in data.get('ai_generation_jobs', []):
+            if isinstance(j, dict) and j.get('status') in active_statuses:
+                j['status'] = 'FAILED'
+                j['error'] = 'Pipeline reset by administrator'
+                j['currentStage'] = 'Reset by administrator'
+                j['updatedAt'] = now_iso
+                reset_count += 1
+                if sync_callback:
+                    try: sync_callback(f"ai_generation_jobs/{j.get('id')}", j, method='PUT')
+                    except Exception: pass
+        if save_callback:
+            try: save_callback(data)
+            except Exception: pass
+
+    # Also directly update MongoDB Atlas
+    try:
+        import mongodb_manager
+        db = mongodb_manager.get_database()
+        if db is not None:
+            db.ai_generation_jobs.update_many(
+                {'status': {'$in': list(active_statuses)}},
+                {'$set': {'status': 'FAILED', 'error': 'Pipeline reset by administrator', 'currentStage': 'Reset by administrator'}}
+            )
+    except Exception:
+        pass
+
+    return reset_count
 
 def cancel_generation_job(
     job_id: str,
@@ -1033,7 +1092,31 @@ def complete_job_from_worker(
 
     job_record = get_job_status(job_id, data)
     if not job_record:
-        return False, "Job not found", None
+        try:
+            import mongodb_manager
+            db = mongodb_manager.get_database()
+            if db is not None:
+                j_doc = db.ai_generation_jobs.find_one({'_id': job_id})
+                if j_doc:
+                    j_doc.pop('_id', None)
+                    job_record = j_doc
+        except Exception:
+            pass
+
+    if not job_record:
+        job_record = {
+            'id': job_id,
+            'title': (questions[0].get('subject') if questions else 'AI') + ' Practice Test',
+            'subject': questions[0].get('subject') if questions else 'Business Economics',
+            'topic': questions[0].get('topic') if questions else 'General',
+            'chapter': questions[0].get('chapter') if questions else '',
+            'examLevel': questions[0].get('examLevel') if questions else 'CA Foundation',
+            'count': len(questions),
+            'status': 'PROCESSING',
+            'createdAt': completed_iso
+        }
+        if data is not None and isinstance(data, dict):
+            data.setdefault('ai_generation_jobs', []).append(job_record)
 
     # Idempotency check: if job already COMPLETED, return cleanly without duplicating
     if job_record.get('status') == 'COMPLETED':

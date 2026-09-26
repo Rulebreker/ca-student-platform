@@ -7804,9 +7804,19 @@ class AdminDashboard {
                     Initializing Generation Pipeline...
                   </h4>
                 </div>
-                <span id="ai-pipeline-badge" class="px-2.5 py-1 text-xs font-black rounded-lg bg-rose-100 text-rose-800 border border-rose-200">
-                  GENERATING
-                </span>
+                <div class="flex items-center gap-2">
+                  <button 
+                    type="button"
+                    onclick="window.adminDashboard.forceResetPipeline()" 
+                    class="px-2.5 py-1 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300 border border-slate-300 rounded-lg transition-all flex items-center gap-1 shadow-sm"
+                    title="Click if generation is stuck to instantly reset"
+                  >
+                    <i data-lucide="rotate-ccw" class="w-3.5 h-3.5 inline"></i> Reset Pipeline
+                  </button>
+                  <span id="ai-pipeline-badge" class="px-2.5 py-1 text-xs font-black rounded-lg bg-rose-100 text-rose-800 border border-rose-200">
+                    GENERATING
+                  </span>
+                </div>
               </div>
 
               <!-- Animated Progress Bar -->
@@ -7881,6 +7891,15 @@ class AdminDashboard {
       const data = await resp.json();
       if (data.hasActiveJob && data.job) {
         const job = data.job;
+        // Ignore stale jobs whose heartbeat or creation is older than 90s
+        const lastHb = job.lastHeartbeatAt ? new Date(job.lastHeartbeatAt).getTime() : 0;
+        const now = Date.now();
+        if (lastHb > 0 && (now - lastHb) > 90000) {
+          console.warn('[STALE_JOB_DETECTED] Automatically releasing stuck job:', job.id);
+          this.forceResetPipeline(true);
+          return;
+        }
+
         this.aiActiveJobId = job.id;
         const idlePanel = document.getElementById('ai-idle-state');
         const activePanel = document.getElementById('ai-active-pipeline');
@@ -7889,13 +7908,38 @@ class AdminDashboard {
         if (activePanel) activePanel.classList.remove('hidden');
         if (btn) {
           btn.disabled = true;
-          btn.innerHTML = `<span class="inline-block animate-spin mr-2">⚙</span> Generating (${job.currentQuestionIndex || 0}/${job.totalQuestions || 10})...`;
+          btn.innerHTML = `<span class="inline-block animate-spin mr-2">⚙</span> Generating (${job.generatedCount || job.currentQuestionIndex || 0}/${job.totalQuestions || 10})...`;
         }
         this.pollAiJobStatus(job.id, job.totalQuestions || 10);
       }
     } catch (err) {
       console.warn('[CHECK_ACTIVE_JOB_ERROR]', err);
     }
+  }
+
+  async forceResetPipeline(silent = false) {
+    if (this.aiJobPollInterval) {
+      clearInterval(this.aiJobPollInterval);
+      this.aiJobPollInterval = null;
+    }
+    this._isGenerating = false;
+    this.aiActiveJobId = null;
+
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+
+    try {
+      await fetch('/api/admin/ai/jobs/reset', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!silent && window.app && window.app.showToast) {
+        window.app.showToast('AI Generation Pipeline reset successfully.', 'success');
+      }
+    } catch (e) {
+      console.warn('Reset request error:', e);
+    }
+    this.resetAiGenerateView();
   }
 
   handleAiPdfFilesSelected(files) {

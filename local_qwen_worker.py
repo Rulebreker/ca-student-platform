@@ -34,6 +34,7 @@ from typing import Dict, Any, Optional, Tuple
 
 # Import local AI engine and Ollama service modules
 import local_qwen_service
+import local_qwen_engine
 import ai_mcq_engine
 import syllabus_hierarchy
 
@@ -222,37 +223,27 @@ class LocalQwenWorker:
 
         # Progress bridge to send stage updates to production
         def _on_progress(p_info):
-            stage = p_info.get('status') or 'Generating questions with Local Qwen3...'
-            progress = p_info.get('progressPct', 25)
+            stage = p_info.get('stage') or p_info.get('status') or 'Generating questions with Local Qwen3...'
+            progress = p_info.get('progress') or p_info.get('progressPct') or 25
             verified = p_info.get('verifiedCount', 0)
             print(f"  -> [{progress}%] {stage} (Verified: {verified}/{count})", flush=True)
             self.report_progress(job_id, stage, progress, verified)
 
-        chapter_metadata = syllabus_hierarchy.get_authoritative_chapter_metadata(
-            chapter_id=job.get('chapterId', ''),
-            chapter_name=topic,
-            exam_level=exam_level
-        )
-
         t_start = time.time()
         try:
-            questions, metrics = ai_mcq_engine.generate_exact_mcqs_pipeline(
+            questions, metrics = local_qwen_engine.generate_exact_10_mcqs(
                 subject=subject,
+                chapter=topic,
                 topic=topic,
-                count=count,
                 exam_level=exam_level,
                 difficulty=difficulty,
-                question_category=question_category,
-                question_speed=question_speed,
-                test_id=test_id,
-                source_documents=[],
-                existing_questions=[],
-                job_id=job_id,
+                target_count=count,
                 marks_per_correct=marks_per_correct,
                 negative_marks=negative_marks,
-                negative_marks_per_wrong=negative_marks,
                 platform_xp=platform_xp,
-                chapter_metadata=chapter_metadata,
+                test_id=test_id,
+                job_id=job_id,
+                category=question_category,
                 progress_callback=_on_progress
             )
 
