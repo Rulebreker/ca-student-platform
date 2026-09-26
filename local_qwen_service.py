@@ -23,7 +23,7 @@ from typing import Dict, Any, List, Optional, Tuple
 
 OLLAMA_BASE_URL = os.environ.get('OLLAMA_BASE_URL', 'http://127.0.0.1:11434').rstrip('/')
 OLLAMA_MODEL = os.environ.get('OLLAMA_MODEL', 'qwen3:8b')
-OLLAMA_TIMEOUT = float(os.environ.get('OLLAMA_TIMEOUT', '180.0'))
+OLLAMA_TIMEOUT = float(os.environ.get('OLLAMA_TIMEOUT', '360.0'))
 
 DEFAULT_SYSTEM_PROMPT = """You are an expert Chartered Accountancy (CA) examination question creator and subject matter authority.
 Your task is to generate high-quality Multiple Choice Questions (MCQs) for the Institute of Chartered Accountants of India (ICAI) curriculum.

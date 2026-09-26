@@ -163,33 +163,18 @@ def validate_and_sanitize_upload(raw_data_or_b64, allowed_types=None, max_size_b
 
     return True, None, binary_data, detected_mime, safe_ext
 
-FIREBASE_RTDB_URL = "https://excellenceca-45a9d-default-rtdb.firebaseio.com"
+import mongodb_manager
 
-def sync_to_firebase(path, data, method='PUT', sync=None):
-    """Sync updates to Firebase Realtime Database via REST API.
-    In serverless environments (Vercel / Lambda), background daemon threads freeze 
-    immediately upon HTTP response, so we execute synchronously with a tight timeout."""
-    def _do_sync():
-        try:
-            import urllib.request
-            url = f"{FIREBASE_RTDB_URL}/{path.lstrip('/')}.json"
-            if method == 'DELETE' and data is None:
-                body = None
-            else:
-                body = json.dumps(data).encode('utf-8')
-            req = urllib.request.Request(url, data=body, method=method)
-            req.add_header('Content-Type', 'application/json')
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                pass
-        except Exception as e:
-            # Silent fallback if offline / timed out
-            pass
-
+def sync_to_database(path, data, method='PUT', sync=None):
+    """Sync updates to MongoDB Atlas natively, maintaining local JSON mirror."""
     should_sync = sync if sync is not None else IS_SERVERLESS
-    if should_sync:
-        _do_sync()
-    else:
-        threading.Thread(target=_do_sync, daemon=True).start()
+    try:
+        mongodb_manager.sync_document_to_mongo(path, data, method=method, sync=should_sync)
+    except Exception:
+        pass
+
+# Maintain backward compatibility alias for legacy callers
+sync_to_firebase = sync_to_database
 
 INITIAL_USERS = {
     'adminrulebreker@rulebrekerdothunter.com': {
@@ -1048,22 +1033,16 @@ def sync_collections_from_firebase(data, collections=None, min_interval=1.0):
     if not keys_to_fetch:
         return data
 
-    import urllib.request
     updated = False
     for key in keys_to_fetch:
         try:
-            req = urllib.request.Request(f"{FIREBASE_RTDB_URL}/{key}.json")
-            with urllib.request.urlopen(req, timeout=2.5) as resp:
-                raw_bytes = resp.read()
-                if not raw_bytes:
-                    continue
-                cloud_data = json.loads(raw_bytes.decode('utf-8'))
-                if cloud_data is None:
-                    if key == 'ai_scheduled_tasks':
-                        data['ai_scheduled_tasks'] = []
-                        _collection_last_synced[key] = now
-                        updated = True
-                    continue
+            cloud_data = mongodb_manager.load_collection_from_mongo(key)
+            if cloud_data is None:
+                if key == 'ai_scheduled_tasks' and mongodb_manager.is_database_connected():
+                    data['ai_scheduled_tasks'] = []
+                    _collection_last_synced[key] = now
+                    updated = True
+                continue
 
                 if key == 'users':
                     if isinstance(cloud_data, dict):
@@ -1391,21 +1370,15 @@ def load_backend_data(refresh_collections=None, min_interval=10.0):
                     with open(DATA_STORE_FILE, 'r', encoding='utf-8') as f:
                         cur_data = json.load(f)
                     
-                    import urllib.request
-                    # Cold start hydration: Only fetch critical dynamic collections from Firebase.
-                    # Heavy static collections (questions, documents, jobs, logs) are already present from bundled seed.
+                    import mongodb_manager
+                    # Cold start hydration: Fetch critical dynamic collections from MongoDB Atlas.
                     keys_to_fetch = ['revoked_users', 'revoked_tokens', 'users', 'subscriptions', 'ai_autopilot_config', 'ai_providers', 'ai_scheduled_tasks']
                     
                     for key in keys_to_fetch:
                         try:
-                            req = urllib.request.Request(f"{FIREBASE_RTDB_URL}/{key}.json")
-                            with urllib.request.urlopen(req, timeout=3.0) as resp:
-                                raw_bytes = resp.read()
-                                if not raw_bytes:
-                                    continue
-                                cloud_data = json.loads(raw_bytes.decode('utf-8'))
-                                if not cloud_data:
-                                    continue
+                            cloud_data = mongodb_manager.load_collection_from_mongo(key)
+                            if not cloud_data:
+                                continue
 
                                 if key == 'revoked_users':
                                     if isinstance(cloud_data, (dict, list)):
@@ -3150,22 +3123,21 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             data = load_backend_data()
             job = ai_job_manager.get_job_status(job_id, data)
-            # Scoped job poll: fetch ONLY this single job from Firebase if active or not cached locally
+            # Scoped job poll: fetch ONLY this single job from MongoDB Atlas if active or not cached locally
             if not job or job.get('status') in ('running', 'QUEUED', 'CLAIMING', 'GENERATING', 'STARTING'):
                 try:
-                    req = urllib.request.Request(f"{FIREBASE_RTDB_URL}/ai_generation_jobs/{job_id}.json")
-                    with urllib.request.urlopen(req, timeout=2.0) as resp:
-                        raw = resp.read()
-                        if raw:
-                            remote_job = json.loads(raw.decode('utf-8'))
-                            if remote_job and isinstance(remote_job, dict):
-                                job = remote_job
-                                jobs_list = data.setdefault('ai_generation_jobs', [])
-                                idx = next((i for i, j in enumerate(jobs_list) if isinstance(j, dict) and j.get('id') == job_id), None)
-                                if idx is not None:
-                                    jobs_list[idx] = remote_job
-                                else:
-                                    jobs_list.insert(0, remote_job)
+                    db = mongodb_manager.get_database()
+                    if db is not None:
+                        remote_job = db.ai_generation_jobs.find_one({'_id': job_id})
+                        if remote_job:
+                            remote_job.pop('_id', None)
+                            job = remote_job
+                            jobs_list = data.setdefault('ai_generation_jobs', [])
+                            idx = next((i for i, j in enumerate(jobs_list) if isinstance(j, dict) and j.get('id') == job_id), None)
+                            if idx is not None:
+                                jobs_list[idx] = remote_job
+                            else:
+                                jobs_list.insert(0, remote_job)
                 except Exception:
                     pass
             if job:
