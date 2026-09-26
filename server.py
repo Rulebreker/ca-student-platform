@@ -1864,6 +1864,23 @@ def check_opportunistic_scheduler_tick():
         except Exception as e:
             print(f"[SCHEDULER_OPPORTUNISTIC_WARN] {e}", flush=True)
 
+TEACHER_PRIVILEGE_KEYS = ('canGradeCopies', 'canUploadTests', 'canUploadLectures', 'canViewStudents')
+MAX_AVATAR_BYTES = 300 * 1024
+
+def _clean_teacher_privileges(raw):
+    raw = raw if isinstance(raw, dict) else {}
+    return {k: bool(raw.get(k)) for k in TEACHER_PRIVILEGE_KEYS}
+
+def _clean_avatar(raw):
+    """An https URL or a data:image/* URL under MAX_AVATAR_BYTES; None when invalid."""
+    val = str(raw or '').strip()
+    if val.startswith('https://') and len(val) < 2048:
+        return val
+    raster = ('data:image/png;base64,', 'data:image/jpeg;base64,', 'data:image/jpg;base64,', 'data:image/webp;base64,', 'data:image/gif;base64,')
+    if val.startswith(raster) and len(val) <= MAX_AVATAR_BYTES * 4 // 3 + 64:
+        return val
+    return None
+
 def is_authorized_ai_worker(token):
     """Local Qwen Worker auth: ONLY the dedicated AI_WORKER_SECRET (admin tokens are not accepted).
     Fails closed when AI_WORKER_SECRET is not configured."""
@@ -4924,6 +4941,13 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     'referralCount': 0,
                     'createdAt': datetime.now(timezone.utc).isoformat()
                 }
+                if raw_role == 'teacher':
+                    new_user['privileges'] = _clean_teacher_privileges(post_data.get('privileges'))
+                    new_user['assignedSubjects'] = [str(s) for s in (post_data.get('assignedSubjects') or []) if s][:50]
+                if post_data.get('avatar'):
+                    avatar = _clean_avatar(post_data.get('avatar'))
+                    if avatar:
+                        new_user['avatar'] = avatar
 
                 # Clear any prior revocation tombstones for explicitly provisioned user
                 for rev_id in [user_id.lower(), raw_email, raw_uname]:
@@ -4951,6 +4975,66 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             except Exception as e:
                 self.send_json(400, {'success': False, 'error': f'Invalid user provisioning payload: {str(e)}'})
+                return
+
+        # Admin: update a student's details or a teacher's privileges (replaces browser -> Firebase writes)
+        if path == '/api/admin/users/update':
+            admin_user = authenticate_token(self.get_auth_token())
+            if not admin_user or admin_user.get('role') != 'admin':
+                self.send_json(403, {'success': False, 'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                user_id = str(req_data.get('userId') or req_data.get('id') or '').strip()
+                if not user_id:
+                    self.send_json(400, {'success': False, 'error': 'userId is required.', 'code': 400})
+                    return
+
+                data = load_backend_data(refresh_collections=['users'])
+                users_dict = data.get('users', {})
+                key = next((k for k, u in users_dict.items() if u.get('id') == user_id), None)
+                if key is None:
+                    self.send_json(404, {'success': False, 'error': 'User not found.', 'code': 404})
+                    return
+                target = users_dict[key]
+
+                new_email = str(req_data.get('email') or target.get('email') or '').strip().lower()
+                new_uname = str(req_data.get('username') or '').strip().lower().lstrip('@')
+                for k, u in users_dict.items():
+                    if u.get('id') == user_id:
+                        continue
+                    if new_email and (u.get('email') or '').lower() == new_email:
+                        self.send_json(409, {'success': False, 'error': 'A user with this email already exists.'})
+                        return
+                    if new_uname and (u.get('username') or '').lower().lstrip('@') == new_uname:
+                        self.send_json(409, {'success': False, 'error': f'Username "@{new_uname}" is already taken.'})
+                        return
+
+                for field in ('name', 'phone', 'caLevel', 'registrationNo'):
+                    if field in req_data and req_data[field] is not None:
+                        target[field] = str(req_data[field]).strip()
+                if new_uname:
+                    target['username'] = new_uname
+                if 'privileges' in req_data and target.get('role') == 'teacher':
+                    target['privileges'] = _clean_teacher_privileges(req_data.get('privileges'))
+                if 'assignedSubjects' in req_data and target.get('role') == 'teacher':
+                    target['assignedSubjects'] = [str(s) for s in (req_data.get('assignedSubjects') or []) if s][:50]
+                target['updatedAt'] = datetime.now(timezone.utc).isoformat()
+
+                if new_email and new_email != key:
+                    target['email'] = new_email
+                    users_dict[new_email] = users_dict.pop(key)
+                save_backend_data(data)
+                sync_to_database(f"users/{user_id}", target, method='PUT', sync=True)
+
+                sanitized = dict(target)
+                sanitized.pop('password', None)
+                self.send_json(200, {'success': True, 'user': sanitized})
+                return
+            except Exception as e:
+                self.send_json(500, {'success': False, 'error': f'User update failed: {str(e)}', 'code': 500})
                 return
 
         if path == '/api/admin/users/delete':
@@ -5213,8 +5297,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
             token = self.get_auth_token()
             user = authenticate_token(token)
-            if not user or user.get('role') != 'admin':
-                self.send_json(403, {'error': 'Forbidden: Admin only.', 'code': 403})
+            is_uploading_teacher = bool(user and user.get('role') == 'teacher' and (user.get('privileges') or {}).get('canUploadTests'))
+            if not user or (user.get('role') != 'admin' and not is_uploading_teacher):
+                self.send_json(403, {'error': 'Forbidden: administrators or teachers with test-upload privilege only.', 'code': 403})
                 return
 
             try:
@@ -5923,6 +6008,13 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 if 'district' in req_data:
                     target_u['district'] = str(req_data['district']).strip()
                     target_u['city'] = str(req_data['district']).strip()
+                if 'avatar' in req_data:
+                    avatar = _clean_avatar(req_data.get('avatar'))
+                    if avatar is None:
+                        self.send_json(400, {'success': False, 'error': 'Avatar must be an image under 300 KB.', 'code': 400})
+                        return
+                    target_u['avatar'] = avatar
+                target_u['updatedAt'] = datetime.now(timezone.utc).isoformat()
 
                 save_backend_data(data)
 

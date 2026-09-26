@@ -6,18 +6,19 @@ finished job publishes (questions, test, generation log).
 
 ai_job_manager owns the job state machine; it reads and writes this state ONLY through this
 repository. The current implementation keeps it inside the backend data store dict
-(persisted via save_callback and mirrored via sync_callback).
+(persisted via save_callback, which writes changed documents through to MongoDB Atlas, and
+mirrored via sync_callback).
 
-Contract for the planned MySQL implementation (see docs/MYSQL_MIGRATION_PLAN.md):
+Repository contract (MongoDB collections):
     list_jobs, get, save                      -> ai_generation_jobs
     get_worker_status, save_worker_status     -> ai_worker_status
     existing_question_texts                   -> questions (read, duplicate detection)
     save_questions, save_test                 -> questions, tests
     add_generation_log                        -> ai_generation_logs
-    persist                                   -> transaction commit
-The read-modify-write sequences ai_job_manager performs under STORE_LOCK must become
-single transactions (claims/leases as `UPDATE ... WHERE id=? AND status=? AND worker_id=?`)
-so they stay atomic across serverless instances.
+    persist                                   -> write-through
+STORE_LOCK makes the read-modify-write sequences atomic within one process only. Across
+serverless instances, claims/lease renewals should become conditional MongoDB updates
+(find_one_and_update with {_id, status, workerId} filters).
 """
 
 import threading

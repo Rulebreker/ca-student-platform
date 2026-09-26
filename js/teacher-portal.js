@@ -542,7 +542,7 @@ class TeacherPortal {
     const description = document.getElementById('tp-desc').value.trim();
 
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const newAsg = {
         id: 'asg-' + Date.now(),
         title,
@@ -557,9 +557,14 @@ class TeacherPortal {
         createdAt: new Date().toISOString()
       };
 
-      window.store.addAssignment(newAsg);
-      window.app.closeModal('admin-generic-modal');
-      window.app.showToast('Question Paper PDF published successfully for students!', 'success');
+      try {
+        const saved = await window.store.persistAssignment(newAsg);
+        window.store.addAssignment({ ...newAsg, ...saved });
+        window.app.closeModal('admin-generic-modal');
+        window.app.showToast('Question Paper PDF published successfully for students!', 'success');
+      } catch (err) {
+        window.app.showToast(`Could not publish the paper: ${err.message}`, 'error');
+      }
       this.render();
     };
 

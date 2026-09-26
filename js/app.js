@@ -951,11 +951,22 @@ class App {
       return;
     }
 
+    if (file.size > 300 * 1024) {
+      this.showToast('Please choose an image smaller than 300 KB.', 'error');
+      return;
+    }
+
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const dataUrl = event.target.result;
       const user = window.auth.getCurrentUser();
       if (user) {
+        try {
+          await window.store.apiPost('/api/user/profile', { avatar: dataUrl });
+        } catch (err) {
+          this.showToast(`Could not save profile photo: ${err.message}`, 'error');
+          return;
+        }
         user.avatar = dataUrl;
         window.store.updateUser(user);
         window.auth.currentUser = user;

@@ -2147,9 +2147,6 @@ class AppStore {
     const users = this.getUsers();
     users.unshift(user);
     this.saveUsers(users);
-    if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
-      window.firebaseSync.saveUser(user);
-    }
   }
   updateUser(user) {
     if (!user || !user.id) return null;
@@ -2171,9 +2168,6 @@ class AppStore {
       updated = user;
     }
     this.saveUsers(users);
-    if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
-      window.firebaseSync.saveUser(updated);
-    }
     // If current logged-in user was updated, refresh session
     const current = this.getCurrentUser();
     if (current && current.id === updated.id) {
@@ -2272,9 +2266,6 @@ class AppStore {
       }
     }
 
-    if (window.firebaseSync && typeof window.firebaseSync.deleteUser === 'function') {
-      window.firebaseSync.deleteUser(id);
-    }
     return true;
   }
   toggleUserStatus(id) {
@@ -2378,9 +2369,6 @@ class AppStore {
       subjects.push(subject);
     }
     this.saveSubjects(subjects);
-    if (window.firebaseSync && typeof window.firebaseSync.saveSubject === 'function') {
-      window.firebaseSync.saveSubject(subject);
-    }
     const user = window.auth ? window.auth.getCurrentUser() : null;
     const token = user ? (user.token || user.email) : '';
     fetch('/api/subjects', {
@@ -2393,9 +2381,6 @@ class AppStore {
   deleteSubject(id) {
     const subjects = this.getSubjects().filter(s => s.id !== id);
     this.saveSubjects(subjects);
-    if (window.firebaseSync && typeof window.firebaseSync.deleteSubject === 'function') {
-      window.firebaseSync.deleteSubject(id);
-    }
     const user = window.auth ? window.auth.getCurrentUser() : null;
     const token = user ? (user.token || user.email) : '';
     fetch('/api/subjects/delete', {
@@ -2433,9 +2418,6 @@ class AppStore {
       targetBm = list[existingIdx];
       list.splice(existingIdx, 1);
       isNowBookmarked = false;
-      if (window.firebaseSync && typeof window.firebaseSync.deleteBookmark === 'function') {
-        window.firebaseSync.deleteBookmark(targetBm.id || `${userId}_${itemId}`);
-      }
     } else {
       targetBm = {
         id: 'bm-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
@@ -2446,9 +2428,6 @@ class AppStore {
       };
       list.unshift(targetBm);
       isNowBookmarked = true;
-      if (window.firebaseSync && typeof window.firebaseSync.saveBookmark === 'function') {
-        window.firebaseSync.saveBookmark(targetBm);
-      }
     }
 
     this.saveBookmarks(list);
@@ -2494,9 +2473,6 @@ class AppStore {
     list.unshift(notifObj);
     this.saveNotifications(list);
 
-    if (window.firebaseSync && typeof window.firebaseSync.saveNotification === 'function') {
-      window.firebaseSync.saveNotification(notifObj);
-    }
 
     fetch('/api/notifications', {
       method: 'POST',
@@ -2548,9 +2524,6 @@ class AppStore {
     if (item) {
       item.read = true;
       this.saveNotifications(list);
-      if (window.firebaseSync && typeof window.firebaseSync.markNotificationRead === 'function') {
-        window.firebaseSync.markNotificationRead(id);
-      }
       const user = window.auth ? window.auth.getCurrentUser() : null;
       const token = user ? (user.token || user.email) : '';
       fetch('/api/notifications/read', {
@@ -2571,9 +2544,6 @@ class AppStore {
       }
     });
     this.saveNotifications(list);
-    if (window.firebaseSync && typeof window.firebaseSync.markAllNotificationsRead === 'function') {
-      window.firebaseSync.markAllNotificationsRead(userId);
-    }
     const user = window.auth ? window.auth.getCurrentUser() : null;
     const token = user ? (user.token || user.email) : '';
     fetch('/api/notifications/read', {
@@ -2595,9 +2565,6 @@ class AppStore {
     list = list.filter(n => n.id !== id);
     this.saveNotifications(list);
 
-    if (window.firebaseSync && typeof window.firebaseSync.deleteNotification === 'function') {
-      window.firebaseSync.deleteNotification(id);
-    }
 
     const user = window.auth ? window.auth.getCurrentUser() : null;
     const token = user ? (user.token || user.email) : '';
@@ -2616,9 +2583,6 @@ class AppStore {
     list = list.filter(n => userId && n.userId !== userId);
     this.saveNotifications(list);
 
-    if (window.firebaseSync && typeof window.firebaseSync.clearNotifications === 'function') {
-      window.firebaseSync.clearNotifications(userId);
-    }
 
     const user = window.auth ? window.auth.getCurrentUser() : null;
     const token = user ? (user.token || user.email) : '';
@@ -2698,9 +2662,6 @@ class AppStore {
       this.adjustUserTotalXp(tx.userId, txObj.points);
     }
 
-    if (window.firebaseSync && typeof window.firebaseSync.saveXpTransaction === 'function') {
-      window.firebaseSync.saveXpTransaction(txObj);
-    }
 
     const user = window.auth ? window.auth.getCurrentUser() : null;
     const token = user ? (user.token || user.email) : '';
@@ -2856,9 +2817,6 @@ class AppStore {
       tests.unshift(tst);
     }
     this.saveTests(tests);
-    if (window.firebaseSync && typeof window.firebaseSync.saveTest === 'function') {
-      window.firebaseSync.saveTest(tst);
-    }
   }
   updateTest(tst) {
     if (!tst || !tst.id) return;
@@ -2870,18 +2828,12 @@ class AppStore {
       tests.unshift(tst);
     }
     this.saveTests(tests);
-    if (window.firebaseSync && typeof window.firebaseSync.saveTest === 'function') {
-      window.firebaseSync.saveTest(tst);
-    }
   }
   deleteTest(id) {
     const tests = this.getTests().filter(t => t.id !== id);
     this.saveTests(tests);
     const questions = this.getQuestions().filter(q => q.testId !== id);
     this.saveQuestions(questions);
-    if (window.firebaseSync && typeof window.firebaseSync.deleteTest === 'function') {
-      window.firebaseSync.deleteTest(id);
-    }
   }
 
   // Questions
@@ -2931,9 +2883,6 @@ class AppStore {
       questions.push(question);
     }
     this.saveQuestions(questions);
-    if (window.firebaseSync && typeof window.firebaseSync.saveQuestion === 'function') {
-      window.firebaseSync.saveQuestion(question);
-    }
   }
   updateQuestion(question) {
     if (!question || !question.id) return;
@@ -2945,17 +2894,11 @@ class AppStore {
       questions.push(question);
     }
     this.saveQuestions(questions);
-    if (window.firebaseSync && typeof window.firebaseSync.saveQuestion === 'function') {
-      window.firebaseSync.saveQuestion(question);
-    }
   }
   deleteQuestion(id) {
     if (!id) return;
     const questions = this.getQuestions().filter(q => q.id !== id);
     this.saveQuestions(questions);
-    if (window.firebaseSync && typeof window.firebaseSync.deleteQuestion === 'function') {
-      window.firebaseSync.deleteQuestion(id);
-    }
   }
 
 
@@ -3117,13 +3060,6 @@ class AppStore {
       assignments.unshift(asg);
     }
     this.saveAssignments(assignments);
-    if (window.firebaseSync && typeof window.firebaseSync.saveAssignment === 'function') {
-      try {
-        window.firebaseSync.saveAssignment(asg);
-      } catch (fbErr) {
-        console.warn('[Store] Firebase sync saveAssignment error:', fbErr);
-      }
-    }
   }
   updateAssignment(asg) {
     if (!asg) return;
@@ -3132,13 +3068,32 @@ class AppStore {
     });
     const assignments = this.getAssignments().map(a => a.id === asg.id ? asg : a);
     this.saveAssignments(assignments);
-    if (window.firebaseSync && typeof window.firebaseSync.saveAssignment === 'function') {
-      try {
-        window.firebaseSync.saveAssignment(asg);
-      } catch (fbErr) {
-        console.warn('[Store] Firebase sync updateAssignment error:', fbErr);
-      }
+  }
+  /**
+   * Persist a paper/assignment on the server (upsert by id). Resolves to the server's paper record,
+   * rejects with a readable error so callers can tell the user the change was not saved.
+   */
+  async persistAssignment(asg) {
+    const res = await this.apiPost('/api/papers', asg);
+    return res.paper || asg;
+  }
+  /**
+   * Authenticated JSON POST to the server. Resolves to the response body; rejects with the server's
+   * error message so callers can tell the user a change was NOT saved.
+   */
+  async apiPost(path, body) {
+    const currentUser = this.getCurrentUser();
+    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const resp = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(body)
+    });
+    const res = await resp.json().catch(() => ({}));
+    if (!resp.ok || res.success === false) {
+      throw new Error(res.error || `Server error (${resp.status})`);
     }
+    return res;
   }
   deleteAssignment(id) {
     const assignments = this.getAssignments().filter(a => a.id !== id);
@@ -3146,9 +3101,6 @@ class AppStore {
     // Clean up corresponding submissions locally
     const submissions = this.getSubmissions().filter(s => s.assignmentId !== id && s.paperId !== id);
     this.saveSubmissions(submissions);
-    if (window.firebaseSync && typeof window.firebaseSync.deleteAssignment === 'function') {
-      window.firebaseSync.deleteAssignment(id);
-    }
   }
 
   // Submissions (With Checked Copy PDF uploaded by Admin/Teacher)
@@ -3173,9 +3125,6 @@ class AppStore {
     }
     submissions.unshift(subm);
     this.saveSubmissions(submissions);
-    if (window.firebaseSync && typeof window.firebaseSync.saveSubmission === 'function') {
-      window.firebaseSync.saveSubmission(subm);
-    }
     if (window.leaderboardManager) {
       window.leaderboardManager.calculateAllStandings();
     }
@@ -3184,9 +3133,6 @@ class AppStore {
   updateSubmission(subm) {
     const submissions = this.getSubmissions().map(s => s.id === subm.id ? subm : s);
     this.saveSubmissions(submissions);
-    if (window.firebaseSync && typeof window.firebaseSync.saveSubmission === 'function') {
-      window.firebaseSync.saveSubmission(subm);
-    }
     if (window.leaderboardManager) {
       window.leaderboardManager.calculateAllStandings();
     }
@@ -3300,9 +3246,6 @@ class AppStore {
     }
     referrals.unshift(record);
     this.saveReferrals(referrals);
-    if (window.firebaseSync && typeof window.firebaseSync.saveReferral === 'function') {
-      window.firebaseSync.saveReferral(record);
-    }
     return record;
   }
 
@@ -3356,9 +3299,6 @@ class AppStore {
   saveXpResetSettings(settings) {
     const merged = { ...DEFAULT_XP_RESET_SETTINGS, ...settings };
     this.set(STORAGE_KEYS.XP_RESET_SETTINGS, merged);
-    if (window.firebaseSync && typeof window.firebaseSync.saveXpResetSettings === 'function') {
-      window.firebaseSync.saveXpResetSettings(merged);
-    }
     return merged;
   }
 
@@ -3385,9 +3325,6 @@ class AppStore {
     history.unshift(item);
     // Keep last 100 events
     this.set(STORAGE_KEYS.XP_RESET_HISTORY, history.slice(0, 100));
-    if (window.firebaseSync && typeof window.firebaseSync.saveXpResetEvent === 'function') {
-      window.firebaseSync.saveXpResetEvent(item);
-    }
     return item;
   }
 
@@ -3476,9 +3413,6 @@ class AppStore {
         createdAt: now
       });
 
-      if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
-        window.firebaseSync.saveUser(st);
-      }
     });
 
     this.saveUsers(users);
@@ -3518,9 +3452,6 @@ class AppStore {
     const subs = this.getSubscriptions();
     subs[subscription.userId] = subscription;
     this.saveSubscriptions(subs);
-    if (window.firebaseSync && typeof window.firebaseSync.saveSubscription === 'function') {
-      window.firebaseSync.saveSubscription(subscription);
-    }
   }
 
   deleteSubscription(userId) {
@@ -3556,9 +3487,6 @@ class AppStore {
       sessions.unshift(session);
     }
     this.savePaymentSessions(sessions);
-    if (window.firebaseSync && typeof window.firebaseSync.savePaymentSession === 'function') {
-      window.firebaseSync.savePaymentSession(session);
-    }
   }
 
   updatePaymentSession(session) {
@@ -3583,9 +3511,6 @@ class AppStore {
 
   savePaymentChannels(channels) {
     this.set('payment_channels', channels);
-    if (window.firebaseSync && typeof window.firebaseSync.savePaymentChannels === 'function') {
-      window.firebaseSync.savePaymentChannels(channels);
-    }
   }
 
   // --- SUBSCRIPTION PLANS CATALOG ---
@@ -3596,9 +3521,6 @@ class AppStore {
 
   saveSubscriptionPlans(plans) {
     this.set('subscription_plans', plans);
-    if (window.firebaseSync && typeof window.firebaseSync.saveSubscriptionPlans === 'function') {
-      window.firebaseSync.saveSubscriptionPlans(plans);
-    }
   }
 
   // --- ADMIN AUDIT LOGS ---
@@ -3617,9 +3539,6 @@ class AppStore {
     logs.unshift(log);
     if (logs.length > 500) logs.splice(500);
     this.saveAdminAuditLogs(logs);
-    if (window.firebaseSync && typeof window.firebaseSync.saveAdminAuditLog === 'function') {
-      window.firebaseSync.saveAdminAuditLog(log);
-    }
   }
 
   // --- CLIENT ENTITLEMENT RESOLVER ---

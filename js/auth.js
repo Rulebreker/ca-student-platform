@@ -269,7 +269,7 @@ class AuthManager {
         if (timeoutId) clearTimeout(timeoutId);
 
         if (resp.status === 404) {
-          console.warn('[AuthManager] /api/auth/login returned 404 (static hosting detected). Proceeding to local store & Firebase authentication fallback.');
+          console.warn('[AuthManager] /api/auth/login returned 404: the API is not reachable from this host.');
           serverAvailable = false;
         } else {
           serverAvailable = true;
@@ -310,7 +310,7 @@ class AuthManager {
           }
 
           if (resp.status >= 500) {
-            console.warn('[AuthManager] Backend login error (>= 500), attempting local/Firebase authentication.');
+            console.warn('[AuthManager] Backend login error (>= 500).');
             serverAvailable = false;
           } else if (resp.ok && data && data.success && data.user) {
             const authUser = data.user;
@@ -339,9 +339,7 @@ class AuthManager {
             this.currentUser = authUser;
             this.onAuthChange();
 
-            if (window.firebaseSync && typeof window.firebaseSync.attachCurrentUserListener === 'function') {
-              window.firebaseSync.attachCurrentUserListener(authUser.id);
-            }
+            if (window.serverSync) window.serverSync.start();
             this.startSessionWatchdog(authUser);
 
             return { success: true, user: authUser };
@@ -354,110 +352,9 @@ class AuthManager {
       }
     }
 
-    // 2. Offline / Cloud Fallback: Local store & Firebase RTDB authentication
-    if (!serverAvailable && window.store) {
-      // Reject permanently revoked accounts immediately
-      let revokedList = [];
-      try {
-        revokedList = JSON.parse(localStorage.getItem('excellenceca_revoked_users') || '[]');
-      } catch (e) {}
-      const revokedSet = new Set(revokedList.map(x => String(x).toLowerCase().replace(/^@+/, '').trim()));
-      if (revokedSet.has(cleanId) || revokedSet.has(cleanUname)) {
-        return { success: false, error: 'Login Failed: Account has been permanently removed.' };
-      }
-
-      let users = window.store.getUsers();
-
-      const findMatchingUser = (userList) => {
-        return userList.find(u => {
-          const uEmail = (u.email || '').trim().toLowerCase();
-          const uUname = (u.username || '').trim().toLowerCase().replace(/^@+/, '');
-          const uPrefix = uEmail.includes('@') ? uEmail.split('@')[0] : '';
-          const uId = (u.id || '').trim().toLowerCase();
-          const uReg = (u.registrationNo || '').trim().toLowerCase();
-          return (
-            cleanId === uEmail ||
-            cleanUname === uUname ||
-            cleanId === uUname ||
-            cleanUname === uPrefix ||
-            cleanUname === uPrefix.replace(/\./g, '_') ||
-            cleanId === uId ||
-            cleanUname === uId ||
-            (uReg && (cleanId === uReg || cleanUname === uReg)) ||
-            (['admin', 'adminrulebreker', 'administrator'].includes(cleanUname) && u.role === 'admin') ||
-            (['teacher', 'prof_rajesh'].includes(cleanUname) && u.role === 'teacher')
-          );
-        });
-      };
-
-      let user = findMatchingUser(users);
-
-      // If user not in local store yet (e.g. fresh device session), query Firebase RTDB directly
-      if (!user && window.firebaseSync && window.firebaseSync.db) {
-        try {
-          const snap = await window.firebaseSync.db.ref('users').once('value');
-          const val = snap.val();
-          const remoteUsers = val ? (Array.isArray(val) ? val.filter(Boolean) : Object.values(val)) : [];
-          if (remoteUsers.length > 0) {
-            window.firebaseSync.mergeRemoteUsers(remoteUsers);
-            users = window.store.getUsers();
-            user = findMatchingUser(users);
-          }
-        } catch (e) {
-          console.warn('[AuthManager] Direct Firebase RTDB user lookup error:', e);
-        }
-      }
-
-      if (user) {
-        const uId = String(user.id || '').toLowerCase().trim();
-        const uEmail = String(user.email || '').toLowerCase().trim();
-        const uUname = String(user.username || '').toLowerCase().replace(/^@+/, '').trim();
-        if (revokedSet.has(uId) || revokedSet.has(uEmail) || revokedSet.has(uUname) || user.isDeleted) {
-          return { success: false, error: 'Login Failed: Account has been permanently removed.' };
-        }
-      }
-
-      if (user && !this.verifyPassword(rawPass, user.password) && window.firebaseSync && window.firebaseSync.db) {
-        try {
-          const snap = await window.firebaseSync.db.ref('users/' + user.id).once('value');
-          const freshVal = snap.val();
-          if (freshVal && freshVal.password) {
-            user = { ...user, ...freshVal };
-            const uIdx = users.findIndex(u => u.id === user.id);
-            if (uIdx !== -1) {
-              users[uIdx] = user;
-              window.store.saveUsers(users);
-            }
-          }
-        } catch (e) {}
-      }
-
-      if (!user || !this.verifyPassword(rawPass, user.password)) {
-        return { success: false, error: 'Login Failed: Invalid username or password.' };
-      }
-
-      if (user.isActive === false) {
-        return { 
-          success: false, 
-          error: 'Login Failed: Your account has been deactivated by the Administrator. Please contact faculty support.' 
-        };
-      }
-
-      if (!user.token) {
-        user.token = `token_${user.role || 'student'}_${Date.now()}`;
-        window.store.updateUser(user);
-      }
-
-      this.currentUser = user;
-      window.store.setCurrentUser(user);
-      this.onAuthChange();
-
-      if (window.firebaseSync && typeof window.firebaseSync.attachCurrentUserListener === 'function') {
-        window.firebaseSync.attachCurrentUserListener(user.id);
-      }
-      this.startSessionWatchdog(user);
-
-      return { success: true, user };
+    // The server is the only authority for credentials: there is no browser-side login fallback.
+    if (!serverAvailable) {
+      return { success: false, error: 'Login Failed: The ExcellenceCA server is unreachable. Please check your connection and try again.' };
     }
 
     return { success: false, error: 'Login Failed: Invalid username or password.' };
@@ -527,8 +424,6 @@ class AuthManager {
       });
 
       if (resp.status === 404) {
-        // Static hosting (e.g. Vercel) does not have the backend /api/auth/register endpoint.
-        // Proceed immediately to Firebase RTDB and local store cloud registration fallback.
         throw new Error('Backend registration endpoint not found (404)');
       }
 
@@ -538,7 +433,7 @@ class AuthManager {
         data = JSON.parse(text);
       } catch (jsonErr) {
         console.warn('[AuthManager] Non-JSON response from registration server:', text);
-        // If server returns HTML error page (e.g. 502/503/504 proxy error), trigger cloud fallback
+        // HTML error page (e.g. 502/503/504 proxy error): report the server as unavailable
         if (resp.status >= 500) {
           throw new Error(`Backend server unavailable (${resp.status})`);
         }
@@ -565,9 +460,7 @@ class AuthManager {
       this.currentUser = authoritativeUser;
 
       // Start watchdog and attach real-time listener for the new student
-      if (window.firebaseSync && typeof window.firebaseSync.attachCurrentUserListener === 'function') {
-        window.firebaseSync.attachCurrentUserListener(authoritativeUser.id);
-      }
+      if (window.serverSync) window.serverSync.start();
       this.startSessionWatchdog(authoritativeUser);
 
       this.onAuthChange();
@@ -578,114 +471,12 @@ class AuthManager {
         referredBy: authoritativeUser.referredBy || null
       };
     } catch (err) {
-      console.warn(`[AuthManager] Primary backend registration unreachable (${err.name}: ${err.message}). Activating Firebase RTDB & local store cloud registration fallback.`);
-
-      try {
-        // Fallback: Client & Firebase-Authoritative Registration for Cloud / Static Deployments
-        if (window.store) {
-          const existingUsers = window.store.getUsers();
-          const cleanEmailLower = email.toLowerCase().trim();
-          if (existingUsers.some(u => u.email && u.email.toLowerCase() === cleanEmailLower)) {
-            return { success: false, error: 'Registration Failed: A user with this email address already exists.' };
-          }
-          if (existingUsers.some(u => u.username && u.username.toLowerCase().replace(/^@+/, '') === cleanUsername.toLowerCase())) {
-            return { success: false, error: `Registration Failed: Username "@${cleanUsername}" is already taken.` };
-          }
-        }
-
-        // Process referral bonus if valid referral code provided
-        let referralPoints = 0;
-        let referrerUser = null;
-        if (cleanReferredBy && window.store) {
-          const users = window.store.getUsers();
-          referrerUser = users.find(u => 
-            (u.username && u.username.toLowerCase().replace(/^@+/, '') === cleanReferredBy.toLowerCase()) ||
-            (u.email && u.email.toLowerCase() === cleanReferredBy.toLowerCase())
-          );
-
-          if (referrerUser) {
-            referralPoints = 100;
-            referrerUser.referralPoints = (referrerUser.referralPoints || 0) + 100;
-            referrerUser.referralCount = (referrerUser.referralCount || 0) + 1;
-            window.store.updateUser(referrerUser);
-            if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
-              window.firebaseSync.saveUser(referrerUser);
-            }
-
-            const refRecord = {
-              id: `ref-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
-              referrerId: referrerUser.id,
-              referrerUsername: referrerUser.username,
-              referrerName: referrerUser.name,
-              referredUsername: cleanUsername,
-              referredName: fullName.trim(),
-              referralCode: cleanReferredBy,
-              referrerReward: 100,
-              referredReward: 100,
-              pointsAwarded: 100,
-              examLevel: normLevel.includes('INTER') ? 'CA INTER' : normLevel,
-              createdAt: new Date().toISOString(),
-              status: 'completed'
-            };
-            if (window.firebaseSync && typeof window.firebaseSync.saveReferral === 'function') {
-              window.firebaseSync.saveReferral(refRecord);
-            }
-          }
-        }
-
-        const newUserId = `usr-student-${Date.now()}`;
-        const newToken = `token_student_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-        const hashedPassword = this.hashPassword(password);
-        const newUser = {
-          id: newUserId,
-          name: fullName.trim(),
-          username: cleanUsername,
-          email: email.toLowerCase().trim(),
-          phone: cleanPhone,
-          caLevel: normLevel.includes('INTER') ? 'CA INTER' : normLevel,
-          password: hashedPassword,
-          role: 'student',
-          state: state || 'Uttar Pradesh',
-          district: district || 'Meerut',
-          token: newToken,
-          isActive: true,
-          totalXp: referralPoints,
-          baseXp: 0,
-          referralPoints: referralPoints,
-          referralCount: 0,
-          referredBy: referrerUser ? (referrerUser.username || referrerUser.name) : null,
-          createdAt: new Date().toISOString()
-        };
-
-        if (window.store) {
-          window.store.addUser(newUser);
-          window.store.setCurrentUser(newUser);
-        }
-        if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
-          window.firebaseSync.saveUser(newUser);
-        }
-
-        this.currentUser = newUser;
-        this.onAuthChange();
-
-        if (window.firebaseSync && typeof window.firebaseSync.attachCurrentUserListener === 'function') {
-          window.firebaseSync.attachCurrentUserListener(newUser.id);
-        }
-        this.startSessionWatchdog(newUser);
-
-        console.log('[AuthManager] Registration fallback succeeded via Firebase RTDB and local store.');
-        return {
-          success: true,
-          user: newUser,
-          referredBy: newUser.referredBy || null
-        };
-      } catch (fallbackErr) {
-        console.error('[AuthManager] Complete registration failure:', fallbackErr);
-        return { 
-          success: false, 
-          error: `Registration service error: ${fallbackErr.message || 'Unable to complete registration. Please try again.'}` 
-        };
-      }
+      // Accounts are created only by the server: there is no browser-side registration fallback.
+      console.warn(`[AuthManager] Registration request failed (${err.name}: ${err.message}).`);
+      return {
+        success: false,
+        error: 'Registration Failed: The ExcellenceCA server is unreachable. Please check your connection and try again.'
+      };
     }
   }
 
@@ -780,9 +571,7 @@ class AuthManager {
     }
 
     // 4. Detach real-time listeners and stop watchdog heartbeat
-    if (window.firebaseSync && typeof window.firebaseSync.detachUserListeners === 'function') {
-      window.firebaseSync.detachUserListeners();
-    }
+    if (window.serverSync) window.serverSync.stop();
     this.stopSessionWatchdog();
 
     // 5. Update UI navigation immediately
@@ -831,7 +620,6 @@ class AuthManager {
 
         if (res.status === 404) {
           // Static hosting (e.g. Vercel) does not host the backend verification endpoint.
-          // In this environment, session state is securely managed in real-time via Firebase RTDB listener.
           return;
         }
 

@@ -931,56 +931,31 @@ class AdminDashboard {
           try { data = JSON.parse(text); } catch (jsonErr) {}
 
           if (!resp.ok || !data || !data.success) {
-            if (resp.status === 404) {
-              console.warn('[AdminDashboard] Backend provisioning endpoint returned 404, proceeding with Firebase cloud provisioning.');
-            } else {
-              const errMsg = (data && data.error) ? data.error : 
-                (resp.status === 403 ? 'Administrator authorization required to provision students.' :
-                 resp.status === 409 ? (data && data.error ? data.error : 'A student with this username or email already exists.') :
-                 resp.status >= 500 ? 'Server error occurred while provisioning student. Please try again.' :
-                 'Failed to provision student on server. Please verify fields.');
-              window.app.showToast(errMsg, 'error');
-              return;
-            }
+            const errMsg = (data && data.error) ? data.error :
+              (resp.status === 403 ? 'Administrator authorization required to provision students.' :
+               resp.status === 409 ? 'A student with this username or email already exists.' :
+               resp.status >= 500 ? 'Server error occurred while provisioning student. Please try again.' :
+               'Failed to provision student on server. Please verify fields.');
+            window.app.showToast(errMsg, 'error');
+            return;
           }
 
-          authoritativeUser = (data && data.user) ? data.user : null;
-          if (data && data.token && authoritativeUser) authoritativeUser.token = data.token;
+          authoritativeUser = data.user;
+          if (data.token) authoritativeUser.token = data.token;
         } catch (apiErr) {
-          console.warn('[AdminDashboard] Server provisioning error, proceeding with local fallback:', apiErr);
+          // Accounts are created only by the server: no browser-side provisioning fallback
+          window.app.showToast(`Could not reach the server to provision the student: ${apiErr.message}`, 'error');
+          return;
         }
       }
+      if (!authoritativeUser) {
+        window.app.showToast('Student was not provisioned: no server response.', 'error');
+        return;
+      }
 
-      const hashedPassword = window.auth ? window.auth.hashPassword(password) : password;
-      const finalStudent = authoritativeUser ? {
-        ...authoritativeUser,
-        password: hashedPassword,
-        registrationNo,
-        phone
-      } : {
-        id: 'usr-' + Date.now(),
-        name,
-        username: cleanUsername,
-        email,
-        phone,
-        password: hashedPassword,
-        token: `token_student_${Date.now()}`,
-        role: 'student',
-        caLevel,
-        registrationNo,
-        isActive: true,
-        totalXp: 0,
-        baseXp: 0,
-        referralCount: 0,
-        referralPoints: 0,
-        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
-        createdAt: new Date().toISOString()
-      };
+      const finalStudent = { ...authoritativeUser, registrationNo, phone };
 
       window.store.addUser(finalStudent);
-      if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
-        window.firebaseSync.saveUser(finalStudent);
-      }
 
       window.app.closeModal('admin-generic-modal');
       window.app.showToast(`Student ${name} (@${cleanUsername}) provisioned successfully.`, 'success');
@@ -1083,7 +1058,7 @@ class AdminDashboard {
     window.app.openModal('admin-generic-modal');
   }
 
-  saveEditStudent(e, studentId) {
+  async saveEditStudent(e, studentId) {
     e.preventDefault();
     const student = window.store.getUserById(studentId);
     if (!student) return;
@@ -1105,20 +1080,16 @@ class AdminDashboard {
       }
     }
 
-    student.name = name;
-    student.username = rawUsername || student.username || 'Not set';
-    student.email = email;
-    student.phone = phone;
-    student.caLevel = caLevel;
-    student.registrationNo = registrationNo;
-
-    window.store.updateUser(student);
-    if (window.firebaseSync && typeof window.firebaseSync.saveUser === 'function') {
-      window.firebaseSync.saveUser(student);
+    try {
+      const res = await window.store.apiPost('/api/admin/users/update', {
+        userId: studentId, name, username: rawUsername || undefined, email, phone, caLevel, registrationNo
+      });
+      window.store.updateUser({ ...student, ...res.user });
+      window.app.closeModal('admin-generic-modal');
+      window.app.showToast(`Student details updated successfully for ${name}.`, 'success');
+    } catch (err) {
+      window.app.showToast(`Could not update student: ${err.message}`, 'error');
     }
-
-    window.app.closeModal('admin-generic-modal');
-    window.app.showToast(`Student details updated successfully for ${student.name}.`, 'success');
     this.renderStudents();
   }
 
@@ -1397,7 +1368,7 @@ class AdminDashboard {
     window.app.openModal('admin-generic-modal');
   }
 
-  saveNewTeacher(e) {
+  async saveNewTeacher(e) {
     e.preventDefault();
     const name = document.getElementById('teach-name').value.trim();
     const email = document.getElementById('teach-email').value.trim();
@@ -1425,9 +1396,16 @@ class AdminDashboard {
       createdAt: new Date().toISOString()
     };
 
-    window.store.addUser(newTeacher);
-    window.app.closeModal('admin-generic-modal');
-    window.app.showToast(`Teacher ${name} added with password: ${password}`, 'success');
+    try {
+      // The server stores only the password hash; the local copy must not keep the plain password.
+      const res = await window.store.apiPost('/api/admin/users', newTeacher);
+      const { password: _plain, ...localTeacher } = newTeacher;
+      window.store.addUser({ ...localTeacher, ...res.user });
+      window.app.closeModal('admin-generic-modal');
+      window.app.showToast(`Teacher ${name} added.`, 'success');
+    } catch (err) {
+      window.app.showToast(`Could not add teacher: ${err.message}`, 'error');
+    }
     this.renderTeachers();
   }
 
@@ -1498,21 +1476,26 @@ class AdminDashboard {
     window.app.openModal('admin-generic-modal');
   }
 
-  savePrivileges(e, teacherId) {
+  async savePrivileges(e, teacherId) {
     e.preventDefault();
     const teacher = window.store.getUserById(teacherId);
     if (!teacher) return;
 
-    teacher.privileges = {
+    const privileges = {
       canGradeCopies: document.getElementById('edit-priv-grade').checked,
       canUploadTests: document.getElementById('edit-priv-upload').checked,
       canUploadLectures: document.getElementById('edit-priv-lectures').checked,
       canViewStudents: document.getElementById('edit-priv-students').checked
     };
 
-    window.store.updateUser(teacher);
-    window.app.closeModal('admin-generic-modal');
-    window.app.showToast(`Privileges updated for ${teacher.name}.`, 'success');
+    try {
+      const res = await window.store.apiPost('/api/admin/users/update', { userId: teacherId, privileges });
+      window.store.updateUser({ ...teacher, ...res.user });
+      window.app.closeModal('admin-generic-modal');
+      window.app.showToast(`Privileges updated for ${teacher.name}.`, 'success');
+    } catch (err) {
+      window.app.showToast(`Could not update privileges: ${err.message}`, 'error');
+    }
     this.renderTeachers();
   }
 
@@ -2350,9 +2333,19 @@ class AdminDashboard {
       paper.deadline = paper.expiryTime;
     }
 
-    window.store.updateAssignment(paper);
-    window.app.closeModal('admin-generic-modal');
-    window.app.showToast('Paper scheduled successfully!', 'success');
+    this._persistPaperChange(paper, 'Paper scheduled successfully!', true);
+  }
+
+  /** Save a paper change on the server first, then update the local store and view. */
+  async _persistPaperChange(paper, successMessage, closeModal = false) {
+    try {
+      const saved = await window.store.persistAssignment(paper);
+      window.store.updateAssignment({ ...paper, ...saved });
+      if (closeModal) window.app.closeModal('admin-generic-modal');
+      window.app.showToast(successMessage, 'success');
+    } catch (err) {
+      window.app.showToast(`Could not save the paper: ${err.message}`, 'error');
+    }
     this.renderTestPapers();
   }
 
@@ -2448,10 +2441,7 @@ class AdminDashboard {
     paper.expiryTime = paper.liveEndTime;
     paper.deadline = paper.liveEndTime;
 
-    window.store.updateAssignment(paper);
-    window.app.closeModal('admin-generic-modal');
-    window.app.showToast('Live Test window successfully configured!', 'success');
-    this.renderTestPapers();
+    this._persistPaperChange(paper, 'Live Test window successfully configured!', true);
   }
 
   endPaperLive(paperId) {
@@ -2463,9 +2453,7 @@ class AdminDashboard {
       paper.status = 'Completed/Expired';
       paper.liveEndTime = new Date().toISOString();
       paper.expiryTime = paper.liveEndTime;
-      window.store.updateAssignment(paper);
-      window.app.showToast('Live test ended.', 'info');
-      this.renderTestPapers();
+      this._persistPaperChange(paper, 'Live test ended.');
     }
   }
 
@@ -2477,9 +2465,7 @@ class AdminDashboard {
     paper.isPublished = true;
     paper.isLive = false;
     paper.scheduledPublishTime = new Date().toISOString();
-    window.store.updateAssignment(paper);
-    window.app.showToast('Paper published and available immediately!', 'success');
-    this.renderTestPapers();
+    this._persistPaperChange(paper, 'Paper published and available immediately!');
   }
 
   openViewDetailsModal(paperId) {
@@ -4817,7 +4803,7 @@ class AdminDashboard {
     }
   }
 
-  verifyQuestionDraft(questionId) {
+  async verifyQuestionDraft(questionId) {
     const q = window.store.getQuestions().find(x => x.id === questionId);
     if (!q) return;
 
@@ -4827,10 +4813,15 @@ class AdminDashboard {
       return;
     }
 
-    q.isDraft = false;
-    q.isDuplicate = false;
-    window.store.updateQuestion(q);
-    window.app.showToast('Question marked as verified.', 'success');
+    try {
+      await window.store.apiPost('/api/tests/questions', { ...q, isDraft: false, isDuplicate: false });
+      q.isDraft = false;
+      q.isDuplicate = false;
+      window.store.updateQuestion(q);
+      window.app.showToast('Question marked as verified.', 'success');
+    } catch (err) {
+      window.app.showToast(`Could not verify question: ${err.message}`, 'error');
+    }
     this.openQuestionBuilder(this.activeTestQuestionsId);
   }
 
@@ -6805,9 +6796,6 @@ class AdminDashboard {
     if (window.store.saveXpResetSettings) {
       window.store.saveXpResetSettings(updatedSettings);
     }
-    if (window.firebaseSync && typeof window.firebaseSync.saveXpResetSettings === 'function') {
-      window.firebaseSync.saveXpResetSettings(updatedSettings);
-    }
 
     if (nextDisplayEl) {
       nextDisplayEl.textContent = nextReset 
@@ -6846,9 +6834,6 @@ class AdminDashboard {
       s.totalXp = 0;
       s.baseXp = 0;
       window.store.updateUser(s);
-      if (window.firebaseSync && window.firebaseSync.db) {
-        window.firebaseSync.db.ref('users/' + s.id).update({ totalXp: 0, baseXp: 0 }).catch(() => {});
-      }
       resetCount++;
     });
 
@@ -6863,17 +6848,11 @@ class AdminDashboard {
       notes: 'Manual reset triggered from Admin Panel'
     };
     if (window.store.recordXpResetEvent) window.store.recordXpResetEvent(resetEvent);
-    if (window.firebaseSync && typeof window.firebaseSync.saveXpResetEvent === 'function') {
-      window.firebaseSync.saveXpResetEvent(resetEvent);
-    }
 
     // Update lastReset in settings
     const currentSettings = window.store.getXpResetSettings ? window.store.getXpResetSettings() : {};
     const updatedSettings = { ...currentSettings, lastReset: resetEvent.resetAt };
     if (window.store.saveXpResetSettings) window.store.saveXpResetSettings(updatedSettings);
-    if (window.firebaseSync && typeof window.firebaseSync.saveXpResetSettings === 'function') {
-      window.firebaseSync.saveXpResetSettings(updatedSettings);
-    }
 
     // Call backend to reset server-side too
     const token = adminUser ? (adminUser.token || adminUser.email) : '';
