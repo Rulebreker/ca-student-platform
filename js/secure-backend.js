@@ -239,7 +239,7 @@ class SecureBackendManager {
       }
     }
 
-    const token = user.token || user.email;
+    const token = (user.token || '');
 
     // Try backend streaming endpoint first
     try {
@@ -383,7 +383,7 @@ startxref
       reader.readAsDataURL(file);
     });
 
-    const token = user.token || user.email;
+    const token = (user.token || '');
 
     try {
       const resp = await fetch('/api/files/upload', {
@@ -496,7 +496,7 @@ startxref
     });
 
     const user = window.auth ? window.auth.getCurrentUser() : null;
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
 
     try {
       const resp = await fetch('/api/files/upload-image', {
@@ -618,7 +618,7 @@ startxref
         });
 
         const user = window.auth ? window.auth.getCurrentUser() : null;
-        const token = user ? (user.token || user.email) : '';
+        const token = user ? (user.token || '') : '';
 
         const resp = await fetch('/api/tests/import-pdf', {
           method: 'POST',
@@ -760,7 +760,7 @@ startxref
     if (isPreview) return { allowed: true, isPreview: true };
 
     const user = window.auth ? window.auth.getCurrentUser() : null;
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
 
     const validateLocalStoreEligibility = () => {
       const test = window.store ? window.store.getTestById(testId) : null;
@@ -822,7 +822,7 @@ startxref
    */
   async submitTestAnswers(testId, answers, timeTaken, isPreview = false) {
     const user = window.auth.getCurrentUser();
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
 
     try {
       const resp = await fetch('/api/tests/submit', {

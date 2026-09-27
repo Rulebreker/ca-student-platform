@@ -1063,7 +1063,7 @@ class TestEngine {
     } else {
       try {
         const user = window.auth ? window.auth.getCurrentUser() : null;
-        const token = user ? (user.token || user.email) : '';
+        const token = user ? (user.token || '') : '';
         const res = await fetch(`/api/tests?testId=${encodeURIComponent(test.id)}`, {
           headers: token ? { 'Authorization': `Bearer ${token}` } : {}
         });

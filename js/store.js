@@ -1873,7 +1873,6 @@ class AppStore {
           admin.password = 'eliterulebrker@220709';
           admin.email = 'adminrulebreker@rulebrekerdothunter.com';
           admin.username = 'adminrulebreker@rulebrekerdothunter.com';
-          if (!admin.token) admin.token = 'token_admin_excellenceca_secret';
         }
         // Ensure teachers exist
         if (!users.some(u => u && u.role === 'teacher')) {
@@ -2222,7 +2221,7 @@ class AppStore {
   async deleteUser(id) {
     const user = this.getUserById(id);
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
 
     // Call backend API first - wait for authoritative confirmation
     if (typeof fetch !== 'undefined') {
@@ -2370,7 +2369,7 @@ class AppStore {
     }
     this.saveSubjects(subjects);
     const user = window.auth ? window.auth.getCurrentUser() : null;
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
     fetch('/api/subjects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -2382,7 +2381,7 @@ class AppStore {
     const subjects = this.getSubjects().filter(s => s.id !== id);
     this.saveSubjects(subjects);
     const user = window.auth ? window.auth.getCurrentUser() : null;
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
     fetch('/api/subjects/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -2433,7 +2432,7 @@ class AppStore {
     this.saveBookmarks(list);
 
     const user = window.auth ? window.auth.getCurrentUser() : null;
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
     fetch('/api/bookmarks/toggle', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -2525,7 +2524,7 @@ class AppStore {
       item.read = true;
       this.saveNotifications(list);
       const user = window.auth ? window.auth.getCurrentUser() : null;
-      const token = user ? (user.token || user.email) : '';
+      const token = user ? (user.token || '') : '';
       fetch('/api/notifications/read', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -2545,7 +2544,7 @@ class AppStore {
     });
     this.saveNotifications(list);
     const user = window.auth ? window.auth.getCurrentUser() : null;
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
     fetch('/api/notifications/read', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -2567,7 +2566,7 @@ class AppStore {
 
 
     const user = window.auth ? window.auth.getCurrentUser() : null;
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
     fetch('/api/notifications/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -2585,7 +2584,7 @@ class AppStore {
 
 
     const user = window.auth ? window.auth.getCurrentUser() : null;
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
     fetch('/api/notifications/clear', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -2664,7 +2663,7 @@ class AppStore {
 
 
     const user = window.auth ? window.auth.getCurrentUser() : null;
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
     fetch('/api/xp/award', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -3083,7 +3082,7 @@ class AppStore {
    */
   async apiPost(path, body) {
     const currentUser = this.getCurrentUser();
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
     const resp = await fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -3373,7 +3372,7 @@ class AppStore {
     // Also call backend if online
     if (typeof fetch !== 'undefined') {
       const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-      const token = currentUser ? (currentUser.token || currentUser.email) : '';
+      const token = currentUser ? (currentUser.token || '') : '';
       fetch('/api/admin/xp/manage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -3420,7 +3419,7 @@ class AppStore {
     // Call backend API
     if (typeof fetch !== 'undefined') {
       const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-      const token = currentUser ? (currentUser.token || currentUser.email) : '';
+      const token = currentUser ? (currentUser.token || '') : '';
       fetch('/api/admin/xp/bulk-set', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },

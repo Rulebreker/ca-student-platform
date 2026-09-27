@@ -50,7 +50,7 @@ class SubscriptionManager {
     }
 
     try {
-      const token = user.token || user.id;
+      const token = (user.token || '');
       const resp = await fetch(`/api/payments/active-session?_t=${Date.now()}`, {
         headers: { 'Authorization': `Bearer ${token}` },
         cache: 'no-store'
@@ -93,7 +93,7 @@ class SubscriptionManager {
     try {
       const url = force ? `/api/subscriptions/plans?_t=${Date.now()}` : '/api/subscriptions/plans';
       const user = window.auth ? window.auth.getCurrentUser() : null;
-      const headers = user ? { 'Authorization': `Bearer ${user.token || user.id}` } : {};
+      const headers = user ? { 'Authorization': `Bearer ${(user.token || '')}` } : {};
       const resp = await fetch(url, { headers, cache: 'no-store' });
       if (resp.ok) {
         const data = await resp.json();
@@ -143,7 +143,7 @@ class SubscriptionManager {
     }
 
     try {
-      const token = user.token || user.id;
+      const token = (user.token || '');
       const resp = await fetch(`/api/subscriptions/my?_t=${Date.now()}`, {
         headers: { 'Authorization': `Bearer ${token}` },
         cache: 'no-store'
@@ -524,7 +524,7 @@ class SubscriptionManager {
     window.app.showToast('Initializing payment session...', 'info');
 
     try {
-      const token = user.token || user.id;
+      const token = (user.token || '');
       const resp = await fetch('/api/payments/create-session', {
         method: 'POST',
         headers: {
@@ -893,7 +893,7 @@ class SubscriptionManager {
     const user = window.auth ? window.auth.getCurrentUser() : null;
     if (user) {
       try {
-        const token = user.token || user.id;
+        const token = (user.token || '');
         await fetch('/api/payments/cancel-session', {
           method: 'POST',
           headers: {
@@ -937,7 +937,7 @@ class SubscriptionManager {
     }
 
     const user = window.auth ? window.auth.getCurrentUser() : null;
-    const token = user ? (user.token || user.id) : '';
+    const token = user ? (user.token || '') : '';
 
     try {
       const resp = await fetch('/api/payments/submit-payment', {
@@ -1571,7 +1571,7 @@ class SubscriptionManager {
     let sessions = [];
     const localFallback = window.store ? (window.store.getPaymentSessions(user.id) || []) : [];
     try {
-      const token = user.token || user.id;
+      const token = (user.token || '');
       const resp = await fetch(`/api/subscriptions/history?_t=${Date.now()}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });

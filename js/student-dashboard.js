@@ -194,7 +194,7 @@ class StudentDashboard {
     // Sync papers from backend (non-blocking, with in-flight lock)
     if (!this._isSyncingPapers && typeof fetch !== 'undefined') {
       this._isSyncingPapers = true;
-      const token = user ? (user.token || user.email) : '';
+      const token = user ? (user.token || '') : '';
       fetch('/api/papers', {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       }).then(r => r.ok ? r.json() : null).then(data => {

@@ -59,7 +59,7 @@ class AssignmentPortal {
     // Synchronize papers from backend (fetches admin-uploaded papers that aren't in localStorage)
     if (!this._isSyncingPapers && typeof fetch !== 'undefined') {
       this._isSyncingPapers = true;
-      const token = user ? (user.token || user.email) : '';
+      const token = user ? (user.token || '') : '';
       fetch('/api/papers', {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       }).then(r => r.ok ? r.json() : null).then(data => {
@@ -1478,7 +1478,7 @@ class AssignmentPortal {
 
     // Sync to backend if server is active
     try {
-      const token = user.token || user.email;
+      const token = (user.token || '');
       await fetch('/api/papers/submissions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },

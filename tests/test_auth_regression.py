@@ -2,9 +2,12 @@ import urllib.request
 import json
 import time
 import sys
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), 'tests'))
+import admin_session
 
 BASE = 'http://127.0.0.1:8000'
-ADMIN_TOKEN = 'token_admin_excellenceca_secret'
+ADMIN_TOKEN = admin_session.admin_token()
 
 def req(url, data=None, headers=None, method='GET'):
     h = {'Content-Type': 'application/json'}

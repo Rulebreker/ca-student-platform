@@ -163,7 +163,7 @@ class AdminDashboard {
 
     this._isSyncingUsers = true;
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
 
     this._syncPromise = fetch(`/api/admin/users?_t=${Date.now()}`, {
       headers: {
@@ -901,7 +901,7 @@ class AdminDashboard {
 
     try {
       const currentAdmin = window.auth ? window.auth.getCurrentUser() : null;
-      const adminToken = currentAdmin ? (currentAdmin.token || 'token_admin_excellenceca_secret') : 'token_admin_excellenceca_secret';
+      const adminToken = currentAdmin ? (currentAdmin.token || '') : '';
 
       // 1. Authoritative Backend Provisioning via POST /api/admin/users
       let authoritativeUser = null;
@@ -1152,7 +1152,7 @@ class AdminDashboard {
 
     try {
       const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-      const token = currentUser ? (currentUser.token || currentUser.email) : '';
+      const token = currentUser ? (currentUser.token || '') : '';
       const resp = await fetch('/api/admin/users/reset-password', {
         method: 'POST',
         headers: {
@@ -2147,7 +2147,7 @@ class AdminDashboard {
 
     try {
       const curUser = window.auth ? window.auth.getCurrentUser() : null;
-      const token = curUser ? (curUser.token || curUser.email) : '';
+      const token = curUser ? (curUser.token || '') : '';
       const resp = await fetch('/api/papers', {
         method: 'POST',
         headers: { 
@@ -2230,7 +2230,7 @@ class AdminDashboard {
 
     try {
       const curUser = window.auth ? window.auth.getCurrentUser() : null;
-      const token = curUser ? (curUser.token || curUser.email) : '';
+      const token = curUser ? (curUser.token || '') : '';
       const resp = await fetch('/api/papers/delete', {
         method: 'POST',
         headers: { 
@@ -3704,7 +3704,7 @@ class AdminDashboard {
     }
 
     const user = window.auth.getCurrentUser();
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
 
     try {
       const resp = await fetch('/api/tests', {
@@ -3803,7 +3803,7 @@ class AdminDashboard {
     if (!confirm('Are you sure you want to permanently delete this mock test and all its questions?')) return;
 
     const user = window.auth.getCurrentUser();
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
     try {
       const resp = await fetch('/api/tests/delete', {
         method: 'POST',
@@ -4635,7 +4635,7 @@ class AdminDashboard {
 
     // Await backend response BEFORE updating store
     const user = window.auth.getCurrentUser();
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
     try {
       const resp = await fetch('/api/tests/questions', {
         method: 'POST',
@@ -4695,7 +4695,7 @@ class AdminDashboard {
 
   async duplicateQuestion(questionId) {
     const user = window.auth.getCurrentUser();
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
     try {
       const resp = await fetch('/api/tests/questions', {
         method: 'POST',
@@ -4749,7 +4749,7 @@ class AdminDashboard {
     window.store.reorderQuestions(testId, orderIds);
 
     const user = window.auth.getCurrentUser();
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
     try {
       await fetch('/api/tests/questions', {
         method: 'POST',
@@ -4766,7 +4766,7 @@ class AdminDashboard {
     if (!confirm('Delete this question permanently?')) return;
     const testId = this.activeTestQuestionsId;
     const user = window.auth.getCurrentUser();
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
 
     try {
       const resp = await fetch('/api/tests/questions/delete', {
@@ -5198,7 +5198,7 @@ class AdminDashboard {
     }
 
     const adminUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = adminUser ? (adminUser.token || adminUser.email) : '';
+    const token = adminUser ? (adminUser.token || '') : '';
 
     try {
       // 1. Call Backend Bulk Import API
@@ -5422,7 +5422,7 @@ class AdminDashboard {
 
     // Backend sync
     const user = window.auth.getCurrentUser();
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
     try {
       await fetch('/api/tests/publish', {
         method: 'POST',
@@ -6805,7 +6805,7 @@ class AdminDashboard {
 
     // Also persist to backend
     const adminUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = adminUser ? (adminUser.token || adminUser.email) : '';
+    const token = adminUser ? (adminUser.token || '') : '';
     if (typeof fetch !== 'undefined') {
       fetch('/api/admin/xp-reset/settings', {
         method: 'POST',
@@ -6855,7 +6855,7 @@ class AdminDashboard {
     if (window.store.saveXpResetSettings) window.store.saveXpResetSettings(updatedSettings);
 
     // Call backend to reset server-side too
-    const token = adminUser ? (adminUser.token || adminUser.email) : '';
+    const token = adminUser ? (adminUser.token || '') : '';
     if (typeof fetch !== 'undefined') {
       fetch('/api/admin/xp-reset/trigger', {
         method: 'POST',
@@ -7115,7 +7115,7 @@ class AdminDashboard {
 
     // Persist to backend
     const adminUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = adminUser ? (adminUser.token || adminUser.email) : '';
+    const token = adminUser ? (adminUser.token || '') : '';
     if (typeof fetch !== 'undefined') {
       fetch('/api/admin/referrals/settings', {
         method: 'POST',
@@ -7859,7 +7859,7 @@ class AdminDashboard {
 
   async checkForActiveAiJob() {
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
     if (!token) return;
 
     try {
@@ -7898,7 +7898,7 @@ class AdminDashboard {
     this.aiActiveJobId = null;
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
 
     try {
       await fetch('/api/admin/ai/jobs/reset', {
@@ -8002,7 +8002,7 @@ class AdminDashboard {
     if (completionCard) completionCard.classList.add('hidden');
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
 
     let matchedDocId = null;
     // If inline PDFs were selected, upload them first (with deterministic SHA-256 deduplication)
@@ -8123,7 +8123,7 @@ class AdminDashboard {
     if (this.aiJobPollInterval) clearInterval(this.aiJobPollInterval);
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
     const ACTIVE_STATUSES = ['QUEUED', 'CLAIMED', 'GENERATING', 'VALIDATING', 'PUBLISHING'];
     const MAX_CONSECUTIVE_POLL_ERRORS = 40; // ~60s of failed polls
     let pollErrors = 0;
@@ -8455,7 +8455,7 @@ class AdminDashboard {
 
     // Fetch documents from backend
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
 
     try {
       const resp = await fetch(`/api/admin/ai/documents?_t=${Date.now()}`, {
@@ -8579,7 +8579,7 @@ class AdminDashboard {
     }
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
 
     try {
       const base64Data = await this._readFileAsBase64(file);
@@ -8636,7 +8636,7 @@ class AdminDashboard {
     if (!confirm('Are you sure you want to remove this source document? Extracted chunks will no longer be referenced in MCQ prompts.')) return;
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
 
     try {
       const resp = await fetch('/api/admin/ai/documents/delete', {
@@ -8666,7 +8666,7 @@ class AdminDashboard {
     await this.getSyllabusHierarchy();
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
 
     const escapeHtml = (str) => {
       if (str === null || str === undefined) return '';
@@ -9479,7 +9479,7 @@ class AdminDashboard {
     }
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
 
     try {
       const resp = await fetch('/api/admin/ai/scheduler/tasks', {
@@ -9526,7 +9526,7 @@ class AdminDashboard {
     if (card) card.remove();
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
 
     try {
       const resp = await fetch('/api/admin/ai/scheduler/tasks/delete', {
@@ -9553,7 +9553,7 @@ class AdminDashboard {
 
   async toggleScheduledTask(taskId, enabled) {
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
 
     try {
       const resp = await fetch('/api/admin/ai/scheduler/tasks/toggle', {
@@ -9586,7 +9586,7 @@ class AdminDashboard {
     }
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
 
     try {
       const resp = await fetch('/api/admin/ai/scheduler/tasks/run-now', {
@@ -9625,7 +9625,7 @@ class AdminDashboard {
     }
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
 
     try {
       const resp = await fetch('/api/admin/ai/scheduler/tick', {
@@ -9668,7 +9668,7 @@ class AdminDashboard {
     if (!container) return;
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
 
     container.innerHTML = `
       <div class="space-y-6">
@@ -9814,7 +9814,7 @@ class AdminDashboard {
     if (!container) return;
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
 
     container.innerHTML = `
       <div class="space-y-6 max-w-4xl">
@@ -9936,7 +9936,7 @@ class AdminDashboard {
     const latencyEl = document.getElementById(`prov-latency-${providerId}`);
 
     const currentUser = window.auth ? window.auth.getCurrentUser() : null;
-    const token = currentUser ? (currentUser.token || currentUser.email) : '';
+    const token = currentUser ? (currentUser.token || '') : '';
 
     try {
       const resp = await fetch('/api/admin/ai/providers/test', {

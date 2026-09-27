@@ -17,6 +17,9 @@ class App {
     }
 
     window.auth.onAuthChange();
+    if (window.auth._sessionExpiredOnLoad) {
+      setTimeout(() => this.showToast('Your session has expired. Please log in again.', 'info'), 300);
+    }
 
     // Navigation click listeners
     document.querySelectorAll('[data-nav]').forEach(el => {
@@ -918,7 +921,7 @@ class App {
 
     // Sync profile updates to backend server
     if (typeof fetch !== 'undefined') {
-      const token = user.token || user.email;
+      const token = (user.token || '');
       fetch('/api/user/profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -1104,7 +1107,7 @@ class App {
 
     // Sync profile updates to backend server
     if (typeof fetch !== 'undefined') {
-      const token = user.token || user.email;
+      const token = (user.token || '');
       fetch('/api/user/profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -1608,7 +1611,7 @@ class App {
     if (!this._fetchingBackendXp && typeof fetch !== 'undefined') {
       this._fetchingBackendXp = true;
       const user = window.auth ? window.auth.getCurrentUser() : null;
-      const token = user ? (user.token || user.email) : '';
+      const token = user ? (user.token || '') : '';
       fetch(`/api/xp/transactions?userId=${encodeURIComponent(userId)}`, {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       }).then(r => r.ok ? r.json() : null).then(data => {

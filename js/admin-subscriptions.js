@@ -22,7 +22,7 @@
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const user = window.auth ? window.auth.getCurrentUser() : null;
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
 
     const headers = {
       'Authorization': `Bearer ${token}`,

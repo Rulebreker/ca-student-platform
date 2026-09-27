@@ -4,13 +4,16 @@ import json
 import time
 import urllib.request
 import urllib.error
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), 'tests'))
+import admin_session
 
 try:
     sys.stdout.reconfigure(line_buffering=True)
 except Exception:
     pass
 
-ADMIN_TOKEN = 'token_admin_excellenceca_secret'
+ADMIN_TOKEN = admin_session.admin_token()
 BASE_URL = 'http://127.0.0.1:8000'
 
 def api_request(path, method='GET', body=None, token=ADMIN_TOKEN):

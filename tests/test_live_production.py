@@ -1,9 +1,12 @@
 import urllib.request
 import json
 import time
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), 'tests'))
+import admin_session
 
 PROD = "https://excellenceca.vercel.app"
-TOKEN = "token_admin_excellenceca_secret"
+TOKEN = admin_session.admin_token('https://excellenceca.vercel.app')
 
 def api(path, method="GET", body=None):
     url = f"{PROD}{path}"

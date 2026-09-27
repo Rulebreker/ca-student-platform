@@ -7,9 +7,12 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), 'tests'))
+import admin_session
 
 BASE = 'http://127.0.0.1:8000'
-ADMIN = 'token_admin_excellenceca_secret'  # local dev admin session
+ADMIN = admin_session.admin_token()
 TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
 
 
@@ -41,7 +44,10 @@ st, res = call('/api/admin/users', {'id': f'usr-teach-{stamp}', 'name': 'Test Te
 check(st == 200 and res['user']['privileges'] == {'canGradeCopies': False, 'canUploadTests': True, 'canUploadLectures': False, 'canViewStudents': False},
       f'create teacher stores cleaned privileges ({st})')
 check('password' not in res['user'], 'create response never returns the password')
-teacher_token = res['token']
+check(not res.get('token') and not res['user'].get('token'), 'provisioning does not hand the new user a session to the admin')
+st, login = call('/api/auth/login', {'identifier': f'teacher{stamp}@example.com', 'password': 'Passw0rd!x'}, token=None)
+check(st == 200 and str(login.get('token', '')).startswith('sess_'), f'teacher logs in and receives a session token ({st})')
+teacher_token = login['token']
 
 # 2. Update privileges + details through the new admin update endpoint
 st, res = call('/api/admin/users/update', {'userId': f'usr-teach-{stamp}', 'privileges': {'canGradeCopies': True, 'canUploadTests': True}, 'phone': '9990001111'})

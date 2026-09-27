@@ -1,11 +1,14 @@
 import urllib.request
 import json
 import time
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), 'tests'))
+import admin_session
 
 LOCAL_BASE = 'http://127.0.0.1:8000'
 PROD_BASE = 'https://excellenceca.vercel.app'
 FIREBASE_RTDB_URL = 'https://excellenceca-45a9d-default-rtdb.firebaseio.com'
-ADMIN_TOKEN = 'token_admin_excellenceca_secret'
+ADMIN_TOKEN = admin_session.admin_token()
 
 def attempt_login(base_url, identifier, password):
     req = urllib.request.Request(f'{base_url}/api/auth/login',

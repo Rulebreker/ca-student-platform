@@ -2,9 +2,12 @@ import urllib.request
 import urllib.error
 import json
 import time
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), 'tests'))
+import admin_session
 
 SERVER_URL = "http://127.0.0.1:8000"
-TOKEN = "token_admin_excellenceca_secret"
+TOKEN = admin_session.admin_token('https://excellenceca.vercel.app')
 
 def post(path, body):
     url = f"{SERVER_URL}{path}"

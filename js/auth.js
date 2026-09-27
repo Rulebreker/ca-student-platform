@@ -124,6 +124,12 @@ class AuthManager {
     this.currentUser = window.store ? window.store.getCurrentUser() : null;
     this._sessionWatchdogTimer = null;
     this._visibilityHandler = null;
+    // Sessions from before server-issued tokens (or without any token) are no longer valid: sign in again.
+    if (this.currentUser && !/^sess_[A-Za-z0-9_-]{40,128}$/.test(String(this.currentUser.token || ''))) {
+      this.currentUser = null;
+      if (window.store) window.store.setCurrentUser(null);
+      this._sessionExpiredOnLoad = true;
+    }
     if (this.currentUser) {
       document.documentElement.classList.add('user-is-authenticated');
       this.startSessionWatchdog(this.currentUser);
@@ -604,7 +610,7 @@ class AuthManager {
     const checkSession = async () => {
       if (!this.currentUser) return;
       try {
-        const token = this.currentUser.token || this.currentUser.id;
+        const token = this.currentUser.token || '';
         const res = await fetch('/api/auth/verify', {
           headers: {
             'Authorization': `Bearer ${token}`,

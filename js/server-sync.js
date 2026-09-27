@@ -53,7 +53,7 @@ class ServerSyncManager {
 
   _authHeaders() {
     const user = window.store ? window.store.getCurrentUser() : null;
-    const token = user ? (user.token || user.email) : '';
+    const token = user ? (user.token || '') : '';
     return token ? { 'Authorization': `Bearer ${token}` } : {};
   }
 
@@ -193,13 +193,15 @@ class ServerSyncManager {
             if (!freshCurrent.password && current.password) {
               freshCurrent.password = current.password;
             }
+            freshCurrent.token = current.token; // the server never returns session tokens in user lists
             window.store.setCurrentUser(freshCurrent);
             if (window.auth) window.auth.currentUser = freshCurrent;
             this.updateUserPointsUi(freshCurrent);
           }
         } else if (current) {
-          const freshCurrent = localUsers.find(u => u.id === current.id);
-          if (freshCurrent) {
+          const found = localUsers.find(u => u.id === current.id);
+          if (found) {
+            const freshCurrent = { ...found, token: current.token };
             window.store.setCurrentUser(freshCurrent);
             if (window.auth) window.auth.currentUser = freshCurrent;
           }

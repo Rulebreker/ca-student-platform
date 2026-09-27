@@ -20,6 +20,7 @@ import re
 import zlib
 import hashlib
 import hmac
+import secrets
 import collections
 
 PORT = 8000
@@ -1662,67 +1663,101 @@ def xp_reset_background_worker():
 REVOKED_TOKENS = set()
 REVOKED_USERS = set()
 
-def authenticate_token(token_or_email):
-    if not token_or_email:
+SESSION_TOKEN_PREFIX = 'sess_'
+SESSION_TOKEN_RE = re.compile(r'^sess_[A-Za-z0-9_-]{40,128}$')
+
+
+def issue_session_token():
+    """New unguessable session token (issued only by login / registration)."""
+    return SESSION_TOKEN_PREFIX + secrets.token_urlsafe(32)
+
+
+def is_session_token(value):
+    return bool(value) and bool(SESSION_TOKEN_RE.match(str(value).strip()))
+
+
+MAX_SESSIONS_PER_USER = 10
+
+
+def user_session_tokens(u):
+    """All live session tokens of a user (one per logged-in device, newest last)."""
+    tokens = [t for t in (u.get('sessionTokens') or []) if is_session_token(t)]
+    if is_session_token(u.get('token')) and u['token'] not in tokens:
+        tokens.append(u['token'])
+    return tokens
+
+
+def start_user_session(u):
+    """Issue a new session for a login/registration without ending the user's other devices."""
+    token = issue_session_token()
+    u['sessionTokens'] = (user_session_tokens(u) + [token])[-MAX_SESSIONS_PER_USER:]
+    u['token'] = token
+    return token
+
+
+def end_all_user_sessions(u, data):
+    """Revoke every session of a user (password reset). The user must log in again."""
+    revoked = data.setdefault('revoked_tokens', [])
+    for t in user_session_tokens(u):
+        REVOKED_TOKENS.add(t)
+        if t not in revoked:
+            revoked.append(t)
+    u['sessionTokens'] = []
+    u['token'] = None
+
+
+def find_user_by_session_token(data, token):
+    """The user holding session `token` (constant-time comparison), else None.
+    Email, username, user id, role names and the old static tokens are NOT tokens."""
+    if not is_session_token(token):
         return None
-    clean_token = str(token_or_email).strip()
-    clean_uname = clean_token.lstrip('@').lower()
-    if clean_token in REVOKED_TOKENS or clean_token.lower() in REVOKED_USERS or clean_uname in REVOKED_USERS:
-        return None
-
-    data = load_backend_data()
-    persisted_revoked_tokens = set(data.get('revoked_tokens', []))
-    persisted_revoked_users = set(data.get('revoked_users', []))
-    if clean_token in persisted_revoked_tokens or clean_token.lower() in persisted_revoked_users or clean_uname in persisted_revoked_users:
-        return None
-
-    # 1. Authoritative lookup in stored users
-    for email, u in data.get('users', {}).items():
-        u_token = u.get('token') or ''
-        u_id = u.get('id') or ''
-        u_email = (u.get('email') or '').lower()
-        u_uname = (u.get('username') or '').lstrip('@').lower()
-
-        if (clean_token == u_token or 
-            clean_token == u_id or 
-            clean_token.lower() == u_email or 
-            clean_uname == u_uname or 
-            clean_token.lower() == u_uname):
-            # Check revocation
-            if (u_token and (u_token in REVOKED_TOKENS or u_token in persisted_revoked_tokens)) or \
-               (u_id and (u_id.lower() in REVOKED_USERS or u_id.lower() in persisted_revoked_users)) or \
-               (u_email and (u_email in REVOKED_USERS or u_email in persisted_revoked_users)) or \
-               (u_uname and (u_uname in REVOKED_USERS or u_uname in persisted_revoked_users)):
-                return None
-            if u.get('isActive', True) and not u.get('isDeleted', False):
-                return u
-            return None
-
-    # 2. Recognized administrator credentials
-    if (clean_token == 'token_admin_excellenceca_secret' or 
-        clean_token.startswith('token_admin_') or 
-        clean_token == 'usr-admin-1' or 
-        clean_token.lower() in ['admin', 'adminrulebreker', 'administrator', 'adminrulebreker@rulebrekerdothunter.com']):
-        admin_u = next((u for u in data.get('users', {}).values() if u.get('role') == 'admin'), None)
-        if admin_u and admin_u.get('isActive', True):
-            return admin_u
-
-    # 3. Recognized teacher credentials
-    if clean_token == 'token_prof_sharma_teacher' or clean_token.lower() == 'prof.sharma@excellenceca.com':
-        teach_u = next((u for u in data.get('users', {}).values() if u.get('role') == 'teacher'), None)
-        if teach_u and teach_u.get('isActive', True):
-            return teach_u
-
-    # 4. Recognized standard student credentials
-    if clean_token == 'token_rohan_sharma_student' or clean_token == 'usr-student-1':
-        if ('usr-student-1' in persisted_revoked_users or 'usr-student-1' in REVOKED_USERS or 
-            'token_rohan_sharma_student' in persisted_revoked_tokens or 'token_rohan_sharma_student' in REVOKED_TOKENS):
-            return None
-        st_u = next((u for u in data.get('users', {}).values() if u.get('id') == 'usr-student-1'), None)
-        if st_u and st_u.get('isActive', True) and not st_u.get('isDeleted', False):
-            return st_u
-
+    clean = str(token).strip().encode('utf-8')
+    for u in (data.get('users') or {}).values():
+        if isinstance(u, dict):
+            for stored in user_session_tokens(u):
+                if hmac.compare_digest(stored.encode('utf-8'), clean):
+                    return u
     return None
+
+
+def is_user_revoked(u, data, token=None):
+    persisted_tokens = set(data.get('revoked_tokens', []))
+    persisted_users = set(str(x).lower().strip() for x in data.get('revoked_users', []))
+    ids = {str(u.get('id') or '').lower(), str(u.get('email') or '').lower(),
+           str(u.get('username') or '').lower().lstrip('@')} - {''}
+    token_revoked = bool(token) and (token in REVOKED_TOKENS or token in persisted_tokens)
+    return token_revoked or bool(ids & REVOKED_USERS) or bool(ids & persisted_users)
+
+
+def scrub_session_tokens(payload, _depth=0):
+    """Remove sessionTokens (a user's other devices) from any API response."""
+    if _depth > 6:
+        return payload
+    if isinstance(payload, dict):
+        return {k: scrub_session_tokens(v, _depth + 1) for k, v in payload.items() if k != 'sessionTokens'}
+    if isinstance(payload, list):
+        return [scrub_session_tokens(v, _depth + 1) for v in payload]
+    return payload
+
+
+def authenticate_token(token):
+    """Authenticated, active user for a session token, or None."""
+    if not is_session_token(token):
+        return None
+    clean = str(token).strip()
+    if clean in REVOKED_TOKENS:
+        return None
+    data = load_backend_data()
+    u = find_user_by_session_token(data, clean)
+    if u is None:
+        # the session may have been issued by another instance moments ago
+        data = load_backend_data(refresh_collections=['users', 'revoked_users', 'revoked_tokens'])
+        u = find_user_by_session_token(data, clean)
+    if u is None or is_user_revoked(u, data, clean):
+        return None
+    if not u.get('isActive', True) or u.get('isDeleted', False):
+        return None
+    return u
 
 def extract_text_from_pdf(pdf_bytes):
     text_chunks = []
@@ -1937,7 +1972,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header('Access-Control-Max-Age', '86400')
 
     def send_json(self, status_code, data):
-        payload = json.dumps(data).encode('utf-8')
+        payload = json.dumps(scrub_session_tokens(data)).encode('utf-8')
         self.send_response(status_code)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(payload)))
@@ -2068,64 +2103,19 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             
             clean_token = str(token).strip()
-            clean_uname = clean_token.lstrip('@').lower()
             data = load_backend_data()
+            matched = find_user_by_session_token(data, clean_token)
+            if not matched:
+                data = load_backend_data(refresh_collections=['users', 'revoked_users', 'revoked_tokens'])
+                matched = find_user_by_session_token(data, clean_token)
             persisted_revoked_tokens = set(data.get('revoked_tokens', []))
             persisted_revoked_users = set(data.get('revoked_users', []))
-            
-            # Find matching user in database
-            matched = None
-            for email, u in data.get('users', {}).items():
-                u_token = u.get('token') or ''
-                u_id = u.get('id') or ''
-                u_email = (u.get('email') or '').lower()
-                u_uname = (u.get('username') or '').lstrip('@').lower()
-                if (clean_token == u_token or 
-                    clean_token == u_id or 
-                    clean_token.lower() == u_email or 
-                    clean_uname == u_uname or 
-                    clean_token.lower() == u_uname):
-                    matched = u
-                    break
-
-            if not matched:
-                # Check legacy admin/teacher hardcodes
-                if clean_token == 'token_admin_excellenceca_secret' or clean_uname in ['admin', 'adminrulebreker', 'adminrulebreker@rulebrekerdothunter.com']:
-                    matched = next((u for u in data.get('users', {}).values() if u.get('role') == 'admin'), None)
-                elif clean_token == 'token_prof_sharma_teacher' or clean_token.lower() == 'prof.sharma@excellenceca.com':
-                    matched = next((u for u in data.get('users', {}).values() if u.get('role') == 'teacher'), None)
-
-            if not matched:
-                # If not found in memory/disk cache, refresh users from database to support newly issued tokens seamlessly
-                refreshed_data = load_backend_data(refresh_collections=['users'])
-                for email, u in refreshed_data.get('users', {}).items():
-                    u_token = u.get('token') or ''
-                    u_id = u.get('id') or ''
-                    u_email = (u.get('email') or '').lower()
-                    u_uname = (u.get('username') or '').lstrip('@').lower()
-                    if (clean_token == u_token or 
-                        clean_token == u_id or 
-                        clean_token.lower() == u_email or 
-                        clean_uname == u_uname or 
-                        clean_token.lower() == u_uname):
-                        matched = u
-                        data = refreshed_data
-                        persisted_revoked_tokens = set(data.get('revoked_tokens', []))
-                        persisted_revoked_users = set(data.get('revoked_users', []))
-                        break
 
             if not matched:
                 self.send_json(401, {'authenticated': False, 'error': 'Invalid or expired token', 'code': 401})
                 return
 
-            # Check revocation
-            u_token = matched.get('token') or ''
-            u_id = (matched.get('id') or '').lower()
-            u_email = (matched.get('email') or '').lower()
-            if (clean_token in REVOKED_TOKENS or clean_token in persisted_revoked_tokens or
-                u_token in REVOKED_TOKENS or u_token in persisted_revoked_tokens or
-                u_id in REVOKED_USERS or u_id in persisted_revoked_users or
-                u_email in REVOKED_USERS or u_email in persisted_revoked_users):
+            if is_user_revoked(matched, data, clean_token):
                 self.send_json(401, {'authenticated': False, 'error': 'Session has been revoked or invalidated by administrator.', 'code': 401})
                 return
 
@@ -2139,6 +2129,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
             sanitized = dict(matched)
             sanitized.pop('password', None)
+            sanitized['token'] = clean_token  # the caller's own session, never another device's
             self.send_json(200, {'authenticated': True, 'user': sanitized})
             return
 
@@ -3992,11 +3983,12 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     matched_user['password'] = hash_password(password)
 
                 # Issue fresh active session token on login and sync to persistent storage and Firebase
-                new_session_tok = f"token_{matched_user.get('role', 'student')}_{uuid.uuid4().hex[:16]}"
-                matched_user['token'] = new_session_tok
+                # New session for this device; the user's other logged-in devices stay signed in
+                new_session_tok = start_user_session(matched_user)
 
                 save_backend_data(data)
-                sync_to_firebase(f"users/{matched_user['id']}", {'token': new_session_tok}, method='PATCH', sync=True)
+                sync_to_firebase(f"users/{matched_user['id']}", {'token': new_session_tok, 'sessionTokens': matched_user['sessionTokens']},
+                                 method='PATCH', sync=True)
 
                 sanitized = dict(matched_user)
                 sanitized.pop('password', None)
@@ -4050,7 +4042,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         return
 
                 user_id = post_data.get('id') or f'usr-student-{int(datetime.now().timestamp() * 1000)}'
-                new_token = f"token_student_{uuid.uuid4().hex[:16]}"
+                new_token = issue_session_token()
                 hashed_pass = hash_password(raw_pass)
 
                 new_user = {
@@ -4063,6 +4055,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     'password': hashed_pass,
                     'role': 'student',
                     'token': new_token,
+                    'sessionTokens': [new_token],
                     'isActive': True,
                     'totalXp': 0,
                     'baseXp': 0,
@@ -4630,16 +4623,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 hashed = hash_password(new_password)
                 target_student['password'] = hashed
 
-                # Invalidate existing token
-                old_token = target_student.get('token')
-                if old_token:
-                    REVOKED_TOKENS.add(old_token)
-                    revoked_list = data.setdefault('revoked_tokens', [])
-                    if old_token not in revoked_list:
-                        revoked_list.append(old_token)
-
-                new_token = f"token_student_{uuid.uuid4().hex[:16]}"
-                target_student['token'] = new_token
+                # A password reset signs the user out everywhere; they log in with the new password
+                end_all_user_sessions(target_student, data)
 
                 # Admin audit log
                 now_iso = datetime.now(timezone.utc).isoformat()
@@ -4664,8 +4649,10 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 # Sync to Firebase RTDB synchronously
                 sync_to_firebase(f"users/{target_student.get('id')}", {
                     'password': hashed,
-                    'token': new_token
+                    'token': None,
+                    'sessionTokens': []
                 }, method='PATCH', sync=True)
+                sync_to_firebase('revoked_tokens', data.get('revoked_tokens', []), sync=True)
                 sync_to_firebase(f"admin_audit_logs/{audit_entry['id']}", audit_entry, method='PUT', sync=True)
 
                 print(f"[ADMIN_RESET_PASSWORD] Password reset for {target_student.get('email')} ({target_student.get('id')}) by {user.get('email')}", flush=True)
@@ -4673,8 +4660,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(200, {
                     'success': True,
                     'message': f'Password updated successfully for {target_student.get("name")}.',
-                    'studentId': target_student.get('id'),
-                    'token': new_token
+                    'studentId': target_student.get('id')
                 })
                 return
             except Exception as e:
@@ -4920,7 +4906,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         return
 
                 user_id = post_data.get('id') or f"usr-{raw_role}-{int(datetime.now().timestamp() * 1000)}"
-                new_token = f"token_{raw_role}_{uuid.uuid4().hex[:16]}"
+                new_token = None  # a session is issued at first login
                 hashed_pass = hash_password(raw_pass)
 
                 new_user = {
@@ -5031,6 +5017,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 sanitized = dict(target)
                 sanitized.pop('password', None)
+                sanitized.pop('token', None)  # never hand another user's session to the admin
                 self.send_json(200, {'success': True, 'user': sanitized})
                 return
             except Exception as e:
@@ -6020,6 +6007,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 sanitized = dict(target_u)
                 sanitized.pop('password', None)
+                sanitized.pop('token', None)  # the caller keeps its own session token
                 sync_to_firebase(f"users/{target_u.get('id')}", sanitized, method='PATCH')
 
                 self.send_json(200, {'success': True, 'user': sanitized})
