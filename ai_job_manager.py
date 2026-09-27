@@ -571,9 +571,17 @@ def _finalize_job(repo: JobRepository, job: Dict[str, Any], questions: List[Dict
     repo.save_test(test_record)
 
     complete = len(questions) >= count
+    if not complete:
+        note = note or metrics.get('partialReason') or metrics.get('error')
+    if isinstance(metrics.get('questionStatuses'), list) and metrics['questionStatuses']:
+        # final slot states (e.g. unfilled + reason) over the earlier ones (a resumed job reports only its part)
+        by_number = {s.get('number'): s for s in (job.get('questionStatuses') or []) if isinstance(s, dict)}
+        by_number.update({s.get('number'): s for s in metrics['questionStatuses'] if isinstance(s, dict)})
+        job['questionStatuses'] = [by_number[n] for n in sorted(by_number, key=lambda n: (n is None, n or 0))]
     job.update({
         'status': 'COMPLETED' if complete else 'PARTIAL',
-        'progressPct': 100,
+        # accepted / requested: only a complete test reaches 100 %
+        'progressPct': 100 if complete else min(99, int(len(questions) * 100 / count)),
         'generatedCount': len(questions),
         'validatedCount': len(questions),
         'failedCount': count - len(questions),

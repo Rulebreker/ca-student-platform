@@ -24,12 +24,50 @@ TOPICS = [
 
 
 class FakeQwen:
-    """Stand-in for local_qwen_service.generate_mcqs returning unique, valid MCQs."""
+    """Stand-in for local_qwen_service.generate_mcqs returning unique, valid MCQs.
 
-    def __init__(self, plan=None):
+    plan: call_index -> 'error' | int (how many valid questions) | list of candidate kinds:
+      'ok' new unique MCQ, 'dup' exact copy of an earlier returned MCQ, 'near' near-duplicate of one,
+      'bank' copy of self.bank_text (a question-bank stem), 'invalid' schema-invalid (empty option D).
+    """
+
+    def __init__(self, plan=None, bank_text=''):
         self.calls = []          # (count, timeout)
-        self.plan = plan or {}   # call_index -> 'error' | int (how many valid questions to return)
+        self.plan = plan or {}
         self.serial = 0
+        self.produced = []       # every 'ok' candidate returned
+        self.bank_text = bank_text
+        self.returned = []       # every candidate returned (any kind)
+
+    def _ok(self, subject, chapter, record=True):
+        topic = TOPICS[self.serial % len(TOPICS)]
+        self.serial += 1
+        q = {
+            'question': f"Which statement best explains {topic} in the ICAI syllabus (case {self.serial})?",
+            'optionA': f"Alpha answer {self.serial}", 'optionB': f"Beta answer {self.serial}",
+            'optionC': f"Gamma answer {self.serial}", 'optionD': f"Delta answer {self.serial}",
+            'correctAnswer': 'B', 'correctOption': 'B',
+            'explanation': f"Option B is correct because of the rule about {topic}.",
+            'subject': subject, 'chapter': chapter,
+        }
+        if record:
+            self.produced.append(q)   # returned 'ok' candidates: what 'dup' / 'near' copy
+        return q
+
+    def _candidate(self, kind, subject, chapter):
+        if kind == 'ok':
+            return self._ok(subject, chapter)
+        base = (dict(self.produced[len(self.returned) % len(self.produced)]) if self.produced
+                else self._ok(subject, chapter, record=False))
+        if kind == 'dup':
+            return dict(base)
+        if kind == 'near':
+            return dict(base, question=base['question'].replace(')?', ') now?'))
+        if kind == 'bank':
+            return dict(base, question=self.bank_text)
+        if kind == 'invalid':
+            return dict(self._ok(subject, chapter, record=False), optionD='')
+        raise ValueError(kind)
 
     def __call__(self, subject, chapter, count, **kwargs):
         idx = len(self.calls)
@@ -38,18 +76,9 @@ class FakeQwen:
         action = self.plan.get(idx, count)
         if action == 'error':
             raise TimeoutError('Local Qwen generation timed out')
-        out = []
-        for _ in range(action):
-            topic = TOPICS[self.serial % len(TOPICS)]
-            self.serial += 1
-            out.append({
-                'question': f"Which statement best explains {topic} in the ICAI syllabus (case {self.serial})?",
-                'optionA': f"Alpha answer {self.serial}", 'optionB': f"Beta answer {self.serial}",
-                'optionC': f"Gamma answer {self.serial}", 'optionD': f"Delta answer {self.serial}",
-                'correctAnswer': 'B', 'correctOption': 'B',
-                'explanation': f"Option B is correct because of the rule about {topic}.",
-                'subject': subject, 'chapter': chapter,
-            })
+        kinds = action if isinstance(action, list) else ['ok'] * action
+        out = [self._candidate(k, subject, chapter) for k in kinds]
+        self.returned.extend(out)
         return out, {'model': 'qwen3:8b'}
 
 
@@ -101,42 +130,158 @@ class TestCanonicalPipeline(unittest.TestCase):
                 with patch('local_qwen_service.generate_mcqs', side_effect=FakeQwen()):
                     ai_mcq_engine.generate_exact_mcqs_pipeline(**CHAPTER, count=2, **bad)
 
-    def test_short_batch_retry_keeps_successful_questions_and_fills_only_the_gap(self):
-        fake = FakeQwen(plan={0: 1})  # batch 1 first attempt returns only 1 valid question
+    def test_short_response_is_topped_up_without_regenerating_accepted_questions(self):
+        fake = FakeQwen(plan={0: 1})  # round 1 returns only 1 of the 2 requested candidates
         qs, metrics, _, _ = self.run_pipeline(fake, count=4)
-        self.assertEqual([c[0] for c in fake.calls], [2, 2, 2], "retry asks a full (<=2) batch for spare candidates")
-        self.assertEqual(fake.kwargs[1]['temperature'], ai_mcq_engine.RETRY_TEMPERATURE)
+        self.assertEqual([c[0] for c in fake.calls], [2, 2, 1], "then exactly the missing number, <= batch size")
         self.assertIsNone(fake.kwargs[0]['temperature'])
-        self.assertEqual(len(qs), 4, "the retry fills only the 1 missing slot")
+        self.assertEqual(fake.kwargs[1]['temperature'], ai_mcq_engine.RETRY_TEMPERATURE, "replacement rounds diversify")
+        self.assertEqual(len(qs), 4)
         self.assertEqual([q['number'] for q in qs], [1, 2, 3, 4])
-        self.assertEqual(metrics['regenerationAttempts'], 1)
+        self.assertEqual(metrics['finalStatus'], 'COMPLETED')
         self.assertTrue(all(c[0] <= 2 for c in fake.calls), "never more than 2 MCQs per Ollama call")
 
-    def test_failed_batch_retried_once_then_filled_by_single_top_up(self):
-        fake = FakeQwen(plan={0: 'error', 1: 'error'})  # batch 1 fails twice
-        qs, metrics, progress, _ = self.run_pipeline(fake, count=4)
-        self.assertEqual(len(fake.calls), 4, "batch 1 x2, batch 2 x1, then one top-up call")
-        self.assertEqual(len(qs), 4)
-        self.assertEqual(metrics['finalStatus'], 'COMPLETED')
-        self.assertEqual((metrics['batchesFailed'], metrics['topUpCalls']), (1, 1))
-        self.assertEqual([s['status'] for s in metrics['questionStatuses']], ['saved'] * 4)
-
-    def test_top_up_is_bounded_and_run_ends_partial(self):
-        fake = FakeQwen(plan={0: 'error', 1: 'error', 3: 'error'})  # batch 1 fails, its top-up fails too
+    def test_transient_provider_errors_are_recovered(self):
+        fake = FakeQwen(plan={0: 'error', 1: 'error'})  # two failed calls, then Qwen recovers
         qs, metrics, _, _ = self.run_pipeline(fake, count=4)
         self.assertEqual(len(fake.calls), 4)
-        self.assertEqual(len(qs), 2)
-        self.assertEqual(metrics['finalStatus'], 'PARTIAL')
-        statuses = [s['status'] for s in metrics['questionStatuses']]
-        self.assertEqual(statuses, ['failed', 'failed', 'saved', 'saved'])
-        self.assertIn('timed out', metrics['questionStatuses'][0]['error'])
+        self.assertEqual(len(qs), 4)
+        self.assertEqual(metrics['finalStatus'], 'COMPLETED')
+        self.assertEqual([s['status'] for s in metrics['questionStatuses']], ['saved'] * 4)
 
-    def test_all_batches_fail_gives_failed_without_looping(self):
+    def test_provider_unavailable_from_the_start_fails_with_reason_without_looping(self):
         fake = FakeQwen(plan={i: 'error' for i in range(50)})
         qs, metrics, _, _ = self.run_pipeline(fake, count=6)
-        self.assertEqual(len(fake.calls), 9, "3 batches x (attempt + retry) + 3 top-ups, then stop")
+        self.assertEqual(len(fake.calls), ai_mcq_engine.MAX_CONSECUTIVE_PROVIDER_FAILURES)
         self.assertEqual(qs, [])
         self.assertEqual(metrics['finalStatus'], 'FAILED')
+        self.assertIn('PROVIDER_UNAVAILABLE', metrics['error'])
+
+    # ---------------------------------------------------------------- target fill
+    def assert_complete_and_clean(self, qs, metrics, saved, count, fake):
+        """COMPLETED means exactly `count` unique validated questions, none of them a rejected candidate."""
+        self.assertEqual(metrics['finalStatus'], 'COMPLETED')
+        self.assertEqual(len(qs), count)
+        self.assertEqual(len({q['text'] for q in qs}), count, "all unique")
+        self.assertEqual([q['number'] for q in qs], list(range(1, count + 1)))
+        self.assertEqual([q['id'] for q in saved], [q['id'] for q in qs], "only accepted questions are handed over for saving")
+        self.assertEqual(len(saved), count, "no rejected candidate is handed over for saving")
+        # an exact duplicate shares its text with the accepted original; every other rejected stem must be absent
+        rejected_stems = {r['question'] for r in metrics['rejectedCandidates']
+                          if r['question'] and 'Identical match with a question already generated' not in r['reason']}
+        self.assertFalse(rejected_stems & {q['text'] for q in qs}, "no rejected candidate is persisted")
+        self.assertEqual([s['status'] for s in metrics['questionStatuses']], ['saved'] * count)
+        self.assertNotIn('failed', [s['status'] for s in metrics['questionStatuses']])
+
+    def test_two_duplicates_in_last_round_get_replacements_10_of_10(self):
+        fake = FakeQwen(plan={4: ['dup', 'dup']})   # Q1-Q8 pass, Q9/Q10 candidates are duplicates
+        qs, metrics, progress, saved = self.run_pipeline(fake, count=10)
+        self.assertEqual([c[0] for c in fake.calls], [2, 2, 2, 2, 2, 2], "one replacement round for the 2 missing")
+        self.assert_complete_and_clean(qs, metrics, saved, 10, fake)
+        self.assertEqual(metrics['rejectedDuplicates'], 2)
+        texts = [p['status'] for p in progress]
+        self.assertIn('8/10 verified \u2014 generating 2 replacement questions...', texts)
+        after_rejection = [p for p in progress if p['stage'] == 'batch_complete' and p['verifiedCount'] == 8][-1]
+        tail = [(s['number'], s['status']) for s in after_rejection['questionStatuses'][8:]]
+        self.assertEqual(tail, [(9, 'retrying'), (10, 'retrying')], "Q9/Q10 are RETRYING, never FAILED")
+        self.assertTrue(all(s['error'].startswith('Rejected: Duplicate') for s in after_rejection['questionStatuses'][8:]))
+        fresh = [t for t in texts if 'replacement' in t]
+        self.assertEqual(len([t for t in texts if t.startswith(('2/10', '4/10', '6/10')) and 'replacement' in t]), 0,
+                         f"first-pass rounds are not labelled replacements: {fresh}")
+        repl = fake.kwargs[5]
+        self.assertEqual(repl['temperature'], ai_mcq_engine.RETRY_TEMPERATURE)
+        self.assertEqual(len(repl['rejected_stems']), 2, "rejected stems are sent as DO NOT REPEAT")
+        self.assertTrue(repl['diversification'], "a different framing angle is requested")
+        self.assertNotEqual(repl['diversification'], fake.kwargs[4].get('diversification'))
+
+    def test_replacement_that_is_again_a_duplicate_gets_another_round(self):
+        fake = FakeQwen(plan={4: ['dup', 'dup'], 5: ['ok', 'dup']})
+        qs, metrics, progress, saved = self.run_pipeline(fake, count=10)
+        self.assertEqual([c[0] for c in fake.calls], [2, 2, 2, 2, 2, 2, 1])
+        self.assert_complete_and_clean(qs, metrics, saved, 10, fake)
+        texts = [p['status'] for p in progress]
+        self.assertIn('9/10 verified \u2014 generating 1 replacement question...', texts)
+        self.assertEqual(len(fake.kwargs[6]['rejected_stems']), 3)
+        angles = [k['diversification'] for k in fake.kwargs[5:7]]
+        self.assertNotEqual(angles[0], angles[1], "each replacement round varies the angle")
+        self.assertEqual(metrics['replacementRounds'], 2)
+
+    def test_question_bank_duplicate_is_replaced(self):
+        bank = "Which statement best explains the role of the ICAI Council in approving accounting standards?"
+        fake = FakeQwen(plan={0: ['bank', 'ok']}, bank_text=bank)
+        qs, metrics, _, saved = self.run_pipeline(fake, count=2, existing_questions=[{'id': 'q-bank-1', 'text': bank}])
+        self.assert_complete_and_clean(qs, metrics, saved, 2, fake)
+        self.assertEqual(metrics['rejectedDuplicates'], 1)
+        self.assertIn('question bank', metrics['rejectedCandidates'][0]['reason'])
+        self.assertNotIn(bank, [q['text'] for q in qs])
+
+    def test_near_duplicate_above_threshold_is_replaced(self):
+        fake = FakeQwen(plan={0: ['ok', 'near']})
+        qs, metrics, _, saved = self.run_pipeline(fake, count=2)
+        near = fake.returned[1]['question']
+        sim = ai_mcq_engine.calculate_jaccard_similarity(near, fake.returned[0]['question'],
+                                                         'Business Economics Law of Demand')
+        self.assertGreaterEqual(sim, ai_mcq_engine.DUPLICATE_SIMILARITY_THRESHOLD)
+        self.assertNotEqual(near, fake.returned[0]['question'], "not an exact copy")
+        self.assert_complete_and_clean(qs, metrics, saved, 2, fake)
+        self.assertIn('Near-duplicate', metrics['rejectedCandidates'][0]['reason'])
+
+    def test_invalid_schema_candidate_is_replaced(self):
+        fake = FakeQwen(plan={0: ['invalid', 'ok']})
+        qs, metrics, _, saved = self.run_pipeline(fake, count=2)
+        self.assert_complete_and_clean(qs, metrics, saved, 2, fake)
+        self.assertEqual(metrics['rejectedValidation'], 1)
+        self.assertEqual(len(fake.calls), 2)
+
+    def test_provider_failure_after_progress_is_partial_with_reason(self):
+        fake = FakeQwen(plan={i: 'error' for i in range(2, 50)})   # 4 accepted, then Ollama goes away
+        qs, metrics, _, saved = self.run_pipeline(fake, count=10)
+        self.assertEqual(len(qs), 4)
+        self.assertEqual(len(fake.calls), 2 + ai_mcq_engine.MAX_CONSECUTIVE_PROVIDER_FAILURES)
+        self.assertEqual(metrics['finalStatus'], 'PARTIAL')
+        self.assertIn('PROVIDER_UNAVAILABLE', metrics['partialReason'])
+        statuses = [s['status'] for s in metrics['questionStatuses']]
+        self.assertEqual(statuses, ['saved'] * 4 + ['unfilled'] * 6)
+        self.assertNotIn('failed', statuses)
+
+    def test_global_budget_exhausted_is_partial_and_bounded(self):
+        fake = FakeQwen(plan={i: ['dup', 'dup'] for i in range(1, 50)})   # every replacement is a duplicate
+        qs, metrics, _, saved = self.run_pipeline(fake, count=4, candidate_budget=10)
+        self.assertEqual(len(qs), 2)
+        self.assertEqual(metrics['candidatesEvaluated'], 10, "stops exactly at the budget")
+        self.assertEqual(len(fake.calls), 5)
+        self.assertEqual(metrics['finalStatus'], 'PARTIAL')
+        self.assertIn('GENERATION_BUDGET_EXHAUSTED', metrics['partialReason'])
+        self.assertEqual([q['id'] for q in saved], [q['id'] for q in qs])
+        # default budget is also finite
+        fake = FakeQwen(plan={i: ['dup', 'dup'] for i in range(1, 500)})
+        qs, metrics, _, _ = self.run_pipeline(fake, count=10)
+        self.assertEqual(metrics['candidatesEvaluated'], ai_mcq_engine.generation_budget(10))
+        self.assertEqual(metrics['finalStatus'], 'PARTIAL')
+
+    def test_progress_is_accepted_over_target_and_never_100_before_complete(self):
+        fake = FakeQwen(plan={4: ['dup', 'dup'], 5: ['ok', 'dup']})
+        _, _, progress, _ = self.run_pipeline(fake, count=10)
+        for p in progress:
+            self.assertEqual(p['progressPct'], min(95, 5 + int(p['verifiedCount'] / 10 * 90)))
+            self.assertLess(p['progressPct'], 100)
+        eight = [p for p in progress if p['verifiedCount'] == 8]
+        self.assertTrue(eight and all(p['progressPct'] == 77 for p in eight), "8/10 is not shown as done")
+        self.assertEqual([p['progressPct'] for p in progress], sorted(p['progressPct'] for p in progress))
+
+    def test_replacement_prompt_carries_do_not_repeat_and_new_angle(self):
+        import local_qwen_service
+        prompt = local_qwen_service.build_mcq_user_prompt(
+            subject='Business Economics', chapter='Theory of Demand and Supply', count=2,
+            previous_concepts=['Accepted question one?'], syllabus_scope='Allowed topics: Law of Demand',
+            rejected_stems=['Rejected duplicate stem about Giffen goods?'],
+            diversification='Frame each new question as a short numerical or computation-based stem.')
+        self.assertIn('DO NOT REPEAT', prompt)
+        self.assertIn('Rejected duplicate stem about Giffen goods?', prompt)
+        self.assertIn('short numerical or computation-based stem', prompt)
+        self.assertIn('Allowed topics: Law of Demand', prompt, "syllabus scope still enforced")
+        plain = local_qwen_service.build_mcq_user_prompt(subject='Business Economics', chapter='Theory of Demand and Supply')
+        self.assertNotIn('DO NOT REPEAT', plain, "first-pass prompt unchanged")
 
     def test_duplicates_are_rejected(self):
         existing = [{'text': "Which statement best explains price elasticity of demand for a normal good in the ICAI syllabus (case 1)?"}]

@@ -97,7 +97,9 @@ def build_mcq_user_prompt(
     question_speed: str = 'Quick',
     admin_description: str = '',
     previous_concepts: Optional[List[str]] = None,
-    syllabus_scope: str = ''
+    syllabus_scope: str = '',
+    rejected_stems: Optional[List[str]] = None,
+    diversification: str = ''
 ) -> str:
     """Build structured prompt for Qwen3 8B."""
     avoid_block = ""
@@ -106,6 +108,12 @@ def build_mcq_user_prompt(
         if cleaned:
             avoid_block = ("\nThese questions ALREADY EXIST. Do NOT repeat or paraphrase any of them; "
                            "test a different concept, rule or example instead:\n" + "\n".join(cleaned))
+    rejected_clean = [f"- {c.strip()[:140]}" for c in (rejected_stems or [])[-12:] if c and c.strip()]
+    if rejected_clean:
+        avoid_block += ("\nDO NOT REPEAT - these candidates were just REJECTED (duplicate or invalid). Do not "
+                        "reproduce, reword or test the same fact as any of them:\n" + "\n".join(rejected_clean))
+    if diversification and diversification.strip():
+        avoid_block += f"\nReplacement questions: {diversification.strip()}"
 
     topic_str = f" - Sub-topic: {topic}" if topic and topic.strip() else ""
     extra_instructions = f"\nAdditional Admin Guidelines: {admin_description.strip()}" if admin_description and admin_description.strip() else ""
@@ -316,7 +324,9 @@ def generate_mcqs(
     previous_concepts: Optional[List[str]] = None,
     timeout: Optional[float] = None,
     syllabus_scope: str = '',
-    temperature: Optional[float] = None
+    temperature: Optional[float] = None,
+    rejected_stems: Optional[List[str]] = None,
+    diversification: str = ''
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Generate multiple MCQs via local Ollama Qwen3 8B.
@@ -344,7 +354,9 @@ def generate_mcqs(
         question_speed=question_speed,
         admin_description=admin_description,
         previous_concepts=previous_concepts,
-        syllabus_scope=syllabus_scope
+        syllabus_scope=syllabus_scope,
+        rejected_stems=rejected_stems,
+        diversification=diversification
     )
 
     payload = {

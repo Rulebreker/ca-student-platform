@@ -58,6 +58,31 @@ class TestWorkerProcessJob(unittest.TestCase):
         self.assertEqual(w.sent('/fail'), [])
         self.assertIsNone(w.current_job_id)
 
+    def test_worker_uses_target_fill_and_hosts_exactly_the_requested_count(self):
+        """Local Qwen worker path: rejected duplicates are replaced, chapter/bank checks still apply."""
+        bank = "Which statement best explains the role of the ICAI Council in approving accounting standards?"
+        fake = FakeQwen(plan={0: ['bank', 'ok'], 4: ['dup', 'dup'], 5: ['ok', 'invalid']}, bank_text=bank)
+        w = RecordingWorker()
+        self.run_job(w, dict(JOB, count=10, existingQuestions=[{'text': bank}]), fake)
+        complete = w.sent('/complete')
+        self.assertEqual(len(complete), 1)
+        final = complete[0]['questions']
+        self.assertEqual(len(final), 10)
+        self.assertEqual(len({q['text'] for q in final}), 10)
+        self.assertNotIn(bank, [q['text'] for q in final], "question-bank duplicate never hosted")
+        self.assertTrue(all(q['chapterId'] == 'ch-fnd-eco-2' for q in final), "canonical chapter metadata kept")
+        self.assertEqual(complete[0]['metrics']['finalStatus'], 'COMPLETED')
+        self.assertEqual(complete[0]['metrics']['rejectedDuplicates'], 3)
+        self.assertEqual(complete[0]['metrics']['rejectedValidation'], 1)
+        sent_questions = [q for p in w.sent('/progress') for q in p['newQuestions']]
+        self.assertEqual(len(sent_questions), 10, "only accepted questions are ever sent to the server")
+        texts = [p['status'] for p in w.sent('/progress')]
+        self.assertTrue(any('replacement question' in (t or '') for t in texts), texts)
+        pcts = [p['progressPct'] for p in w.sent('/progress') if p['stage'] != 'publishing']
+        self.assertTrue(all(pct < 100 for pct in pcts))
+        self.assertTrue(all(s['status'] != 'failed' for p in w.sent('/progress') for s in (p['questionStatuses'] or [])))
+        self.assertEqual(w.sent('/fail'), [])
+
     def test_resume_generates_only_missing_questions(self):
         saved = [{'id': f'q-old-{i}', 'text': f'Earlier question number {i} about elasticity?', 'number': i} for i in (1, 2)]
         fake = FakeQwen()

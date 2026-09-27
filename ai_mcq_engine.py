@@ -12,6 +12,9 @@ import local_qwen_service
 
 # ----------------- Duplicate Detection -----------------
 
+# Jaccard similarity at/above which a candidate is a near-duplicate of an accepted or bank question
+DUPLICATE_SIMILARITY_THRESHOLD = float(os.environ.get('MCQ_DUPLICATE_THRESHOLD', '0.75'))
+
 def _tokenize_for_similarity(text: str, subject_topic: Optional[str] = None) -> Set[str]:
     """Extract clean lowercase word tokens for Jaccard similarity comparison."""
     words = re.findall(r'\b[a-zA-Z0-9]{3,}\b', text.lower())
@@ -565,7 +568,7 @@ def validate_mcq_locally_deterministic(
             candidate_text=q_text,
             existing_questions=existing_questions or [],
             current_batch_questions=current_batch_questions or [],
-            threshold=0.75,
+            threshold=DUPLICATE_SIMILARITY_THRESHOLD,
             subject_topic=f"{subject} {topic}"
         )
         if is_dup:
@@ -667,9 +670,32 @@ def validate_mcq_independently(
 
 QWEN_BATCH_SIZE = max(1, int(os.environ.get('QWEN_BATCH_SIZE', '2')))
 QWEN_BATCH_TIMEOUT = float(os.environ.get('QWEN_BATCH_TIMEOUT', '240'))
-MAX_ATTEMPTS_PER_BATCH = 2  # first attempt + at most one retry for the missing questions
 AVOID_LIST_SIZE = 20  # existing/earlier questions sent to Qwen as "do not repeat"
-RETRY_TEMPERATURE = 0.85  # more variety on the single retry so it does not reproduce the rejected output
+RETRY_TEMPERATURE = 0.85  # more variety for replacement rounds so rejected output is not reproduced
+# Target-fill budget: candidates evaluated (accepted + rejected) per requested question. A job of N
+# questions may evaluate at most max(N * factor, N + MIN_EXTRA_CANDIDATES) candidates in total.
+MAX_CANDIDATES_PER_QUESTION = max(1, int(os.environ.get('QWEN_MAX_CANDIDATES_PER_QUESTION', '3')))
+MIN_EXTRA_CANDIDATES = 4
+# Consecutive Ollama call failures (timeout / offline / error) after which the provider is unavailable
+MAX_CONSECUTIVE_PROVIDER_FAILURES = max(1, int(os.environ.get('QWEN_MAX_CONSECUTIVE_FAILURES', '3')))
+REJECTED_STEMS_LIMIT = 12  # rejected stems sent back to Qwen as "DO NOT REPEAT"
+REJECTED_TELEMETRY_LIMIT = 50
+# Framing rotated across replacement rounds so a replacement is not the same question again
+DIVERSIFICATION_ANGLES = (
+    "a short numerical or computation-based stem",
+    "a 'Which of the following is NOT ...' stem testing an exception",
+    "a practical scenario that applies the rule to specific facts",
+    "a comparison between two closely related concepts",
+    "a cause-and-effect or consequence question",
+    "an 'identify the correct example' question",
+    "a precise definition question that separates the concept from a close alternative",
+    "a question about when the rule does NOT apply or its limitations",
+)
+
+
+def generation_budget(count: int) -> int:
+    """Maximum candidates (accepted + rejected) evaluated for a job of `count` questions."""
+    return max(count * MAX_CANDIDATES_PER_QUESTION, count + MIN_EXTRA_CANDIDATES)
 
 
 class GenerationCancelled(Exception):
@@ -756,7 +782,9 @@ def generate_batched_mcqs(
     syllabus_scope: str = '',
     previous_concepts: Optional[List[str]] = None,
     timeout: Optional[float] = None,
-    temperature: Optional[float] = None
+    temperature: Optional[float] = None,
+    rejected_stems: Optional[List[str]] = None,
+    diversification: str = ''
 ) -> Tuple[List[Dict[str, Any]], str, str]:
     """
     One Ollama call for a single small batch of candidate MCQs.
@@ -775,7 +803,9 @@ def generate_batched_mcqs(
         syllabus_scope=syllabus_scope,
         previous_concepts=previous_concepts,
         timeout=timeout,
-        temperature=temperature
+        temperature=temperature,
+        rejected_stems=rejected_stems,
+        diversification=diversification
     )
     return valid_mcqs, 'local_qwen', telemetry.get('model') or local_qwen_service.OLLAMA_MODEL
 
@@ -884,7 +914,8 @@ def generate_exact_mcqs_pipeline(
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     on_question_verified: Optional[Callable[..., None]] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
-    rng: Optional[random.Random] = None
+    rng: Optional[random.Random] = None,
+    candidate_budget: Optional[int] = None
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     The single canonical MCQ generation pipeline (Local Qwen3 8B via Ollama).
@@ -892,11 +923,18 @@ def generate_exact_mcqs_pipeline(
     Keyword-only arguments: an unknown or misspelled parameter raises TypeError instead of
     being silently ignored.
 
-    Questions are generated in small batches (QWEN_BATCH_SIZE, default 2). Each batch is:
-    generate -> parse -> validate -> deduplicate -> on_question_verified (save) -> progress_callback.
-    A batch that yields fewer valid questions than requested is retried once for the missing
-    questions only; successful questions are never regenerated. Every Ollama call is bounded by
-    batch_timeout. The run ends COMPLETED, PARTIAL or FAILED - it never loops indefinitely.
+    Target fill: the run keeps generating until `count` validated, unique questions are accepted.
+    Each round asks Qwen for min(missing, QWEN_BATCH_SIZE) candidates, then every candidate goes
+    through validate -> deduplicate (accepted questions of this run + the question bank) ->
+    on_question_verified (save) -> progress_callback. A rejected candidate (invalid, duplicate,
+    near-duplicate, out of scope) never fills a slot: the missing questions are generated again as
+    replacements, with the rejected stems as "DO NOT REPEAT", a different framing angle, a different
+    sub-topic (whole-chapter requests) and a higher temperature. Accepted questions are never
+    regenerated. The loop is bounded: it stops at `count` accepted (COMPLETED), when the candidate
+    budget (generation_budget(count), or candidate_budget) is used up, or after
+    MAX_CONSECUTIVE_PROVIDER_FAILURES failed Ollama calls in a row (PARTIAL, or FAILED with none
+    accepted), with the reason in metrics['error'] / metrics['partialReason']. Every Ollama call is
+    bounded by batch_timeout.
 
     start_number offsets question numbering when resuming a job that already has saved questions.
     cancel_check is polled before every Ollama call; returning True raises GenerationCancelled.
@@ -925,23 +963,28 @@ def generate_exact_mcqs_pipeline(
         {'number': start_number + i, 'status': 'pending', 'error': None, 'provider': None}
         for i in range(count)
     ]
-    batch_sizes: List[int] = [min(size, count - i) for i in range(0, count, size)]
+    budget = max(1, int(candidate_budget or generation_budget(count)))
+    rejected: List[Dict[str, Any]] = []   # telemetry only - rejected candidates are never saved
 
     metrics: Dict[str, Any] = {
         'requestedCount': count,
         'generatedCount': 0,
         'failedCount': 0,
+        'rejectedCount': 0,
         'rejectedDuplicates': 0,
         'rejectedValidation': 0,
+        'rejectedCandidates': rejected,
         'regenerationAttempts': 0,
         'regenerationCount': 0,
+        'replacementRounds': 0,
+        'rounds': 0,
         'qwenGenerationCalls': 0,
+        'providerFailures': 0,
+        'candidatesEvaluated': 0,
+        'candidateBudget': budget,
         'validationCalls': 0,
         'validationProvider': 'local',
         'batchSize': size,
-        'batchesTotal': len(batch_sizes),
-        'batchesFailed': 0,
-        'topUpCalls': 0,
         'providersUsed': set(),
         'validationProvidersUsed': set(),
         'questionStatuses': question_statuses,
@@ -952,8 +995,10 @@ def generate_exact_mcqs_pipeline(
     }
 
     def _finish(final_status: Optional[str] = None, error: Optional[str] = None):
-        metrics['generatedCount'] = len(generated_questions)
-        metrics['failedCount'] = count - len(generated_questions)
+        accepted_n = len(generated_questions)
+        metrics['generatedCount'] = accepted_n
+        metrics['failedCount'] = count - accepted_n
+        metrics['rejectedCount'] = metrics['rejectedDuplicates'] + metrics['rejectedValidation']
         metrics['regenerationCount'] = metrics['regenerationAttempts']
         metrics['endTime'] = time.time()
         metrics['durationSeconds'] = round(metrics['endTime'] - metrics['startTime'], 1)
@@ -961,13 +1006,20 @@ def generate_exact_mcqs_pipeline(
         metrics['validationProvidersUsed'] = sorted(metrics['validationProvidersUsed'])
         if error:
             metrics['error'] = error
+            if accepted_n:
+                metrics['partialReason'] = error
+        # accepted questions are the only source of truth for completion
         metrics['finalStatus'] = final_status or (
-            'COMPLETED' if len(generated_questions) == count else ('PARTIAL' if generated_questions else 'FAILED'))
-        print(f"[BATCH_COMPLETED] batchId={job_id} total={count} verified={len(generated_questions)} "
-              f"failed={metrics['failedCount']} duration={metrics['durationSeconds']}s status={metrics['finalStatus']}", flush=True)
+            'COMPLETED' if accepted_n == count else ('PARTIAL' if accepted_n else 'FAILED'))
+        print(f"[BATCH_COMPLETED] batchId={job_id} total={count} verified={accepted_n} "
+              f"rejected={metrics['rejectedCount']} candidates={metrics['candidatesEvaluated']}/{budget} "
+              f"duration={metrics['durationSeconds']}s status={metrics['finalStatus']}", flush=True)
         return generated_questions, metrics
 
-    def _report(stage: str, status_text: str, batch_index: int):
+    offset = start_number - 1   # numbering/progress text of a resumed job includes earlier questions
+    shown_total = offset + count
+
+    def _report(stage: str, status_text: str, round_no: int):
         if not progress_callback:
             return
         verified = len(generated_questions)
@@ -977,8 +1029,9 @@ def generate_exact_mcqs_pipeline(
             'verifiedCount': verified,
             'total': count,
             'current': min(count, verified + 1),
-            'batchIndex': batch_index,
-            'totalBatches': len(batch_sizes),
+            'batchIndex': round_no,
+            'rejectedCount': metrics['rejectedDuplicates'] + metrics['rejectedValidation'],
+            # accepted / target only; never 100 while generating
             'progressPct': min(95, 5 + int((verified / count) * 90)) if count else 95,
             'questionStatuses': [dict(s) for s in question_statuses]
         })
@@ -1007,16 +1060,16 @@ def generate_exact_mcqs_pipeline(
     syllabus_scope = _build_syllabus_scope(resolved_ch_meta)
 
     # Sub-topic rotation: when the admin asked for the whole chapter (topic empty or = chapter name),
-    # each batch focuses on a different allowed topic so batches and consecutive jobs don't converge
+    # each round focuses on a different allowed topic so rounds and consecutive jobs don't converge
     # on the same classic questions (which the duplicate check would then reject).
     allowed_topics = [str(t).strip() for t in (resolved_ch_meta.get('allowedTopics') or []) if str(t).strip()]
     rotate_topics = bool(allowed_topics) and (not topic.strip() or topic.strip().lower() == canonical_ch_name.lower())
     topic_offset = len(existing_texts) // size
 
-    def _focus_topic(batch_index: int, attempt: int) -> str:
+    def _focus_topic(round_no: int) -> str:
         if not rotate_topics:
             return topic
-        return allowed_topics[(topic_offset + batch_index - 1 + attempt - 1) % len(allowed_topics)]
+        return allowed_topics[(topic_offset + round_no - 1) % len(allowed_topics)]
 
     # 2. Optional grounding chunks from uploaded syllabus documents (server-side callers only)
     all_docs = source_documents if source_documents is not None else (
@@ -1031,29 +1084,82 @@ def generate_exact_mcqs_pipeline(
         max_chunks=6
     ) if all_docs else []
 
-    print(f"[BATCH START] batchId={job_id} total={count} batches={batch_sizes} chapter='{canonical_ch_name}' "
-          f"({canonical_ch_id}) subject='{canonical_subject}' timeout={per_call_timeout}s", flush=True)
+    print(f"[BATCH START] batchId={job_id} total={count} batchSize={size} candidateBudget={budget} "
+          f"chapter='{canonical_ch_name}' ({canonical_ch_id}) subject='{canonical_subject}' "
+          f"timeout={per_call_timeout}s", flush=True)
 
-    def _attempt(slots: List[Dict[str, Any]], request_count: int, temperature: Optional[float],
-                 focus_topic: str, label: str, batch_index: int) -> Tuple[int, Optional[str]]:
-        """One Ollama call: generate -> validate -> dedupe -> save into the given empty slots.
-        Returns (accepted, last_error)."""
+    round_errors: List[str] = []   # reasons of the candidates rejected in the current round
+
+    def _refresh_open_slots():
+        """The first unfilled slots show this round's rejections (RETRYING + reason) - one per rejected candidate."""
+        base = len(generated_questions)
+        for i, err in enumerate(round_errors):
+            if base + i < count:
+                question_statuses[base + i].update({'status': 'retrying', 'error': err})
+
+    def _reject(reason: str, stem: str, round_no: int):
+        """A rejected candidate: counted, remembered for "DO NOT REPEAT", never saved; the slot it was
+        meant for stays open (RETRYING) and is filled by a replacement."""
+        if 'duplicate' in str(reason).lower():
+            metrics['rejectedDuplicates'] += 1
+        else:
+            metrics['rejectedValidation'] += 1
+        rejected.append({'question': str(stem or '')[:160], 'reason': str(reason)[:200], 'round': round_no})
+        del rejected[:-REJECTED_TELEMETRY_LIMIT]
+        round_errors.append(f"Rejected: {reason}"[:240])
+        _refresh_open_slots()
+        slot_no = question_statuses[min(count - 1, len(generated_questions) + len(round_errors) - 1)]['number']
+        print(f"[QUESTION_REJECTED] batchId={job_id} round={round_no} slot=Q{slot_no} reason={reason}", flush=True)
+
+    # 3. Target-fill loop: keep generating the missing questions until the target is met or a bound is hit
+    consecutive_failures = 0
+    stop_reason: Optional[str] = None
+    round_no = 0
+    while len(generated_questions) < count:
+        if metrics['candidatesEvaluated'] >= budget:
+            stop_reason = (f"GENERATION_BUDGET_EXHAUSTED: {len(generated_questions)} of {count} unique MCQs verified "
+                           f"after {metrics['candidatesEvaluated']} candidates ({metrics['rejectedDuplicates']} duplicate, "
+                           f"{metrics['rejectedValidation']} invalid, {metrics['providerFailures']} failed Qwen calls).")
+            break
         if cancel_check and cancel_check():
-            raise GenerationCancelled(f"Generation cancelled before {label}.")
-        for s in slots:
-            s['status'] = 'retrying' if temperature else 'generating'
-        done = len(generated_questions)
-        _report('generating',
-                f"{label}: generating questions {start_number + done}-{start_number + done + len(slots) - 1} "
-                f"of {start_number + count - 1} with Local Qwen3...", batch_index)
+            raise GenerationCancelled(f"Generation cancelled before round {round_no + 1}.")
+
+        round_no += 1
+        verified = len(generated_questions)
+        missing = count - verified
+        request = min(missing, size, budget - metrics['candidatesEvaluated'])
+        round_errors.clear()
+        slots = question_statuses[verified:verified + request]
+        # slots whose earlier candidate was rejected (or whose Qwen call failed) are being replaced
+        n_replace = sum(1 for sl in question_statuses[verified:] if sl['status'] == 'retrying')
+        replacement = n_replace > 0 or consecutive_failures > 0
+        if replacement:
+            metrics['replacementRounds'] += 1
+            metrics['regenerationAttempts'] += 1
+        metrics['rounds'] = round_no
+        for sl in slots:
+            sl['status'] = 'retrying' if sl['status'] == 'retrying' else 'generating'
+        if replacement and n_replace >= request:
+            status_text = (f"{offset + verified}/{shown_total} verified \u2014 generating {request} replacement "
+                           f"question{'s' if request != 1 else ''}...")
+        elif replacement:
+            status_text = (f"{offset + verified}/{shown_total} verified \u2014 generating questions "
+                           f"{offset + verified + 1}-{offset + verified + request} "
+                           f"({min(n_replace, request)} replacement)...")
+        else:
+            status_text = (f"{offset + verified}/{shown_total} verified \u2014 generating questions "
+                           f"{offset + verified + 1}-{offset + verified + request} with Local Qwen3...")
+        _report('generating', status_text, round_no)
+
+        angle = DIVERSIFICATION_ANGLES[(round_no - 1) % len(DIVERSIFICATION_ANGLES)] if replacement else ''
         metrics['qwenGenerationCalls'] += 1
         try:
             candidates, gen_prov, gen_model = generate_batched_mcqs(
                 subject=canonical_subject,
                 chapter=canonical_ch_name,
-                count=request_count,
-                temperature=temperature,
-                topic=focus_topic,
+                count=request,
+                temperature=RETRY_TEMPERATURE if replacement else None,
+                topic=_focus_topic(round_no),
                 exam_level=canonical_exam_level,
                 difficulty=difficulty,
                 question_category=question_category,
@@ -1061,21 +1167,40 @@ def generate_exact_mcqs_pipeline(
                 admin_description=admin_description,
                 syllabus_scope=syllabus_scope,
                 previous_concepts=_avoid_list(),
+                rejected_stems=[r['question'] for r in rejected if r['question']][-REJECTED_STEMS_LIMIT:],
+                diversification=(f"Frame each new question as {angle}, on a concept/rule that none of the listed "
+                                 f"questions covers." if angle else ''),
                 timeout=per_call_timeout
             )
             metrics['providersUsed'].add(gen_prov)
         except Exception as gen_err:
-            print(f"[BATCH_GEN_ERROR] {label}: {gen_err}", flush=True)
-            return 0, f"Generation error: {gen_err}"
-
-        _report('validating', f"{label}: validating {len(candidates)} candidate MCQ(s)...", batch_index)
-        accepted = 0
-        last_error = None
-        for cand_q in candidates:
-            if accepted >= len(slots):
+            consecutive_failures += 1
+            metrics['providerFailures'] += 1
+            metrics['candidatesEvaluated'] += request   # a failed call still consumes budget
+            print(f"[BATCH_GEN_ERROR] round {round_no}: {gen_err}", flush=True)
+            for sl in slots:
+                sl.update({'status': 'retrying', 'error': f"Generation error: {gen_err}"[:240]})
+            if consecutive_failures >= MAX_CONSECUTIVE_PROVIDER_FAILURES:
+                stop_reason = (f"PROVIDER_UNAVAILABLE: Local Qwen failed {consecutive_failures} times in a row "
+                               f"({gen_err}). {len(generated_questions)} of {count} MCQs verified.")
                 break
-            slot = slots[accepted]
-            slot['status'] = 'validating'
+            continue
+        consecutive_failures = 0
+
+        _report('validating', f"{offset + verified}/{shown_total} verified \u2014 validating {len(candidates)} "
+                              f"candidate MCQ(s)...", round_no)
+        evaluated = 0
+        for cand_q in candidates:
+            if len(generated_questions) >= count or evaluated >= request:
+                break
+            evaluated += 1
+            slot = question_statuses[len(generated_questions)]   # an accepted candidate takes the next number
+            probe = question_statuses[min(count - 1, len(generated_questions) + len(round_errors))]
+            probe['status'] = 'validating'
+            stem = str((cand_q or {}).get('question') or (cand_q or {}).get('text') or '') if isinstance(cand_q, dict) else ''
+            if not isinstance(cand_q, dict):
+                _reject('Invalid candidate (not an MCQ object).', '', round_no)
+                continue
             is_valid, val_reason, fix, val_prov = validate_mcq_independently(
                 q_data=cand_q,
                 subject=canonical_subject,
@@ -1095,14 +1220,7 @@ def generate_exact_mcqs_pipeline(
             metrics['validationCalls'] += 1
             metrics['validationProvidersUsed'].add(val_prov)
             if not is_valid:
-                print(f"[QUESTION_REJECTED] batchId={job_id} {label} reason={val_reason}", flush=True)
-                last_error = val_reason
-                slot['status'] = 'retrying'
-                slot['error'] = val_reason
-                if 'duplicate' in str(val_reason).lower():
-                    metrics['rejectedDuplicates'] += 1
-                else:
-                    metrics['rejectedValidation'] += 1
+                _reject(val_reason, stem, round_no)
                 continue
 
             if fix and isinstance(fix, dict):
@@ -1129,64 +1247,26 @@ def generate_exact_mcqs_pipeline(
                 val_prov=val_prov
             )
             generated_questions.append(q_rec)
-            accepted += 1
             slot.update({'status': 'saved', 'provider': gen_prov, 'error': None})
+            _refresh_open_slots()
             print(f"[QUESTION_VERIFIED] batchId={job_id} questionNumber={q_rec['number']} "
                   f"verifiedTotal={len(generated_questions)}/{count}", flush=True)
             if on_question_verified:
                 on_question_verified(q_rec, generated_questions, len(generated_questions), count)
-        return accepted, last_error
 
-    # 3. Main batches: first attempt + at most one retry, filling only the batch's empty slots
-    slot_cursor = 0
-    for batch_index, batch_target in enumerate(batch_sizes, start=1):
-        batch_slots = question_statuses[slot_cursor:slot_cursor + batch_target]
-        slot_cursor += batch_target
-        filled = 0
-        last_error: Optional[str] = None
-
-        for attempt in range(1, MAX_ATTEMPTS_PER_BATCH + 1):
-            if filled >= batch_target:
+        # fewer usable candidates than requested (empty / malformed / unparseable output) = rejected ones
+        for _ in range(request - evaluated):
+            if len(generated_questions) >= count:
                 break
-            if attempt > 1:
-                metrics['regenerationAttempts'] += 1
-            # A retry requests a full batch (still <= batch size) at a higher temperature, so a
-            # duplicate/invalid candidate has a spare; only the empty slots are filled.
-            accepted, err = _attempt(
-                batch_slots[filled:],
-                request_count=(batch_target - filled) if attempt == 1 else size,
-                temperature=RETRY_TEMPERATURE if attempt > 1 else None,
-                focus_topic=_focus_topic(batch_index, attempt),
-                label=f"Batch {batch_index}/{len(batch_sizes)}{' (retry)' if attempt > 1 else ''}",
-                batch_index=batch_index)
-            filled += accepted
-            last_error = err or last_error
+            _reject('Qwen returned fewer valid MCQ objects than requested (empty or malformed output).', '', round_no)
+        metrics['candidatesEvaluated'] += max(evaluated, request)
 
-        if filled < batch_target:
-            metrics['batchesFailed'] += 1
-            for s in batch_slots[filled:]:
-                s['status'] = 'failed'
-                s['error'] = last_error or 'Batch retry budget exhausted'
+        still_needed = count - len(generated_questions)
+        _report('batch_complete', f"{offset + len(generated_questions)}/{shown_total} verified" +
+                (f" \u2014 {still_needed} still needed" if still_needed else ''), round_no)
 
-        _report('batch_complete',
-                f"Verified {len(generated_questions)} of {count} MCQs (batch {batch_index}/{len(batch_sizes)} done)",
-                batch_index)
-
-    # 4. Bounded top-up: at most one extra call per failed batch, to fill slots whose batch
-    #    exhausted its retry (typically duplicates of the question bank). Never loops.
-    for topup_index in range(1, metrics['batchesFailed'] + 1):
-        empty = [s for s in question_statuses if s['status'] == 'failed']
-        if not empty:
-            break
-        metrics['topUpCalls'] += 1
-        metrics['regenerationAttempts'] += 1
-        _attempt(empty[:size], request_count=size, temperature=RETRY_TEMPERATURE,
-                 focus_topic=_focus_topic(len(batch_sizes) + topup_index, 2),
-                 label=f"Top-up {topup_index}/{metrics['batchesFailed']}", batch_index=len(batch_sizes))
-        for s in empty[:size]:
-            if s['status'] != 'saved':
-                s['status'] = 'failed'
-        _report('batch_complete', f"Verified {len(generated_questions)} of {count} MCQs (top-up {topup_index} done)",
-                len(batch_sizes))
-
+    if len(generated_questions) < count:
+        for sl in question_statuses[len(generated_questions):]:
+            sl.update({'status': 'unfilled', 'error': stop_reason})
+        return _finish(error=stop_reason)
     return _finish()

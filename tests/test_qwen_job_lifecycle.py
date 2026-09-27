@@ -183,6 +183,24 @@ class TestLeaseAndProgress(LifecycleBase):
         self.assertEqual(len(self.data['tests']), 1)
         self.assertEqual(len(self.data['questions']), 4)
 
+    def test_partial_after_budget_keeps_reason_and_real_progress(self):
+        reason = 'GENERATION_BUDGET_EXHAUSTED: 3 of 4 unique MCQs verified after 12 candidates.'
+        statuses = [{'number': n, 'status': 'saved'} for n in (1, 2, 3)] + [{'number': 4, 'status': 'unfilled', 'error': reason}]
+        ok, err, res, code = jm.complete_job_from_worker(
+            self.job['id'], 'w1', [make_q(i) for i in (1, 2, 3)],
+            {'finalStatus': 'PARTIAL', 'partialReason': reason, 'questionStatuses': statuses}, self.data, self.save)
+        self.assertTrue(ok, err)
+        j = self.job_now()
+        self.assertEqual(j['status'], 'PARTIAL')
+        self.assertEqual(j['error'], reason, "explicit reason, not a generic message")
+        self.assertEqual(j['progressPct'], 75, "3/4 accepted is not shown as 100 %")
+        self.assertEqual([s['status'] for s in j['questionStatuses']], ['saved', 'saved', 'saved', 'unfilled'])
+        self.assertEqual(self.data['tests'][0]['totalQuestions'], 3)
+
+    def test_completed_job_reaches_100_only_with_all_questions(self):
+        jm.complete_job_from_worker(self.job['id'], 'w1', [make_q(i) for i in range(1, 5)], {}, self.data, self.save)
+        self.assertEqual((self.job_now()['status'], self.job_now()['progressPct']), ('COMPLETED', 100))
+
     def test_fail_after_partial_progress_hosts_partial(self):
         jm.update_job_progress_from_worker(self.job['id'], 'w1', {'stage': 'batch_complete', 'newQuestions': [make_q(1), make_q(2)]}, self.data, self.save)
         ok, err, code = jm.fail_job_from_worker(self.job['id'], 'w1', 'Ollama crashed', self.data, self.save)
