@@ -213,6 +213,69 @@ def sync_document_to_mongo(path: str, data: Any, method: str = 'PUT', sync: bool
     return None
 
 
+def claim_scheduled_task(task_id: Any, expected_next_run_at: Any, lease_cutoff_iso: str, fields: Dict[str, Any]) -> Optional[bool]:
+    """Atomically claim one due occurrence of a scheduled task (findOneAndUpdate).
+    Matches only while the task is enabled, still at the expected nextRunAt and either 'scheduled' or
+    holding a stale CLAIMING lease. True = claimed, False = someone else has it (or it changed / was
+    deleted), None = database unavailable."""
+    db = get_database()
+    if db is None:
+        return None
+    try:
+        doc = db['ai_scheduled_tasks'].find_one_and_update(
+            {
+                '_id': str(task_id),
+                'nextRunAt': expected_next_run_at,
+                'enabled': {'$ne': False},
+                '$or': [
+                    {'status': 'scheduled'},
+                    {'status': 'CLAIMING', 'claimedAt': {'$lt': lease_cutoff_iso}},
+                ],
+            },
+            {'$set': dict(fields)},
+            return_document=True,   # ReturnDocument.AFTER
+        )
+        return doc is not None
+    except Exception as e:
+        print(f"[MONGODB_SYNC_ERROR] scheduler claim failed for {task_id}: {e}", flush=True)
+        return None
+
+
+def scheduler_has_due_work(now_iso: str, lease_cutoff_iso: str) -> Optional[bool]:
+    """Cheap scheduler check (up to three find_one queries that return only an _id): is any task
+    due to start, to expire or to recover, or any live test past its window? None = unknown."""
+    db = get_database()
+    if db is None:
+        return None
+    try:
+        due_task = db['ai_scheduled_tasks'].find_one({'$or': [
+            {'status': 'scheduled', 'enabled': {'$ne': False}, 'nextRunAt': {'$lte': now_iso}},
+            {'status': 'CLAIMING', 'claimedAt': {'$lt': lease_cutoff_iso}, 'nextRunAt': {'$lte': now_iso}},
+            {'status': 'live', 'expiresAt': {'$lte': now_iso}},
+            {'status': 'failed', 'enabled': {'$ne': False}, 'scheduleType': {'$in': ['recurring', 'weekly']}},
+        ]}, {'_id': 1})
+        if due_task:
+            return True
+        if db['tests'].find_one({'isLive': True, 'liveExpiresAt': {'$lte': now_iso}}, {'_id': 1}):
+            return True
+        return False
+    except Exception as e:
+        print(f"[MONGODB_SYNC_WARN] scheduler due check failed: {e}", flush=True)
+        return None
+
+
+def collection_is_empty(collection_name: str) -> Optional[bool]:
+    """True/False, or None when the database is unavailable."""
+    db = get_database()
+    if db is None:
+        return None
+    try:
+        return db[collection_name].find_one({}, {'_id': 1}) is None
+    except Exception as e:
+        print(f"[MONGODB_SYNC_WARN] emptiness check failed for {collection_name}: {e}", flush=True)
+        return None
+
+
 def is_tombstoned(collection_name: str, doc_id: Any) -> bool:
     """True if the document was deleted (deletion tombstone in MongoDB). False when unknown/offline."""
     db = get_database()

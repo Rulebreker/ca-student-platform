@@ -183,8 +183,9 @@ class TestWeeklySchedule(unittest.TestCase):
         ok, err, _ = ai_scheduler.dispatch_scheduled_task(task, data, lambda d: None, None)
         self.assertFalse(ok)
         self.assertIn('no longer exists', err)
-        self.assertEqual(task['status'], 'failed')
-        self.assertIsNotNone(task['nextRunAt'], 'weekly schedule continues')
+        self.assertEqual(task['status'], 'scheduled', 'weekly schedule continues (status, not only nextRunAt)')
+        self.assertIn('no longer exists', task['lastError'])
+        self.assertIsNotNone(task['nextRunAt'])
 
     def test_daily_schedule_unchanged(self):
         task = {'scheduleType': 'recurring', 'dailyTime': '09:00', 'enabled': True, 'status': 'scheduled'}

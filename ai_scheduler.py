@@ -457,22 +457,116 @@ def cancel_scheduled_task(task_id: str, data: Dict[str, Any]) -> Optional[Dict[s
 # ATOMIC TASK CLAIMING & EXECUTION ENGINE
 # ======================================================================
 
+CLAIM_LEASE_SECONDS = 180
+
+
+def lease_cutoff_iso(now_utc: datetime) -> str:
+    """Claims made before this moment are stale (the claiming instance died before dispatching)."""
+    return format_iso_utc(now_utc - timedelta(seconds=CLAIM_LEASE_SECONDS))
+
+
+def is_due_to_start(task: Dict[str, Any], now_utc: datetime) -> bool:
+    """Due occurrence that nobody holds: 'scheduled' and nextRunAt reached, or a stale CLAIMING lease."""
+    if not isinstance(task, dict) or not task.get('enabled', True):
+        return False
+    next_run = task.get('nextRunAt')
+    if not next_run or next_run > format_iso_utc(now_utc):
+        return False
+    status = task.get('status')
+    if status == 'scheduled':
+        return True
+    if status == 'CLAIMING' and not task.get('activeJobId'):
+        return str(task.get('claimedAt') or '') < lease_cutoff_iso(now_utc)
+    return False
+
+
+def is_stalled_recurring(task: Dict[str, Any]) -> bool:
+    """Daily/weekly task left in 'failed' (by code before failure recovery existed)."""
+    return isinstance(task, dict) and is_recurring(task) and task.get('status') == 'failed' and task.get('enabled', True)
+
+
+def has_due_work(data: Dict[str, Any], now_utc: Optional[datetime] = None) -> bool:
+    """Cheap check (no refresh): would process_due_tasks do anything right now?"""
+    now_utc = now_utc or get_now_utc()
+    now_iso = format_iso_utc(now_utc)
+    for t in data.get('ai_scheduled_tasks') or []:
+        if not isinstance(t, dict):
+            continue
+        if is_due_to_start(t, now_utc) or is_stalled_recurring(t):
+            return True
+        if t.get('status') == 'live' and (t.get('expiresAt') or t.get('nextRunAt') or '9999') <= now_iso:
+            return True
+    for test in data.get('tests') or []:
+        if isinstance(test, dict) and (test.get('isLive') or test.get('status') == 'Live') \
+                and test.get('liveExpiresAt') and test['liveExpiresAt'] <= now_iso:
+            return True
+    live_tasks = [t for t in data.get('ai_scheduled_tasks') or []
+                  if isinstance(t, dict) and t.get('id') and not t.get('isDeleted') and t.get('status') != 'deleted']
+    return not live_tasks and legacy_autopilot_due(data.get('ai_autopilot_config'), now_utc)
+
+
+def legacy_autopilot_due(cfg: Any, now_utc: Optional[datetime] = None) -> bool:
+    """Same condition process_due_tasks uses for the legacy single auto-pilot (only when no tasks exist)."""
+    if not isinstance(cfg, dict) or not cfg.get('enabled'):
+        return False
+    now_utc = now_utc or get_now_utc()
+    try:
+        local = now_utc.astimezone(timezone(timedelta(hours=float(cfg.get('timezoneOffsetHours', 5.5)))))
+    except (TypeError, ValueError):
+        return False
+    return cfg.get('lastRunDate') != local.strftime('%Y-%m-%d') and local.strftime('%H:%M') >= str(cfg.get('dailyTime', '20:00'))
+
+
 def attempt_claim_task(
     task: Dict[str, Any],
     data: Dict[str, Any],
     worker_id: Optional[str] = None,
     save_callback: Any = None,
-    firebase_sync_callback: Any = None
+    firebase_sync_callback: Any = None,
+    claim_fn: Any = None
 ) -> Tuple[bool, Optional[str]]:
     """
-    Attempt atomic claim on a scheduled task to prevent race conditions across concurrent workers/cron triggers.
-    Workflow: scheduled -> CLAIMING -> PROCESSING -> live / completed / failed.
-    If another worker already holds an active lease (< 180s), claim fails -> False.
+    Claim one due occurrence of a scheduled task so that exactly one instance runs it.
+    Workflow: scheduled -> CLAIMING -> processing / live -> scheduled / completed / failed.
+
+    claim_fn(task_id, expected_next_run_at, lease_cutoff_iso, fields) performs an atomic conditional
+    update in the shared database (MongoDB findOneAndUpdate on status 'scheduled' - or a stale
+    CLAIMING lease - and the expected nextRunAt). It returns True (claimed), False (another
+    instance claimed it / it changed) or None (database unavailable). Without a database the claim
+    is process-local (callers hold job_repository.STORE_LOCK); on serverless it is refused.
     """
     task_id = task.get('id')
     now_utc = get_now_utc()
     now_iso = format_iso_utc(now_utc)
     current_status = task.get('status')
+    assigned_worker = worker_id or f"worker-{os.getpid()}-{uuid.uuid4().hex[:6]}"
+    execution_id = f"exec-{int(time.time()*1000)}-{uuid.uuid4().hex[:6]}"
+    claim_fields = {
+        'status': 'CLAIMING',
+        'claimedAt': now_iso,
+        'workerId': assigned_worker,
+        'executionId': execution_id,
+        'claimedOccurrence': task.get('nextRunAt'),
+        'updatedAt': now_iso,
+    }
+
+    if claim_fn is not None:
+        claimed = claim_fn(task_id, task.get('nextRunAt'), lease_cutoff_iso(now_utc), dict(claim_fields))
+        if claimed is False:
+            print(f"[SCHEDULER_RACE_AVOIDED] Task '{task.get('name')}' (ID: {task_id}) occurrence {task.get('nextRunAt')} "
+                  f"was already claimed by another instance. Skipping.", flush=True)
+            return False, 'Task occurrence already claimed by another instance'
+        if claimed is True:
+            task.update(claim_fields)
+            if save_callback:
+                try:
+                    save_callback(data)
+                except Exception:
+                    pass
+            return True, execution_id
+        if IS_SERVERLESS:
+            print(f"[SCHEDULER_CLAIM_UNAVAILABLE] Task '{task.get('name')}': database unavailable; not running without an atomic claim.", flush=True)
+            return False, 'Database unavailable for an atomic claim'
     
     # Check if task is already in CLAIMING or processing with active lease (<180s)
     if current_status in ['CLAIMING', 'processing', 'PROCESSING']:
@@ -481,21 +575,14 @@ def attempt_claim_task(
             try:
                 claimed_dt = parse_iso_utc(claimed_at_str)
                 age_seconds = (now_utc - claimed_dt).total_seconds()
-                if age_seconds < 180:
+                if age_seconds < CLAIM_LEASE_SECONDS:
                     print(f"[SCHEDULER_RACE_AVOIDED] Task '{task.get('name')}' (ID: {task_id}) is actively claimed by worker '{task.get('workerId')}' ({age_seconds:.1f}s ago). Skipping duplicate execution.", flush=True)
                     return False, f"Task already claimed by worker '{task.get('workerId')}'"
             except Exception:
                 pass
 
-    assigned_worker = worker_id or f"worker-{os.getpid()}-{uuid.uuid4().hex[:6]}"
-    execution_id = f"exec-{int(time.time()*1000)}-{uuid.uuid4().hex[:6]}"
-
-    # Atomic transition to CLAIMING
-    task['status'] = 'CLAIMING'
-    task['claimedAt'] = now_iso
-    task['workerId'] = assigned_worker
-    task['executionId'] = execution_id
-    task['updatedAt'] = now_iso
+    # Process-local claim (local development without MongoDB)
+    task.update(claim_fields)
 
     if save_callback:
         try:
@@ -518,14 +605,32 @@ def _persist_task(task: Dict[str, Any], data: Dict[str, Any], save_callback: Any
         firebase_sync_callback(f"ai_scheduled_tasks/{task.get('id')}", task, method='PUT', sync=True)
 
 
-def _fail_task(task: Dict[str, Any], err_msg: str, data: Dict[str, Any], save_callback: Any, firebase_sync_callback: Any):
-    now_utc = get_now_utc()
-    task['status'] = 'failed'
+def record_task_failure(task: Dict[str, Any], err_msg: str, now_utc: datetime) -> None:
+    """A failed run. One-time tasks stay 'failed'. Daily/weekly tasks keep the error details and go
+    back to 'scheduled' for their next occurrence, so one bad run never stops the schedule."""
+    now_iso = format_iso_utc(now_utc)
     task['lastError'] = err_msg
+    task['lastFailedAt'] = now_iso
+    task['failureCount'] = int(task.get('failureCount') or 0) + 1
+    history = task.get('failureHistory') if isinstance(task.get('failureHistory'), list) else []
+    history.append({'at': now_iso, 'occurrence': task.get('claimedOccurrence') or task.get('nextRunAt'), 'error': str(err_msg)[:500]})
+    task['failureHistory'] = history[-10:]
     task['activeJobId'] = None
-    task['updatedAt'] = format_iso_utc(now_utc)
-    if is_recurring(task):
-        task['nextRunAt'] = calculate_next_run(task, now_utc)
+    task['updatedAt'] = now_iso
+    if is_recurring(task) and task.get('enabled', True):
+        task['status'] = 'scheduled'   # calculate_next_run skips completed/cancelled/deleted tasks
+        next_run = calculate_next_run(task, now_utc)
+        if next_run:
+            task['nextRunAt'] = next_run
+            task['startsAt'] = next_run
+            task['expiresAt'] = format_iso_utc(parse_iso_utc(next_run) + timedelta(minutes=int(task.get('liveDurationMinutes', 15))))
+            print(f"[SCHEDULER_RECOVERED] Task '{task.get('name')}' failed ({str(err_msg)[:120]}); next run {next_run}.", flush=True)
+            return
+    task['status'] = 'failed'
+
+
+def _fail_task(task: Dict[str, Any], err_msg: str, data: Dict[str, Any], save_callback: Any, firebase_sync_callback: Any):
+    record_task_failure(task, err_msg, get_now_utc())
     _persist_task(task, data, save_callback, firebase_sync_callback)
 
 
@@ -673,10 +778,7 @@ def apply_job_outcome_to_task(
     task['updatedAt'] = completed_iso
 
     if not test_record:
-        task['status'] = 'failed'
-        task['lastError'] = job.get('error') or f"Generation job {job.get('status')}"
-        if is_recurring(task):
-            task['nextRunAt'] = calculate_next_run(task, completed_utc)
+        record_task_failure(task, job.get('error') or f"Generation job {job.get('status')}", completed_utc)
     else:
         test_id = test_record.get('id')
         task['lastRunAt'] = completed_iso
@@ -715,7 +817,8 @@ def apply_job_outcome_to_task(
 def process_due_tasks(
     data: Dict[str, Any],
     save_callback: Any,
-    firebase_sync_callback: Any
+    firebase_sync_callback: Any,
+    claim_fn: Any = None
 ) -> Dict[str, Any]:
     """
     Authoritative state evaluator and executor:
@@ -730,19 +833,24 @@ def process_due_tasks(
 
     executed_results = []
 
-    # Phase 1: Due Start Events (scheduled -> live / completed)
-    due_to_start = []
+    # Phase 0: daily/weekly tasks left 'failed' by older code resume at their next occurrence
     for t in tasks:
-        if not t.get('enabled', True):
-            continue
-        if t.get('status') != 'scheduled':
-            continue
-        next_run = t.get('nextRunAt')
-        if next_run and next_run <= now_iso:
-            due_to_start.append(t)
+        if is_stalled_recurring(t):
+            t['status'] = 'scheduled'
+            next_run = t.get('nextRunAt')
+            if not next_run or next_run <= now_iso:
+                t['nextRunAt'] = calculate_next_run(t, now_utc)
+            t['updatedAt'] = now_iso
+            _persist_task(t, data, save_callback, firebase_sync_callback)
+            executed_results.append({'taskId': t.get('id'), 'taskName': t.get('name'), 'action': 'recovered_schedule',
+                                     'success': True, 'nextRunAt': t.get('nextRunAt')})
+
+    # Phase 1: Due Start Events (scheduled -> live / completed); one instance per occurrence
+    due_to_start = [t for t in tasks if is_due_to_start(t, now_utc)]
 
     for t in due_to_start:
-        claimed, claim_id = attempt_claim_task(t, data, save_callback=save_callback, firebase_sync_callback=firebase_sync_callback)
+        claimed, claim_id = attempt_claim_task(t, data, save_callback=save_callback,
+                                               firebase_sync_callback=firebase_sync_callback, claim_fn=claim_fn)
         if not claimed:
             continue
         ok, err, res = dispatch_scheduled_task(t, data, save_callback, firebase_sync_callback)

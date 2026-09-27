@@ -2075,15 +2075,7 @@ def check_opportunistic_scheduler_tick():
     if now - _last_opportunistic_tick > 60:
         _last_opportunistic_tick = now
         try:
-            d = load_backend_data(refresh_collections=['ai_scheduled_tasks'])
-            now_iso = ai_scheduler.format_iso_utc(ai_scheduler.get_now_utc())
-            tasks = d.get('ai_scheduled_tasks', [])
-            has_due = any(
-                isinstance(t, dict) and t.get('enabled', True) and t.get('status') == 'scheduled' and t.get('nextRunAt') and t.get('nextRunAt') <= now_iso
-                for t in tasks
-            )
-            if has_due:
-                run_due_scheduler_tasks()
+            run_due_scheduler_tasks()   # returns at once after the cheap due check when nothing is due
         except Exception as e:
             print(f"[SCHEDULER_OPPORTUNISTIC_WARN] {e}", flush=True)
 
@@ -2122,11 +2114,44 @@ def is_authorized_scheduler_tick(token):
     user = authenticate_token(token) if token else None
     return bool(user and user.get('role') == 'admin')
 
-def run_due_scheduler_tasks():
-    """Evaluate Auto-Pilot tasks (queues generation jobs for the worker) under the job store lock."""
+def scheduler_work_due(now_utc=None):
+    """Cheap check before the expensive refresh: is anything due? Unknown -> True (never skip work)."""
+    now_utc = now_utc or ai_scheduler.get_now_utc()
+    if mongodb_manager.is_database_connected():
+        due = mongodb_manager.scheduler_has_due_work(ai_scheduler.format_iso_utc(now_utc), ai_scheduler.lease_cutoff_iso(now_utc))
+        if due is None or due:
+            return True
+        # legacy single auto-pilot runs only while no scheduled tasks exist
+        if mongodb_manager.collection_is_empty('ai_scheduled_tasks') is False:
+            return False
+        cfg = mongodb_manager.load_collection_from_mongo('ai_autopilot_config')
+        return ai_scheduler.legacy_autopilot_due(cfg, now_utc)
+    if IS_SERVERLESS:
+        return True
+    return ai_scheduler.has_due_work(load_backend_data(), now_utc)   # local development: the JSON store
+
+
+def claim_scheduled_task_occurrence(task_id, expected_next_run_at, cutoff_iso, fields):
+    """Atomic MongoDB claim; None when no database (process-local claim under STORE_LOCK instead)."""
+    if not mongodb_manager.is_database_connected():
+        return None
+    return mongodb_manager.claim_scheduled_task(task_id, expected_next_run_at, cutoff_iso, fields)
+
+
+def run_due_scheduler_tasks(force=False):
+    """Evaluate Auto-Pilot tasks (queues generation jobs / hosts tests) under the job store lock.
+    Skips the full data refresh when the cheap check finds nothing due."""
+    now_utc = ai_scheduler.get_now_utc()
+    if not force and not scheduler_work_due(now_utc):
+        return {
+            'success': True, 'executedCount': 0, 'results': [], 'skipped': 'nothing_due',
+            'serverTimeUtc': ai_scheduler.format_iso_utc(now_utc),
+            'serverTimeIst': now_utc.astimezone(ai_scheduler.IST_TZ).strftime('%Y-%m-%d %H:%M:%S IST')
+        }
     with job_repository.STORE_LOCK:
         data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests', 'ai_generation_jobs', 'ai_worker_status'])
-        return ai_scheduler.process_due_tasks(data, save_backend_data, sync_to_firebase)
+        return ai_scheduler.process_due_tasks(data, save_backend_data, sync_to_firebase,
+                                              claim_fn=claim_scheduled_task_occurrence)
 
 class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -2207,6 +2232,27 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         if forwarded:
             return forwarded
         return self.client_address[0] if self.client_address else 'unknown'
+
+    def get_header_auth_token(self):
+        """Credential from request headers only (Authorization: Bearer, X-Auth-Token, X-Worker-Token)."""
+        auth_header = self.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            return auth_header[7:].strip() or None
+        x_token = self.headers.get('X-Auth-Token') or self.headers.get('X-Worker-Token')
+        return x_token.strip() if x_token else None
+
+    def handle_scheduler_tick(self):
+        """GET/POST /api/admin/ai/scheduler/tick for Vercel Cron, an external cron, the Local Qwen Worker
+        and admins. Secrets are accepted only in headers - a ?token= query parameter is refused so a
+        cron secret never ends up in URLs or access logs."""
+        effective = self.headers.get('x-matched-path') or self.headers.get('x-forwarded-uri') or self.path
+        if 'token' in urllib.parse.parse_qs(urllib.parse.urlparse(effective).query):
+            self.send_json(401, {'error': 'Query-string tokens are not accepted. Send the secret in the Authorization: Bearer header.', 'code': 401})
+            return
+        if not is_authorized_scheduler_tick(self.get_header_auth_token()):
+            self.send_json(403, {'error': 'Forbidden: administrator, worker or cron authentication required.', 'code': 403})
+            return
+        self.send_json(200, run_due_scheduler_tasks())
 
     def log_message(self, format, *args):
         # request lines may carry ?token=... (password reset links); never write it to the log
@@ -3321,10 +3367,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
         # 5.2 AI Scheduler Tick Runner (Vercel Cron & Heartbeat)
         if path == '/api/admin/ai/scheduler/tick':
-            if not is_authorized_scheduler_tick(self.get_auth_token()):
-                self.send_json(403, {'error': 'Forbidden: administrator, worker or cron authentication required.', 'code': 403})
-                return
-            self.send_json(200, run_due_scheduler_tasks())
+            self.handle_scheduler_tick()
             return
 
         # 5.3 AI Outbound Worker Status (admin dashboard or the worker itself)
@@ -3809,10 +3852,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
         # 6.5 Trigger Tick via POST (Local Qwen Worker, admin dashboard or Vercel Cron)
         if path == '/api/admin/ai/scheduler/tick':
-            if not is_authorized_scheduler_tick(self.get_auth_token()):
-                self.send_json(403, {'error': 'Forbidden: administrator, worker or cron authentication required.', 'code': 403})
-                return
-            self.send_json(200, run_due_scheduler_tasks())
+            self.handle_scheduler_tick()
             return
 
         # ================================================================

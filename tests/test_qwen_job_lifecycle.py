@@ -260,8 +260,18 @@ class TestAutoPilotWorkerDriven(LifecycleBase):
         with patch('time.time', return_value=self.clock.now):
             ok, err, res = ai_scheduler.dispatch_scheduled_task(task, self.data, self.save, None)
         self.assertFalse(ok)
-        self.assertEqual(task['status'], 'failed')
+        # a daily task goes back to 'scheduled' for its next run; the error is kept
+        self.assertEqual(task['status'], 'scheduled')
+        self.assertIn('offline', task['lastError'])
+        self.assertTrue(task['nextRunAt'])
         self.assertEqual(self.data['ai_generation_jobs'], [])
+
+    def test_dispatch_failure_of_one_time_task_stays_failed(self):
+        task = self.make_task(scheduleType='one_time')
+        with patch('time.time', return_value=self.clock.now):
+            ok, err, res = ai_scheduler.dispatch_scheduled_task(task, self.data, self.save, None)
+        self.assertFalse(ok)
+        self.assertEqual(task['status'], 'failed')
 
     def test_dispatch_queues_job_and_completion_updates_task(self):
         task = self.make_task(isLiveEvent=True, liveDurationMinutes=30)
@@ -279,14 +289,15 @@ class TestAutoPilotWorkerDriven(LifecycleBase):
         self.assertEqual(task['lastTestId'], self.data['tests'][0]['id'])
         self.assertTrue(self.data['tests'][0]['isLive'])
 
-    def test_failed_job_marks_task_failed_and_reschedules(self):
+    def test_failed_job_keeps_error_and_reschedules(self):
         task = self.make_task()
         with patch('time.time', return_value=self.clock.now):
             self.heartbeat()
             ok, err, res = ai_scheduler.dispatch_scheduled_task(task, self.data, self.save, None)
         jm.claim_pending_job_for_worker('w1', self.data, self.save)
         jm.fail_job_from_worker(res['job']['id'], 'w1', 'Ollama is not reachable', self.data, self.save)
-        self.assertEqual(task['status'], 'failed')
+        self.assertEqual(task['status'], 'scheduled')
+        self.assertEqual(task['failureCount'], 1)
         self.assertIn('Ollama', task['lastError'])
         self.assertTrue(task['nextRunAt'])
 
