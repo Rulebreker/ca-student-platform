@@ -1485,7 +1485,7 @@
       return true;
     });
 
-    this._cachedPaymentSessions = filtered;
+    this._cachedPaymentSessions = payments;
     this._pvPage = this._pvPage || 1;
     const pageSize = 10;
     const totalFiltered = filtered.length;
@@ -1584,179 +1584,12 @@
           />
         </div>
 
-        <!-- Payments Table Container -->
-        <div id="admin-payment-table-container">
-        <div class="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden">
-          <div class="overflow-x-auto">
-            <table class="w-full text-left text-sm">
-              <thead>
-                <tr class="border-b border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                  <th class="py-3 px-4">Student & Plan</th>
-                  <th class="py-3 px-4">Amount</th>
-                  <th class="py-3 px-4">UTR Reference</th>
-                  <th class="py-3 px-4">UPI Channel</th>
-                  <th class="py-3 px-4">Submitted At</th>
-                  <th class="py-3 px-4">Receipt Proof</th>
-                  <th class="py-3 px-4">Status</th>
-                  <th class="py-3 px-4 text-right">Verification Action</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-100">
-                ${filtered.length === 0 ? `
-                  <tr>
-                    <td colspan="8" class="py-12 text-center text-slate-400">
-                      <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 opacity-40"></i>
-                      <p class="text-xs font-bold">No payment sessions in this category.</p>
-                    </td>
-                  </tr>
-                ` : pagedSessions.map(p => {
-                  const isPending = p.status === 'pending_verification' || p.status === 'late_payment';
-                  const isLate = p.status === 'late_payment';
-                  const dateStr = p.submittedAt ? new Date(p.submittedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '--';
-                  const pendingAgeDays = p.submittedAt ? (now - new Date(p.submittedAt)) / (1000 * 60 * 60 * 24) : 0;
-                  const isPendingOverdue = isPending && pendingAgeDays >= 3;
-                  const cleanUtr = (p.utr || '').trim().toUpperCase();
-                  const isDupUtr = cleanUtr && cleanUtr !== 'N/A' && (utrCounts[cleanUtr] || 0) > 1;
-
-                  let statusBadge = '';
-                  if (p.status === 'approved') {
-                    statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200"><i data-lucide="check-circle" class="w-3 h-3"></i> Approved</span>';
-                  } else if (p.status === 'late_payment') {
-                    statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-orange-100 text-orange-800 border border-orange-200 animate-pulse"><i data-lucide="alert-triangle" class="w-3 h-3"></i> Late Payment</span>';
-                  } else if (p.status === 'pending_verification') {
-                    statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200"><i data-lucide="clock" class="w-3 h-3 animate-spin"></i> Pending Review</span>';
-                  } else if (p.status === 'rejected') {
-                    statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200"><i data-lucide="x-circle" class="w-3 h-3"></i> Rejected</span>';
-                  } else {
-                    statusBadge = '<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">Incomplete</span>';
-                  }
-
-                  const studentUser = window.store && (window.store.getUserById(p.userId || p.studentId) || window.store.getUserByEmail(p.userEmail || p.studentEmail));
-                  const studentName = (studentUser && studentUser.name) || p.studentName || p.userName || 'Student';
-                  const studentUsername = (studentUser && studentUser.username) || p.username || '';
-                  const studentEmail = (studentUser && studentUser.email) || p.studentEmail || p.userEmail || p.studentId || '';
-
-                  return `
-                    <tr class="hover:bg-slate-50/70 transition-colors ${isLate ? 'bg-orange-50/20' : ''}">
-                      <td class="py-3 px-4">
-                        <div class="flex items-center gap-1.5 flex-wrap">
-                          <span class="font-bold text-slate-900">${studentName}</span>
-                          ${studentUsername ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-200">@${studentUsername}</span>` : ''}
-                        </div>
-                        <span class="text-xs text-slate-500 block">${studentEmail}</span>
-                        <span class="text-[11px] font-bold text-rose-700 mt-0.5 inline-block">${p.planName || p.planId}</span>
-                      </td>
-                      <td class="py-3 px-4 font-black text-slate-900">₹${p.amount}</td>
-                      <td class="py-3 px-4 font-mono text-xs font-bold text-slate-800">
-                        <div class="flex items-center gap-1.5">
-                          <span>${p.utr || '<span class="text-slate-400 font-sans">N/A</span>'}</span>
-                          ${p.utr ? `
-                            <button 
-                              onclick="navigator.clipboard.writeText('${p.utr}'); window.app.showToast('UTR copied!', 'info');"
-                              class="text-slate-400 hover:text-slate-700 p-1"
-                              title="Copy UTR"
-                            >
-                              <i data-lucide="copy" class="w-3.5 h-3.5"></i>
-                            </button>
-                          ` : ''}
-                        </div>
-                        <span class="text-[10px] text-slate-400 font-mono block mt-0.5">ID: ${p.sessionId}</span>
-                        ${isDupUtr ? `
-                          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200 mt-1 block w-fit" title="Duplicate UTR detected across ${utrCounts[cleanUtr]} sessions!">
-                            <i data-lucide="alert-octagon" class="w-3 h-3"></i> Duplicate UTR (${utrCounts[cleanUtr]}x)
-                          </span>
-                        ` : ''}
-                      </td>
-                      <td class="py-3 px-4 text-xs font-mono text-slate-600">
-                        ${p.channelUpiId || (p.channelSnapshot ? p.channelSnapshot.upiId : 'HDFC UPI')}
-                      </td>
-                      <td class="py-3 px-4 text-xs text-slate-500">${dateStr}</td>
-                      <td class="py-3 px-4">
-                        ${p.screenshot ? `
-                          <button 
-                            onclick="window.adminDashboard.viewPaymentProof('${p.sessionId}')"
-                            class="group relative w-10 h-10 rounded-lg overflow-hidden border border-slate-300 hover:border-rose-500 transition-colors shadow-2xs block"
-                            title="Click to inspect receipt proof"
-                          >
-                            <img src="${p.screenshot}" alt="Proof" class="w-full h-full object-cover group-hover:scale-110 transition-transform">
-                            <div class="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors flex items-center justify-center">
-                              <i data-lucide="zoom-in" class="w-4 h-4 text-white drop-shadow"></i>
-                            </div>
-                          </button>
-                        ` : '<span class="text-xs text-slate-400">No image</span>'}
-                      </td>
-                      <td class="py-3 px-4">
-                        ${statusBadge}
-                        ${isPendingOverdue ? `
-                          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-200 mt-1 block w-fit animate-pulse" title="Submitted ${Math.floor(pendingAgeDays)} days ago - urgent attention needed">
-                            <i data-lucide="clock" class="w-3 h-3"></i> Pending &gt; 3 Days
-                          </span>
-                        ` : ''}
-                      </td>
-                      <td class="py-3 px-4 text-right">
-                        ${isPending ? `
-                          <div class="inline-flex items-center gap-1.5">
-                            <button 
-                              onclick="window.adminDashboard.promptApprovePayment('${p.sessionId}')"
-                              class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-xs transition-colors flex items-center gap-1 cursor-pointer"
-                              title="Approve and activate subscription"
-                            >
-                              <i data-lucide="check" class="w-3.5 h-3.5"></i> Approve
-                            </button>
-                            <button 
-                              onclick="window.adminDashboard.promptRejectPayment('${p.sessionId}')"
-                              class="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-lg border border-rose-200 transition-colors flex items-center gap-1 cursor-pointer"
-                              title="Reject proof"
-                            >
-                              <i data-lucide="x" class="w-3.5 h-3.5"></i> Reject
-                            </button>
-                          </div>
-                        ` : (p.status === 'approved' ? `
-                          <div class="text-xs text-emerald-700 font-medium">
-                            <span class="font-bold">Verified</span> by ${p.verifiedBy || 'admin'}
-                          </div>
-                        ` : (p.status === 'rejected' ? `
-                          <div class="text-xs text-rose-600 font-medium" title="${p.rejectionReason || ''}">
-                            <span class="font-bold">Rejected:</span> ${p.rejectionReason || 'Proof invalid'}
-                          </div>
-                        ` : '--'))}
-                      </td>
-                    </tr>
-                  `;
-                }).join('')}
-              </tbody>
-            </table>
-          </div>
-          ${totalPages > 1 ? `
-            <div class="px-4 py-3 bg-slate-50/70 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-              <div class="text-slate-600">
-                Showing <span class="font-semibold text-slate-900">${totalFiltered === 0 ? 0 : startIndex + 1}</span> to <span class="font-semibold text-slate-900">${endIndex}</span> of <span class="font-bold text-slate-900">${totalFiltered}</span> payment sessions
-              </div>
-              <div class="flex items-center gap-1">
-                <button 
-                  onclick="window.adminDashboard.setPvPage(${this._pvPage - 1})"
-                  ${this._pvPage <= 1 ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 bg-white cursor-not-allowed text-xs"' : 'class="px-2.5 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-100 text-xs font-medium cursor-pointer"'}
-                >
-                  Previous
-                </button>
-                <span class="px-3 py-1 font-bold text-xs text-slate-700 bg-white border border-slate-200 rounded">
-                  Page ${this._pvPage} of ${totalPages}
-                </span>
-                <button 
-                  onclick="window.adminDashboard.setPvPage(${this._pvPage + 1})"
-                  ${this._pvPage >= totalPages ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 bg-white cursor-not-allowed text-xs"' : 'class="px-2.5 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-100 text-xs font-medium cursor-pointer"'}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          ` : ''}
-        </div>
-        </div>
+        <!-- Payments Table Container (rendered by renderPaymentVerificationsTableOnly) -->
+        <div id="admin-payment-table-container"></div>
       </div>
     `;
 
-    if (window.lucide) window.lucide.createIcons();
+    this.renderPaymentVerificationsTableOnly();
   };
 
   AdminDashboard.prototype.setPvPage = function(page) {
@@ -1817,13 +1650,35 @@
     const startIndex = (this._pvPage - 1) * pageSize;
     const endIndex = Math.min(startIndex + pageSize, totalFiltered);
     const pagedSessions = filtered.slice(startIndex, endIndex);
+    const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const sidOf = (p) => p.sessionId || p.paymentSessionId;
+    const knownIds = new Set(payments.map(sidOf));
+    this.pvSelected = new Set([...(this.pvSelected || [])].filter(id => knownIds.has(id)));
+    const selectedCount = this.pvSelected.size;
+    const pageIds = pagedSessions.map(sidOf);
+    const allPageSelected = pageIds.length > 0 && pageIds.every(id => this.pvSelected.has(id));
+    this._pvFilteredIds = filtered.map(sidOf);
 
     tableContainer.innerHTML = `
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-2 px-1 text-xs ${selectedCount ? '' : 'hidden'}">
+        <span class="font-bold text-slate-700">Selected: ${selectedCount}</span>
+        <div class="flex flex-wrap items-center gap-2">
+          ${filtered.length > selectedCount ? `<button onclick="window.adminDashboard.selectAllFilteredPayments()" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-bold text-slate-700 cursor-pointer">Select all ${filtered.length} in this view</button>` : ''}
+          <button onclick="window.adminDashboard.clearPaymentSelection()" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-bold text-slate-700 cursor-pointer">Clear</button>
+          <button id="admin-payment-bulk-delete" onclick="window.adminDashboard.bulkDeletePayments()" class="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold flex items-center gap-1 cursor-pointer">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Delete Selected (${selectedCount})
+          </button>
+        </div>
+      </div>
       <div class="bg-white border border-slate-200 rounded-xl shadow-2xs overflow-hidden">
         <div class="overflow-x-auto">
           <table class="w-full text-left text-sm">
             <thead>
               <tr class="border-b border-slate-200 bg-slate-50/70 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <th class="py-3 pl-4 pr-1 w-8">
+                  <input type="checkbox" aria-label="Select all payments on this page" ${allPageSelected ? 'checked' : ''}
+                    onchange="window.adminDashboard.togglePaymentPageSelection(this.checked)" class="w-4 h-4 rounded cursor-pointer">
+                </th>
                 <th class="py-3 px-4">Student & Plan</th>
                 <th class="py-3 px-4">Amount</th>
                 <th class="py-3 px-4">UTR Reference</th>
@@ -1831,18 +1686,20 @@
                 <th class="py-3 px-4">Submitted At</th>
                 <th class="py-3 px-4">Receipt Proof</th>
                 <th class="py-3 px-4">Status</th>
-                <th class="py-3 px-4 text-right">Verification Action</th>
+                <th class="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
               ${filtered.length === 0 ? `
                 <tr>
-                  <td colspan="8" class="py-12 text-center text-slate-400">
+                  <td colspan="9" class="py-12 text-center text-slate-400">
                     <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 opacity-40"></i>
                     <p class="text-xs font-bold">No payment sessions in this category.</p>
                   </td>
                 </tr>
               ` : pagedSessions.map(p => {
+                const sid = sidOf(p);
+                const isSelected = this.pvSelected.has(sid);
                 const isPending = p.status === 'pending_verification' || p.status === 'late_payment';
                 const isLate = p.status === 'late_payment';
                 const dateStr = p.submittedAt ? new Date(p.submittedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '--';
@@ -1868,24 +1725,49 @@
                 const studentName = (studentUser && studentUser.name) || p.studentName || p.userName || 'Student';
                 const studentUsername = (studentUser && studentUser.username) || p.username || '';
                 const studentEmail = (studentUser && studentUser.email) || p.studentEmail || p.userEmail || p.studentId || '';
+                const snap = p.channelSnapshot || {};
+                const channelTitle = snap.title || snap.name || p.channelTitle || p.channelId || 'UPI';
+                const channelUpi = snap.upiId || p.channelUpi || p.channelUpiId || '';
+                const hasProof = Boolean(p.screenshot || p.proofUrl);
+                const proofStatus = p.proofStatus || (hasProof ? 'available' : 'none');
+
+                let proofCell;
+                if (proofStatus === 'available') {
+                  proofCell = `
+                    <button onclick="window.adminDashboard.viewPaymentProof('${sid}')"
+                      class="group relative w-12 h-12 rounded-lg overflow-hidden border border-slate-300 hover:border-rose-500 transition-colors shadow-2xs block bg-slate-100 cursor-pointer"
+                      title="Click to inspect receipt proof">
+                      <img data-proof-session="${sid}" alt="Payment proof" class="hidden w-full h-full object-cover group-hover:scale-110 transition-transform">
+                      <span data-proof-placeholder="${sid}" class="absolute inset-0 flex items-center justify-center text-slate-400"><i data-lucide="image" class="w-4 h-4"></i></span>
+                    </button>`;
+                } else if (proofStatus === 'missing') {
+                  proofCell = `<span class="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700" title="The record points to a proof image that no longer exists in storage (uploaded before persistent storage was enabled).">
+                      <i data-lucide="image-off" class="w-3.5 h-3.5"></i> Proof file missing</span>`;
+                } else {
+                  proofCell = '<span class="text-xs text-slate-400 italic">No receipt attached</span>';
+                }
 
                 return `
-                  <tr class="hover:bg-slate-50/70 transition-colors ${isLate ? 'bg-orange-50/20' : ''}">
+                  <tr class="hover:bg-slate-50/70 transition-colors ${isSelected ? 'bg-rose-50/40' : (isLate ? 'bg-orange-50/20' : '')}">
+                    <td class="py-3 pl-4 pr-1">
+                      <input type="checkbox" aria-label="Select payment" ${isSelected ? 'checked' : ''}
+                        onchange="window.adminDashboard.togglePaymentSelection('${sid}', this.checked)" class="w-4 h-4 rounded cursor-pointer">
+                    </td>
                     <td class="py-3 px-4">
                       <div class="flex items-center gap-1.5 flex-wrap">
-                        <span class="font-bold text-slate-900">${studentName}</span>
-                        ${studentUsername ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-200">@${studentUsername}</span>` : ''}
+                        <span class="font-bold text-slate-900">${esc(studentName)}</span>
+                        ${studentUsername ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-200">@${esc(studentUsername)}</span>` : ''}
                       </div>
-                      <span class="text-xs text-slate-500 block">${studentEmail}</span>
-                      <span class="text-[11px] font-bold text-rose-700 mt-0.5 inline-block">${p.planName || p.planId}</span>
+                      <span class="text-xs text-slate-500 block">${esc(studentEmail)}</span>
+                      <span class="text-[11px] font-bold text-rose-700 mt-0.5 inline-block">${esc(p.planName || p.planId)}</span>
                     </td>
-                    <td class="py-3 px-4 font-black text-slate-900">₹${p.amount}</td>
+                    <td class="py-3 px-4 font-black text-slate-900">₹${esc(p.amount)}</td>
                     <td class="py-3 px-4 font-mono text-xs font-bold text-slate-800">
                       <div class="flex items-center gap-1.5">
-                        <span>${p.utr || '<span class="text-slate-400 font-sans">N/A</span>'}</span>
+                        <span>${p.utr ? esc(p.utr) : '<span class="text-slate-400 font-sans">N/A</span>'}</span>
                         ${p.utr ? `
-                          <button 
-                            onclick="navigator.clipboard.writeText('${p.utr}'); window.app.showToast('UTR copied!', 'info');"
+                          <button
+                            onclick="navigator.clipboard.writeText('${esc(p.utr)}'); window.app.showToast('UTR copied!', 'info');"
                             class="text-slate-400 hover:text-slate-700 p-1"
                             title="Copy UTR"
                           >
@@ -1893,7 +1775,7 @@
                           </button>
                         ` : ''}
                       </div>
-                      <span class="text-[10px] text-slate-400 font-mono block mt-0.5">ID: ${p.sessionId}</span>
+                      <span class="text-[10px] text-slate-400 font-mono block mt-0.5">ID: ${esc(sid)}</span>
                       ${isDupUtr ? `
                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200 mt-1 block w-fit" title="Duplicate UTR detected across ${utrCounts[cleanUtr]} sessions!">
                           <i data-lucide="alert-triangle" class="w-3 h-3"></i> Duplicate UTR (${utrCounts[cleanUtr]}x)
@@ -1901,8 +1783,8 @@
                       ` : ''}
                     </td>
                     <td class="py-3 px-4 text-xs font-medium text-slate-600">
-                      <div class="font-bold text-slate-800">${p.channelTitle || p.channelId || 'UPI'}</div>
-                      <div class="text-[10px] text-slate-400 font-mono">${p.channelUpi || ''}</div>
+                      <div class="font-bold text-slate-800">${esc(channelTitle)}</div>
+                      <div class="text-[10px] text-slate-400 font-mono">${esc(channelUpi)}</div>
                     </td>
                     <td class="py-3 px-4 text-xs text-slate-600">
                       <div>${dateStr}</div>
@@ -1912,48 +1794,38 @@
                         </span>
                       ` : ''}
                     </td>
-                    <td class="py-3 px-4">
-                      ${(p.screenshot || p.proofUrl) ? `
-                        <button 
-                          onclick="window.adminDashboard.viewPaymentProof('${p.sessionId}')" 
-                          class="px-2.5 py-1 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
-                        >
-                          <i data-lucide="image" class="w-3.5 h-3.5"></i> View Proof
-                        </button>
-                      ` : `
-                        <span class="text-xs text-slate-400 italic">No receipt attached</span>
-                      `}
-                    </td>
+                    <td class="py-3 px-4">${proofCell}</td>
                     <td class="py-3 px-4">
                       ${statusBadge}
                     </td>
                     <td class="py-3 px-4 text-right">
                       <div class="inline-flex items-center gap-1.5">
                         ${isPending ? `
-                          <button 
-                            onclick="window.adminDashboard.promptApprovePayment('${p.sessionId}')"
+                          <button
+                            onclick="window.adminDashboard.promptApprovePayment('${sid}')"
                             class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-2xs transition-colors flex items-center gap-1 cursor-pointer"
                             title="Verify and activate student membership"
                           >
                             <i data-lucide="check" class="w-3.5 h-3.5"></i> Approve
                           </button>
-                          <button 
-                            onclick="window.adminDashboard.promptRejectPayment('${p.sessionId}')"
+                          <button
+                            onclick="window.adminDashboard.promptRejectPayment('${sid}')"
                             class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
                             title="Reject payment proof"
                           >
                             <i data-lucide="x" class="w-3.5 h-3.5"></i> Reject
                           </button>
                         ` : `
-                          <span class="text-xs text-slate-400 font-medium mr-1">Settled</span>
-                          <button 
-                            onclick="window.adminDashboard.viewPaymentSessionDetails('${p.sessionId}')" 
-                            class="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-                            title="View Session Details"
-                          >
-                            <i data-lucide="file-text" class="w-4 h-4"></i>
-                          </button>
+                          ${p.status === 'approved' || p.status === 'rejected' ? '<span class="text-xs text-slate-400 font-medium mr-1">Settled</span>' : ''}
                         `}
+                        <button
+                          onclick="window.adminDashboard.deletePaymentRecord('${sid}')"
+                          class="p-1.5 text-slate-400 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                          title="Delete payment record"
+                          aria-label="Delete payment record"
+                        >
+                          <i data-lucide="trash-2" class="w-4 h-4"></i>
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -1968,7 +1840,7 @@
               Showing <span class="font-semibold text-slate-900">${totalFiltered === 0 ? 0 : startIndex + 1}</span> to <span class="font-semibold text-slate-900">${endIndex}</span> of <span class="font-bold text-slate-900">${totalFiltered}</span> sessions
             </div>
             <div class="flex items-center gap-1">
-              <button 
+              <button
                 onclick="window.adminDashboard.setPvPage(${this._pvPage - 1})"
                 ${this._pvPage <= 1 ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 bg-white cursor-not-allowed text-xs"' : 'class="px-2.5 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-100 text-xs font-medium cursor-pointer"'}
               >
@@ -1977,7 +1849,7 @@
               <span class="px-3 py-1 font-bold text-xs text-slate-700 bg-white border border-slate-200 rounded">
                 Page ${this._pvPage} of ${totalPages}
               </span>
-              <button 
+              <button
                 onclick="window.adminDashboard.setPvPage(${this._pvPage + 1})"
                 ${this._pvPage >= totalPages ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 bg-white cursor-not-allowed text-xs"' : 'class="px-2.5 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-100 text-xs font-medium cursor-pointer"'}
               >
@@ -1990,16 +1862,161 @@
     `;
 
     if (window.lucide) window.lucide.createIcons();
+    this.loadProofThumbnails(pagedSessions);
   };
 
-  AdminDashboard.prototype.viewPaymentProof = function(sessionId) {
-    const session = (this._cachedPaymentSessions || []).find(s => s.sessionId === sessionId);
+  /** Payment proofs are private: fetch them with the admin's session and show them as object URLs. */
+  AdminDashboard.prototype.fetchProofObjectUrl = async function(session) {
+    const src = (session && (session.screenshot || session.proofUrl)) || '';
+    if (!src) return null;
+    if (src.startsWith('data:')) return src;
+    this._proofUrlCache = this._proofUrlCache || new Map();
+    if (this._proofUrlCache.has(src)) return this._proofUrlCache.get(src);
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    const resp = await fetch(src, { headers: { 'Authorization': `Bearer ${user ? (user.token || '') : ''}` } });
+    if (!resp.ok) {
+      throw new Error(resp.status === 404 ? 'The proof image was not found in storage.' : `The proof image could not be loaded (HTTP ${resp.status}).`);
+    }
+    const url = URL.createObjectURL(await resp.blob());
+    this._proofUrlCache.set(src, url);
+    if (this._proofUrlCache.size > 80) {   // keep memory bounded
+      const [oldKey, oldUrl] = this._proofUrlCache.entries().next().value;
+      URL.revokeObjectURL(oldUrl);
+      this._proofUrlCache.delete(oldKey);
+    }
+    return url;
+  };
+
+  AdminDashboard.prototype.loadProofThumbnails = function(sessions) {
+    (sessions || []).forEach(p => {
+      const sid = p.sessionId || p.paymentSessionId;
+      if ((p.proofStatus || (p.screenshot ? 'available' : 'none')) !== 'available') return;
+      this.fetchProofObjectUrl(p).then(url => {
+        const img = document.querySelector(`img[data-proof-session="${sid}"]`);
+        const ph = document.querySelector(`[data-proof-placeholder="${sid}"]`);
+        if (!img || !url) return;
+        img.src = url;
+        img.classList.remove('hidden');
+        if (ph) ph.classList.add('hidden');
+      }).catch(() => {
+        const ph = document.querySelector(`[data-proof-placeholder="${sid}"]`);
+        if (ph) {
+          ph.innerHTML = '<i data-lucide="image-off" class="w-4 h-4 text-amber-600"></i>';
+          ph.title = 'Proof image unavailable';
+          if (window.lucide) window.lucide.createIcons();
+        }
+      });
+    });
+  };
+
+  AdminDashboard.prototype.togglePaymentSelection = function(sessionId, checked) {
+    this.pvSelected = this.pvSelected || new Set();
+    if (checked) this.pvSelected.add(sessionId); else this.pvSelected.delete(sessionId);
+    this.renderPaymentVerificationsTableOnly();
+  };
+
+  AdminDashboard.prototype.togglePaymentPageSelection = function(checked) {
+    this.pvSelected = this.pvSelected || new Set();
+    document.querySelectorAll('#admin-payment-table-container input[aria-label="Select payment"]').forEach(cb => {
+      const m = (cb.getAttribute('onchange') || '').match(/togglePaymentSelection\('([^']+)'/);
+      if (m) { if (checked) this.pvSelected.add(m[1]); else this.pvSelected.delete(m[1]); }
+    });
+    this.renderPaymentVerificationsTableOnly();
+  };
+
+  AdminDashboard.prototype.selectAllFilteredPayments = function() {
+    this.pvSelected = new Set(this._pvFilteredIds || []);
+    this.renderPaymentVerificationsTableOnly();
+  };
+
+  AdminDashboard.prototype.clearPaymentSelection = function() {
+    this.pvSelected = new Set();
+    this.renderPaymentVerificationsTableOnly();
+  };
+
+  /** POST that reports partial results instead of throwing on a non-2xx response. */
+  AdminDashboard.prototype._postPaymentDelete = async function(url, body) {
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${user ? (user.token || '') : ''}` },
+      body: JSON.stringify(body)
+    });
+    const res = await resp.json().catch(() => ({}));
+    return { ok: resp.ok && res.success, res, status: resp.status };
+  };
+
+  AdminDashboard.prototype._removeDeletedPayments = function(ids) {
+    const gone = new Set(ids || []);
+    if (!gone.size) return;
+    this._cachedPaymentSessions = (this._cachedPaymentSessions || []).filter(p => !gone.has(p.sessionId || p.paymentSessionId));
+    if (window.store && typeof window.store.savePaymentSessions === 'function') {
+      window.store.savePaymentSessions(this._cachedPaymentSessions);
+    }
+    gone.forEach(id => this.pvSelected && this.pvSelected.delete(id));
+  };
+
+  AdminDashboard.prototype.deletePaymentRecord = async function(sessionId) {
+    const p = (this._cachedPaymentSessions || []).find(s => (s.sessionId || s.paymentSessionId) === sessionId);
+    const label = p ? `${p.studentName || p.userName || 'student'} - ₹${p.amount} (${p.utr || sessionId})` : sessionId;
+    if (!confirm(`Permanently delete this payment record?\n\n${label}\n\nThe payment proof image is deleted too. A subscription that was already granted is NOT changed. This cannot be undone.`)) return;
+    try {
+      const { ok, res } = await this._postPaymentDelete('/api/admin/payments/delete', { paymentSessionId: sessionId });
+      this._removeDeletedPayments(res.deletedIds);
+      if (ok) {
+        window.app.showToast('Payment record deleted.', 'info');
+      } else {
+        window.app.showToast(res.error || 'Delete failed. Please try again.', 'error');
+      }
+    } catch (err) {
+      window.app.showToast(`Delete failed: ${err.message}`, 'error');
+    }
+    this.renderPaymentVerifications(true, true);
+  };
+
+  AdminDashboard.prototype.bulkDeletePayments = async function() {
+    const ids = [...(this.pvSelected || [])];
+    if (!ids.length) return;
+    if (!confirm(`Permanently delete ${ids.length} payment record${ids.length === 1 ? '' : 's'} and their proof images?\n\nSubscriptions that were already granted are NOT changed. This cannot be undone.`)) return;
+    const btn = document.getElementById('admin-payment-bulk-delete');
+    if (btn) { btn.disabled = true; btn.textContent = 'Deleting...'; }
+    try {
+      const { ok, res } = await this._postPaymentDelete('/api/admin/payments/bulk-delete', { ids });
+      this._removeDeletedPayments(res.deletedIds);
+      const deleted = (res.deletedIds || []).length;
+      if (ok) {
+        this.pvSelected = new Set();
+        window.app.showToast(`Deleted ${deleted} payment record(s).`, 'info');
+      } else if (deleted) {
+        window.app.showToast(`Deleted ${deleted} record(s); ${(res.failed || []).length} could not be deleted and stay selected.`, 'warning');
+      } else {
+        window.app.showToast(res.error || 'Bulk delete failed. Please try again.', 'error');
+      }
+    } catch (err) {
+      window.app.showToast(`Bulk delete failed: ${err.message}`, 'error');
+    }
+    this.renderPaymentVerifications(true, true);
+  };
+
+  AdminDashboard.prototype.viewPaymentProof = async function(sessionId) {
+    const session = (this._cachedPaymentSessions || []).find(s => (s.sessionId || s.paymentSessionId) === sessionId);
     if (!session) {
       window.app.showToast('Session details not found.', 'error');
       return;
     }
-    const imgSrc = session.screenshot || session.proofUrl || '';
-    this.openScreenshotModal(imgSrc, `UTR: ${session.utr || session.sessionId}`, session);
+    const title = `UTR: ${session.utr || sessionId}`;
+    if (session.proofStatus === 'missing') {
+      this.openScreenshotModal('', title, session, 'The proof image for this record no longer exists in storage.');
+      return;
+    }
+    let imgSrc = '';
+    let problem = '';
+    try {
+      imgSrc = (await this.fetchProofObjectUrl(session)) || '';
+    } catch (err) {
+      problem = err.message;
+    }
+    this.openScreenshotModal(imgSrc, title, session, problem);
   };
 
   AdminDashboard.prototype.promptApprovePayment = function(sessionId) {
@@ -2220,14 +2237,14 @@
 
   // --- ZOOMABLE / ROTATABLE SCREENSHOT MODAL ---
 
-  AdminDashboard.prototype.openScreenshotModal = function(imgSrc, title, session) {
+  AdminDashboard.prototype.openScreenshotModal = function(imgSrc, title, session, problem) {
     this._screenshotScale = 1.0;
     this._screenshotRotate = 0;
     const modalContent = document.getElementById('admin-generic-modal-content');
     if (!modalContent) return;
 
-    let cleanSrc = (imgSrc || (session && (session.screenshot || session.proofUrl)) || '').trim();
-    if (cleanSrc && !cleanSrc.startsWith('data:') && !cleanSrc.startsWith('http') && !cleanSrc.startsWith('/')) {
+    let cleanSrc = (imgSrc || '').trim();
+    if (cleanSrc && !cleanSrc.startsWith('data:') && !cleanSrc.startsWith('blob:') && !cleanSrc.startsWith('http') && !cleanSrc.startsWith('/')) {
       if (cleanSrc.startsWith('iVBORw0KGgo')) {
         cleanSrc = 'data:image/png;base64,' + cleanSrc;
       } else {
@@ -2285,8 +2302,8 @@
           </div>
           <div id="proof-error-indicator" class="${hasImage ? 'hidden' : 'flex'} flex-col items-center justify-center p-6 text-rose-600 text-center">
             <i data-lucide="alert-circle" class="w-8 h-8 mx-auto mb-2 text-rose-500"></i>
-            <p class="text-xs font-bold">No receipt image attached</p>
-            <p class="text-[11px] text-slate-500 mt-1">The student submitted payment without attaching an image proof or the image is unavailable.</p>
+            <p class="text-xs font-bold">${problem ? 'Receipt image unavailable' : (hasImage ? 'Receipt image could not be displayed' : 'No receipt image attached')}</p>
+            <p class="text-[11px] text-slate-500 mt-1">${problem || 'The student submitted payment without attaching an image proof or the image is unavailable.'}</p>
           </div>
           ${hasImage ? `
             <img id="screenshot-modal-image" src="${cleanSrc}" alt="Payment Proof" 
@@ -2300,7 +2317,7 @@
 
         <div class="flex items-center justify-between pt-2 border-t border-slate-100">
           ${hasImage ? `
-            <a href="${cleanSrc}" download="payment_proof_${Date.now()}.png" class="text-xs font-bold text-rose-700 hover:text-rose-800 flex items-center gap-1">
+            <a href="${cleanSrc}" download="payment_proof_${Date.now()}" class="text-xs font-bold text-rose-700 hover:text-rose-800 flex items-center gap-1">
               <i data-lucide="download" class="w-4 h-4"></i> Download Original
             </a>
           ` : '<span class="text-xs text-slate-400 font-medium">No image to download</span>'}
@@ -2440,7 +2457,7 @@
                       ${tierBadge}
                       ${amountLabel}
                       ${ch.isActive ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">ACTIVE</span>' : '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">INACTIVE</span>'}
-                      ${ch.needsReupload ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1"><i data-lucide="alert-triangle" class="w-3 h-3 text-amber-600"></i> RE-UPLOAD QR</span>' : ''}
+                      ${(ch.needsReupload || ch.qrMissing) ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1"><i data-lucide="alert-triangle" class="w-3 h-3 text-amber-600"></i> RE-UPLOAD QR</span>' : ''}
                     </div>
 
                     <div class="font-mono text-xs font-black text-rose-700 bg-rose-50 px-2.5 py-1 rounded-lg inline-flex items-center gap-2 border border-rose-100">
@@ -2481,7 +2498,7 @@
 
                   <!-- QR Thumbnail -->
                   <div class="w-24 h-24 bg-slate-50 border border-slate-200 rounded-xl p-1.5 flex-shrink-0 flex items-center justify-center relative overflow-hidden">
-                    ${ch.needsReupload ? `
+                    ${(ch.needsReupload || ch.qrMissing) ? `
                       <div class="p-1 text-center text-amber-800 bg-amber-50 rounded flex flex-col items-center justify-center h-full w-full">
                         <i data-lucide="alert-triangle" class="w-5 h-5 text-amber-600 mb-0.5"></i>
                         <span class="text-[9px] font-bold leading-tight">Re-upload</span>
@@ -2885,12 +2902,17 @@
             channelId: channelId || undefined
           })
         });
-        if (uploadRes && uploadRes.qrCodeUrl) {
-          qrUrl = uploadRes.qrCodeUrl;
-        }
+        if (!uploadRes || !uploadRes.qrCodeUrl) throw new Error('The server did not confirm the stored QR image.');
+        qrUrl = uploadRes.qrCodeUrl;
       } catch (upErr) {
         console.warn('[AdminSubscriptions] QR upload failed:', upErr);
-        window.app.showToast('Failed to upload QR image, continuing save...', 'warning');
+        window.app.showToast(`QR image was not saved: ${upErr.message} Nothing was changed.`, 'error');
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i> Save Channel';
+          if (window.lucide) window.lucide.createIcons();
+        }
+        return;
       }
     } else if (this._removeChannelQr) {
       qrUrl = '';

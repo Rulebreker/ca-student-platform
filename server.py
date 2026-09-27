@@ -6,6 +6,7 @@ import ai_scheduler
 import job_repository
 import syllabus_hierarchy
 import password_reset
+import image_store
 import http.server
 import socketserver
 import os
@@ -1034,7 +1035,7 @@ SHARED_COLLECTIONS = [
 # Deletion tombstones ("<collection>:<id>" in the deleted_documents collection). Deletions are
 # recorded in MongoDB so that no instance - including a fresh one seeded from backend_data.json -
 # can bring a deleted record back through the merge-only refresh or write-through.
-TOMBSTONED_COLLECTIONS = ('tests', 'questions')
+TOMBSTONED_COLLECTIONS = ('tests', 'questions', 'payment_sessions')
 
 
 def tombstone_key(collection, doc_id):
@@ -1042,7 +1043,7 @@ def tombstone_key(collection, doc_id):
 
 
 def apply_tombstones(data):
-    """Drop tombstoned tests/questions from this instance's data; fix counts of affected tests."""
+    """Drop tombstoned tests/questions/payment sessions from this instance's data; fix counts of affected tests."""
     tomb = set(data.get('deleted_documents') or [])
     if not tomb:
         return False
@@ -1052,10 +1053,11 @@ def apply_tombstones(data):
         items = data.get(coll)
         if not isinstance(items, list):
             continue
-        kept = [d for d in items if not (isinstance(d, dict) and tombstone_key(coll, d.get('id')) in tomb)]
+        key_field = mongodb_manager.list_key_field(coll)
+        kept = [d for d in items if not (isinstance(d, dict) and tombstone_key(coll, d.get(key_field)) in tomb)]
         if len(kept) != len(items):
             if coll == 'questions':
-                affected_tests |= {d.get('testId') for d in items if isinstance(d, dict) and tombstone_key(coll, d.get('id')) in tomb}
+                affected_tests |= {d.get('testId') for d in items if isinstance(d, dict) and tombstone_key(coll, d.get(key_field)) in tomb}
             data[coll] = kept
             changed = True
     if affected_tests:
@@ -1074,15 +1076,64 @@ def record_deletions(data, collection, ids):
     them from MongoDB. Call before save_backend_data(data)."""
     ids = [str(i) for i in ids if i]
     if not ids:
-        return
+        return []
     tomb = data.setdefault('deleted_documents', [])
     known = set(tomb)
     new_keys = [tombstone_key(collection, i) for i in ids if tombstone_key(collection, i) not in known]
     tomb.extend(new_keys)
-    if new_keys:
-        mongodb_manager.upsert_documents('deleted_documents', [{'_id': k, 'value': True} for k in new_keys], '_id')
+    db_online = mongodb_manager.get_database() is not None
+    failed = []
+    if new_keys and db_online and not mongodb_manager.upsert_documents('deleted_documents', [{'_id': k, 'value': True} for k in new_keys], '_id'):
+        failed = list(ids)
     for i in ids:
-        sync_to_database(f"{collection}/{i}", None, method='DELETE', sync=True)
+        if not sync_to_database(f"{collection}/{i}", None, method='DELETE', sync=True) and db_online and i not in failed:
+            failed.append(i)
+    return failed   # ids whose removal from MongoDB could not be confirmed
+
+
+def delete_payment_sessions_everywhere(data, session_ids):
+    """Permanently delete payment session records and their proof images. Caller saves data.
+    Subscriptions that were already granted are not touched."""
+    wanted = set(str(i) for i in session_ids if i)
+    sessions = data.get('payment_sessions', [])
+    sid = lambda s: str(s.get('paymentSessionId') or s.get('sessionId') or '')
+    removed = [s for s in sessions if isinstance(s, dict) and sid(s) in wanted]
+    data['payment_sessions'] = [s for s in sessions if not (isinstance(s, dict) and sid(s) in wanted)]
+    failed = record_deletions(data, 'payment_sessions', sorted(wanted))
+    still_referenced = {image_store.image_id_from_url(s.get('screenshot')) for s in data['payment_sessions'] if isinstance(s, dict)}
+    proofs_deleted, proofs_failed = [], []
+    for s in removed:
+        image_id = image_store.image_id_from_url(s.get('screenshot'))
+        if image_id and image_id not in still_referenced:
+            (proofs_deleted if image_store.delete_image(image_id) else proofs_failed).append(image_id)
+    removed_ids = [sid(s) for s in removed]
+    return {'deletedIds': [i for i in removed_ids if i not in failed],
+            'failed': sorted(failed),
+            'notFound': sorted(wanted - set(removed_ids) - set(failed)),
+            'deletedProofImages': len(proofs_deleted),
+            'proofImagesNotRemoved': len(proofs_failed)}
+
+
+def image_referenced_elsewhere(data, image_id):
+    """True if a payment channel or any payment session still uses this stored image."""
+    for c in data.get('payment_channels') or []:
+        if isinstance(c, dict) and image_store.image_id_from_url(c.get('qrCodeUrl')) == image_id:
+            return True
+    for s in data.get('payment_sessions') or []:
+        if not isinstance(s, dict):
+            continue
+        snap = s.get('channelSnapshot') if isinstance(s.get('channelSnapshot'), dict) else {}
+        if image_id in (image_store.image_id_from_url(s.get('screenshot')), image_store.image_id_from_url(s.get('qrData')),
+                        image_store.image_id_from_url(snap.get('qrCodeUrl'))):
+            return True
+    return False
+
+
+def cleanup_replaced_qr(data, old_url):
+    """Delete a channel QR image that nothing refers to any more (after replace/remove/delete)."""
+    image_id = image_store.image_id_from_url(old_url)
+    if image_id and not image_referenced_elsewhere(data, image_id):
+        image_store.delete_image(image_id)
 
 
 def delete_questions_everywhere(data, question_ids):
@@ -1414,7 +1465,9 @@ def _write_through_to_mongo(data):
 def sanitize_rtdb_binary_payloads(data):
     """
     Ensures large binary assets (base64 images) are not stored inside RTDB collections.
-    Converts base64 QR data in payment_channels and payment_sessions to disk-backed image URLs.
+    Moves base64 QR / proof images in payment_channels and payment_sessions into persistent image
+    storage (image_store) and replaces them with /api/images/<id> URLs. If storage is unavailable
+    the embedded image is kept, never dropped.
     """
     dirty = False
     channels = data.get('payment_channels', [])
@@ -1423,18 +1476,19 @@ def sanitize_rtdb_binary_payloads(data):
             qr_url = ch.get('qrCodeUrl', '')
             if qr_url and isinstance(qr_url, str) and qr_url.startswith('data:image/'):
                 try:
-                    import base64
                     header, b64_data = qr_url.split(';base64,', 1)
                     raw_bytes = base64.b64decode(b64_data)
                     ext = '.png'
                     if 'jpeg' in header or 'jpg' in header: ext = '.jpg'
                     elif 'webp' in header: ext = '.webp'
-                    img_id = f"qr_{ch.get('id', 'chan')}{ext}"
-                    img_path = os.path.join(PRIVATE_IMAGES_DIR, img_id)
-                    with open(img_path, 'wb') as f:
-                        f.write(raw_bytes)
+                    safe_cid = re.sub(r'[^a-zA-Z0-9_\-]', '', str(ch.get('id', 'chan')))[:40] or 'chan'
+                    img_id = f"qr_{safe_cid}_{uuid.uuid4().hex[:8]}{ext}"
+                    image_store.save_image(img_id, raw_bytes, 'qr', related_id=ch.get('id'))
                     ch['qrCodeUrl'] = f"/api/images/{img_id}"
+                    ch['needsReupload'] = False
                     dirty = True
+                except image_store.StorageUnavailable:
+                    pass
                 except Exception:
                     ch['qrCodeUrl'] = ''
                     dirty = True
@@ -1455,7 +1509,6 @@ def sanitize_rtdb_binary_payloads(data):
             screenshot = s.get('screenshot', '')
             if screenshot and isinstance(screenshot, str) and screenshot.startswith('data:image/'):
                 try:
-                    import base64
                     header, b64_data = screenshot.split(';base64,', 1)
                     raw_bytes = base64.b64decode(b64_data)
                     ext = '.jpg'
@@ -1463,10 +1516,8 @@ def sanitize_rtdb_binary_payloads(data):
                     elif 'webp' in header: ext = '.webp'
                     sid = s.get('paymentSessionId') or s.get('id') or uuid.uuid4().hex[:8]
                     safe_sid = re.sub(r'[^a-zA-Z0-9_\-]', '', str(sid))[:40]
-                    img_id = f"shot_{safe_sid}{ext}"
-                    img_path = os.path.join(PRIVATE_IMAGES_DIR, img_id)
-                    with open(img_path, 'wb') as f:
-                        f.write(raw_bytes)
+                    img_id = f"shot_{safe_sid}_{uuid.uuid4().hex[:8]}{ext}"
+                    image_store.save_image(img_id, raw_bytes, 'payment_proof', owner_user_id=s.get('userId'), related_id=sid)
                     s['screenshot'] = f"/api/images/{img_id}"
                     dirty = True
                 except Exception:
@@ -2185,39 +2236,38 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
         # Secure Image Serving (QR Codes, Proofs, Uploads)
         if raw_path.startswith('/api/images/'):
-            img_filename = os.path.basename(raw_path.replace('/api/images/', ''))
-            ext = img_filename.lower().split('.')[-1] if '.' in img_filename else 'png'
-            if ext in ('svg', 'svgz', 'html', 'htm', 'php', 'js', 'exe'):
-                self.send_json(403, {'error': 'Forbidden file type.', 'code': 403})
+            img_filename = raw_path[len('/api/images/'):]
+            if not image_store.is_valid_image_id(img_filename):
+                self.send_json(404 if '/' not in img_filename else 403, {'error': 'Image not found', 'code': 404})
                 return
-            img_path = os.path.join(PRIVATE_IMAGES_DIR, img_filename)
-            if os.path.exists(img_path) and os.path.isfile(img_path):
-                content_types = {
-                    'png': 'image/png',
-                    'jpg': 'image/jpeg',
-                    'jpeg': 'image/jpeg',
-                    'webp': 'image/webp',
-                    'gif': 'image/gif'
-                }
-                ctype = content_types.get(ext, 'image/png')
-                try:
-                    with open(img_path, 'rb') as f:
-                        img_bytes = f.read()
-                    self.send_response(200)
-                    self.send_header('Content-Type', ctype)
-                    self.send_header('Content-Length', str(len(img_bytes)))
-                    self.send_header('X-Content-Type-Options', 'nosniff')
-                    self.send_header('Cache-Control', 'public, max-age=86400')
-                    self._send_cors_headers()
-                    self.end_headers()
-                    self.wfile.write(img_bytes)
+            is_payment_proof = img_filename.startswith('shot_')
+            if is_payment_proof:
+                # payment proofs: only administrators and the student who submitted the payment
+                viewer = authenticate_token(self.get_auth_token())
+                allowed = bool(viewer) and viewer.get('role') == 'admin'
+                if viewer and not allowed:
+                    data = load_backend_data()
+                    proof_url = f"/api/images/{img_filename}"
+                    allowed = any(isinstance(s, dict) and s.get('screenshot') == proof_url and s.get('userId') == viewer.get('id')
+                                  for s in data.get('payment_sessions', []))
+                if not allowed:
+                    self.send_json(401 if not viewer else 403, {'error': 'Not authorized to view this payment proof.', 'code': 401 if not viewer else 403})
                     return
-                except Exception as e:
-                    self.send_json(500, {'error': f'Image read error: {str(e)}'})
-                    return
-            else:
+            img_bytes = image_store.load_image(img_filename)
+            if img_bytes is None:
                 self.send_json(404, {'error': 'Image not found', 'code': 404})
                 return
+            self.send_response(200)
+            self.send_header('Content-Type', image_store.content_type_for(img_filename))
+            self.send_header('Content-Length', str(len(img_bytes)))
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.send_header('Content-Security-Policy', "default-src 'none'")
+            # image ids are unique per upload, so public images never change under the same URL
+            self.send_header('Cache-Control', 'private, no-store' if is_payment_proof else 'public, max-age=86400, immutable')
+            self._send_cors_headers()
+            self.end_headers()
+            self.wfile.write(img_bytes)
+            return
 
         # Server time
         if path == '/api/time':
@@ -2296,6 +2346,12 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             data = load_backend_data(refresh_collections=['payment_channels'])
             channels = subscription_manager.get_payment_channels(data)
             save_backend_data(data)
+            # flag uploaded QR images that no longer exist (e.g. lost from temporary disk storage)
+            stored = {image_store.image_id_from_url(c.get('qrCodeUrl')) for c in channels if isinstance(c, dict)} - {None}
+            present = image_store.existing_image_ids(stored)
+            channels = [dict(c, qrMissing=bool(image_store.image_id_from_url(c.get('qrCodeUrl'))) and
+                             image_store.image_id_from_url(c.get('qrCodeUrl')) not in present)
+                        for c in channels if isinstance(c, dict)]
             self.send_json(200, {'success': True, 'channels': channels})
             return
 
@@ -2456,6 +2512,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(403, {'success': False, 'error': 'Administrator authorization required.', 'code': 403})
                 return
             data = load_backend_data(refresh_collections=['payment_sessions', 'users'], min_interval=30.0)
+            # deletions made on another instance must not reappear while the full list is cached
+            data = load_backend_data(refresh_collections=['deleted_documents'], min_interval=5.0)
             sessions = data.get('payment_sessions', [])
             status_filter = query.get('status', [None])[0]
             if status_filter and status_filter != 'all':
@@ -2498,6 +2556,19 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         s_copy['studentId'] = user_obj.get('id')
                         s_copy['userId'] = user_obj.get('id')
                 enriched_payments.append(s_copy)
+
+            # proofStatus: 'available' | 'missing' (record points to an image that is gone) | 'none'
+            proof_ids = {image_store.image_id_from_url(p.get('screenshot')) for p in enriched_payments} - {None}
+            present = image_store.existing_image_ids(proof_ids)
+            for p in enriched_payments:
+                shot = p.get('screenshot')
+                image_id = image_store.image_id_from_url(shot)
+                if image_id:
+                    p['proofStatus'] = 'available' if image_id in present else 'missing'
+                elif isinstance(shot, str) and shot.startswith('data:image/'):
+                    p['proofStatus'] = 'available'
+                else:
+                    p['proofStatus'] = 'none'
 
             stats = {
                 'total': len(sessions),
@@ -3784,9 +3855,12 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(content_length) if content_length > 0 else b'{}'
                 req_data = json.loads(body.decode('utf-8')) if body else {}
                 plan_id = req_data.get('planId')
-                data = load_backend_data()
+                # always the channels' current QR/UPI settings, even if another instance changed them
+                data = load_backend_data(refresh_collections=['payment_channels'], min_interval=2.0)
                 sync_sync_fn = lambda p, d, method='PUT': sync_to_firebase(p, d, method=method, sync=True)
-                success, res = subscription_manager.create_payment_session(user, plan_id, data, sync_sync_fn)
+                qr_exists = lambda url: bool(image_store.existing_image_ids({image_store.image_id_from_url(url)} - {None}))
+                success, res = subscription_manager.create_payment_session(user, plan_id, data, sync_sync_fn,
+                                                                           qr_image_exists=qr_exists)
                 if not success:
                     self.send_json(400, {'success': False, 'error': res})
                     return
@@ -3848,20 +3922,35 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json(400, {'success': False, 'error': f'Invalid payment proof: {err}'})
                     return
 
-                img_ext = ext if ext else '.png'
-                safe_sid = re.sub(r'[^a-zA-Z0-9_\-]', '', str(session_id or 'receipt'))[:40]
-                img_id = f"shot_{safe_sid}_{uuid.uuid4().hex[:6]}{img_ext}"
-                dest_path = os.path.join(PRIVATE_IMAGES_DIR, img_id)
-                with open(dest_path, 'wb') as f:
-                    f.write(binary_data)
-                clean_screenshot_uri = f"/api/images/{img_id}"
                 data = load_backend_data()
+                own_session = next((s for s in data.get('payment_sessions', []) if isinstance(s, dict)
+                                    and session_id and session_id in (s.get('paymentSessionId'), s.get('sessionId'))
+                                    and s.get('userId') == user['id']), None)
+                if not own_session:
+                    self.send_json(400, {'success': False, 'error': 'Payment session not found.'})
+                    return
+
+                # unguessable id: payment proofs are private (admin + submitting student only)
+                img_ext = ext if ext else '.png'
+                safe_sid = re.sub(r'[^a-zA-Z0-9_\-]', '', str(session_id))[:40]
+                img_id = f"shot_{safe_sid}_{secrets.token_hex(12)}{img_ext}"
+                try:
+                    image_store.save_image(img_id, binary_data, 'payment_proof', owner_user_id=user['id'], related_id=session_id)
+                except image_store.StorageUnavailable:
+                    self.send_json(503, {'success': False, 'error': 'Payment proof could not be stored right now. Please try again in a minute.'})
+                    return
+                clean_screenshot_uri = f"/api/images/{img_id}"
+                previous_proof = own_session.get('screenshot')
                 sync_sync_fn = lambda p, d, method='PUT': sync_to_firebase(p, d, method=method, sync=True)
                 success, res = subscription_manager.submit_payment(user['id'], session_id, utr, clean_screenshot_uri, data, sync_sync_fn)
                 if not success:
+                    image_store.delete_image(img_id)   # no record refers to it
                     self.send_json(400, {'success': False, 'error': res})
                     return
                 save_backend_data(data)
+                old_id = image_store.image_id_from_url(previous_proof)
+                if old_id and old_id != img_id and not image_referenced_elsewhere(data, old_id):
+                    image_store.delete_image(old_id)   # proof replaced by a resubmission
                 self.send_json(200, {'success': True, 'session': res})
                 return
             except Exception as e:
@@ -3894,6 +3983,53 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             except Exception as e:
                 self.send_json(500, {'success': False, 'error': f'Verification error: {str(e)}'})
+                return
+
+        # 4b. Admin: permanently delete payment records (single or bulk) and their proof images
+        if path in ('/api/admin/payments/delete', '/api/admin/payments/bulk-delete'):
+            admin_u = authenticate_token(self.get_auth_token())
+            if not admin_u or admin_u.get('role') != 'admin':
+                self.send_json(403, {'success': False, 'error': 'Administrator authorization required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if 0 < content_length <= 256 * 1024 else b''
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+                if not isinstance(req_data, dict):
+                    req_data = {}
+                if path.endswith('/bulk-delete'):
+                    ids = req_data.get('ids') or req_data.get('paymentSessionIds')
+                else:
+                    single = req_data.get('paymentSessionId') or req_data.get('sessionId')
+                    ids = [single] if single else None
+                if not isinstance(ids, list) or not ids or not all(isinstance(i, str) and 0 < len(i) <= 120 for i in ids):
+                    self.send_json(400, {'success': False, 'error': 'Select at least one payment record to delete.'})
+                    return
+                if len(ids) > 500:
+                    self.send_json(400, {'success': False, 'error': 'At most 500 payment records can be deleted at once.'})
+                    return
+                if IS_SERVERLESS and not mongodb_manager.is_database_connected():
+                    self.send_json(503, {'success': False, 'error': 'Database is unavailable. Nothing was deleted - please try again.'})
+                    return
+
+                data = load_backend_data(refresh_collections=['payment_sessions', 'payment_channels'], min_interval=0.0)
+                result = delete_payment_sessions_everywhere(data, ids)
+                save_backend_data(data)
+                subscription_manager.log_audit_action(
+                    admin_u, 'DELETE_PAYMENT_RECORDS', ','.join(result['deletedIds'])[:500], None, None,
+                    details=f"Deleted {len(result['deletedIds'])} payment record(s)", data=data, sync_fn=sync_to_firebase)
+                save_backend_data(data)
+                print(f"[ADMIN_PAYMENTS] {admin_u.get('email')} deleted {len(result['deletedIds'])} payment record(s); failed: {len(result['failed'])}", flush=True)
+                ok = not result['failed']
+                self.send_json(200 if ok else 502, {
+                    'success': ok,
+                    **result,
+                    **({} if ok else {'error': f"{len(result['failed'])} payment record(s) could not be deleted. Please try again."})
+                })
+                return
+            except Exception as e:
+                print(f"[ADMIN_PAYMENTS] delete error ({type(e).__name__}): {e}", flush=True)
+                self.send_json(500, {'success': False, 'error': 'Delete failed. Please try again.'})
                 return
 
         # 5. Admin Subscription Management (Grant / Extend / Shorten / Suspend / Reactivate / Cancel)
@@ -3946,14 +4082,19 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(content_length) if content_length > 0 else b'{}'
                 req_data = json.loads(body.decode('utf-8')) if body else {}
                 action = req_data.get('action')
-                data = load_backend_data()
+                data = load_backend_data(refresh_collections=['payment_channels'], min_interval=2.0)
 
                 combined_params = dict(req_data)
                 if isinstance(req_data.get('channelData'), dict):
                     combined_params.update(req_data['channelData'])
                 if 'channelId' in req_data and 'id' not in combined_params:
                     combined_params['id'] = req_data['channelId']
+                if combined_params.get('qrCodeUrl') and not str(combined_params['qrCodeUrl']).startswith(('/api/images/', 'https://')):
+                    self.send_json(400, {'success': False, 'error': 'Invalid QR image reference. Upload the QR image again.'})
+                    return
 
+                target_id = combined_params.get('id')
+                old_qr = next((c.get('qrCodeUrl') for c in data.get('payment_channels', []) if isinstance(c, dict) and c.get('id') == target_id), None)
                 success, res = subscription_manager.manage_payment_channel(
                     admin_u, action, combined_params, data,
                     lambda path, d, method='PUT': sync_to_firebase(path, d, method=method, sync=True)
@@ -3962,6 +4103,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json(400, {'success': False, 'error': res})
                     return
                 save_backend_data(data)
+                new_qr = next((c.get('qrCodeUrl') for c in data.get('payment_channels', []) if isinstance(c, dict) and c.get('id') == target_id), None)
+                if old_qr and old_qr != new_qr:
+                    cleanup_replaced_qr(data, old_qr)   # replaced, removed or channel deleted
                 print(f"[ADMIN_CHANNELS] Channel action {action} succeeded by {admin_u.get('email')}", flush=True)
                 self.send_json(200, {'success': True, 'result': res})
                 return
@@ -3997,21 +4141,35 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json(400, {'success': False, 'error': f'Invalid image format: {err}'})
                     return
 
-                sanitized_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', os.path.basename(file_name))
-                unique_img_id = f'qr_{uuid.uuid4().hex[:12]}{safe_ext}'
-                dest_path = os.path.join(PRIVATE_IMAGES_DIR, unique_img_id)
-                with open(dest_path, 'wb') as f:
-                    f.write(binary_data)
+                data = load_backend_data(refresh_collections=['payment_channels'])
+                channels = data.setdefault('payment_channels', [])
+                target = next((c for c in channels if isinstance(c, dict) and c.get('id') == channel_id), None) if channel_id else None
+                if channel_id and not target:
+                    self.send_json(404, {'success': False, 'error': 'Payment channel not found.'})
+                    return
+
+                unique_img_id = f'qr_{uuid.uuid4().hex[:16]}{safe_ext}'
+                try:
+                    image_store.save_image(unique_img_id, binary_data, 'qr', related_id=channel_id)
+                except image_store.StorageUnavailable:
+                    self.send_json(503, {'success': False, 'error': 'QR image could not be saved to storage. Nothing was changed - please try again.'})
+                    return
 
                 image_url = f'/api/images/{unique_img_id}'
-                data = load_backend_data()
-                if channel_id:
-                    channels = data.setdefault('payment_channels', [])
-                    target = next((c for c in channels if c.get('id') == channel_id), None)
-                    if target:
-                        target['qrCodeUrl'] = image_url
-                        save_backend_data(data)
-                        sync_to_firebase(f"payment_channels/{channel_id}", target)
+                if target:
+                    old_qr = target.get('qrCodeUrl')
+                    target['qrCodeUrl'] = image_url
+                    target['needsReupload'] = False
+                    target['updatedAt'] = datetime.now(timezone.utc).isoformat()
+                    save_backend_data(data)
+                    persisted = sync_to_firebase(f"payment_channels/{channel_id}",
+                                                 {'qrCodeUrl': image_url, 'needsReupload': False, 'updatedAt': target['updatedAt']},
+                                                 method='PATCH', sync=True)
+                    if persisted is False and mongodb_manager.get_database() is not None:
+                        self.send_json(503, {'success': False, 'error': 'QR image was stored but the channel could not be updated. Please save again.'})
+                        return
+                    if old_qr and old_qr != image_url:
+                        cleanup_replaced_qr(data, old_qr)
 
                 self.send_json(200, {
                     'success': True,
@@ -4020,7 +4178,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 })
                 return
             except Exception as e:
-                self.send_json(500, {'success': False, 'error': f'QR upload error: {str(e)}'})
+                print(f"[ADMIN_CHANNELS] QR upload error ({type(e).__name__}): {e}", flush=True)
+                self.send_json(500, {'success': False, 'error': 'QR upload failed. Please try again.'})
                 return
 
         # 7. Admin Plan Configuration (Pricing, Features, Limits, Trial)
@@ -4555,9 +4714,10 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 sanitized_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', os.path.basename(file_name))
                 unique_img_id = f'img_{uuid.uuid4().hex[:12]}{safe_ext}'
-                dest_path = os.path.join(PRIVATE_IMAGES_DIR, unique_img_id)
-                with open(dest_path, 'wb') as f:
-                    f.write(binary_data)
+                try:
+                    image_store.save_image(unique_img_id, binary_data, 'upload', owner_user_id=user.get('id'))
+                except image_store.StorageUnavailable:
+                    pass   # the response carries the image itself as a data URL; the stored copy is optional
 
                 # Return full data URL so frontend renders directly without extra HTTP auth roundtrips
                 data_url = f"data:{detected_mime};base64,{base64.b64encode(binary_data).decode('utf-8')}"

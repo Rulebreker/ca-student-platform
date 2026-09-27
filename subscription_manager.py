@@ -513,11 +513,13 @@ def is_eligible_for_trial(user_id, data):
                 return False
     return True
 
-def create_payment_session(user, plan_id, data, sync_fn=None):
+def create_payment_session(user, plan_id, data, sync_fn=None, qr_image_exists=None):
     """
     Create a 10-minute payment session.
     Takes a snapshot of the primary/selected payment channel.
     Server timestamps enforce 10-minute countdown.
+    qr_image_exists(url) -> bool: when an uploaded channel QR is missing from storage, the session
+    falls back to a QR generated for the channel's UPI ID and amount instead of a broken image.
     """
     plan = get_plan_by_id(plan_id, data)
     if not plan:
@@ -581,7 +583,9 @@ def create_payment_session(user, plan_id, data, sync_fn=None):
     encoded_upi_uri = f"upi://pay?pa={urllib.parse.quote(upi_id)}&pn={urllib.parse.quote(payee_name)}&am={amount:.2f}&cu=INR&tn={urllib.parse.quote(plan['name'])}"
 
     qr_url = selected_channel.get('qrCodeUrl')
-    if not qr_url or 'api.qrserver.com' in qr_url:
+    uploaded_qr_missing = bool(qr_url) and qr_image_exists is not None and str(qr_url).startswith('/api/images/') \
+        and not qr_image_exists(qr_url)
+    if not qr_url or 'api.qrserver.com' in qr_url or uploaded_qr_missing:
         qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(encoded_upi_uri)}"
 
     channel_snapshot = {
@@ -595,7 +599,8 @@ def create_payment_session(user, plan_id, data, sync_fn=None):
         'targetPassTitle': selected_channel.get('targetPassTitle'),
         'expectedAmount': selected_channel.get('expectedAmount') or amount,
         'subscriptionTier': selected_channel.get('subscriptionTier', 'all'),
-        'needsReupload': bool(selected_channel.get('needsReupload', False))
+        # with a storage check the snapshot always carries a usable QR (stored image or generated)
+        'needsReupload': bool(selected_channel.get('needsReupload', False)) if qr_image_exists is None else False
     }
 
     now = datetime.now(timezone.utc)
@@ -1272,12 +1277,21 @@ def manage_payment_channel(admin_user, action, params, data, sync_fn=None):
             target['title'] = target['name']
         if params.get('payeeName'):
             target['payeeName'] = params['payeeName'].strip()
+        pn = target.get('payeeName', 'ExcellenceCA')
         if params.get('upiId'):
-            target['upiId'] = params['upiId'].strip()
-            if not params.get('qrCodeUrl'):
-                pn = target.get('payeeName', 'ExcellenceCA')
-                target['qrCodeUrl'] = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa={target['upiId']}%26pn={urllib.parse.quote(pn)}%26cu=INR"
-        if params.get('qrCodeUrl'): target['qrCodeUrl'] = params['qrCodeUrl'].strip()
+            new_upi = params['upiId'].strip()
+            current_qr = str(target.get('qrCodeUrl') or '')
+            target['upiId'] = new_upi
+            # Regenerate only an automatic QR. An uploaded QR is kept on every edit unless the admin
+            # replaces it or removes it (qrCodeUrl: '').
+            if not params.get('qrCodeUrl') and (not current_qr or 'api.qrserver.com' in current_qr):
+                target['qrCodeUrl'] = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa={new_upi}%26pn={urllib.parse.quote(pn)}%26cu=INR"
+        if params.get('qrCodeUrl'):
+            target['qrCodeUrl'] = params['qrCodeUrl'].strip()
+            target['needsReupload'] = False
+        elif 'qrCodeUrl' in params and params.get('qrCodeUrl') == '':
+            target['qrCodeUrl'] = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=upi://pay?pa={target.get('upiId')}%26pn={urllib.parse.quote(pn)}%26cu=INR"
+            target['needsReupload'] = False
         if 'subscriptionTier' in params or 'planTier' in params:
             target['subscriptionTier'] = (params.get('subscriptionTier') or params.get('planTier') or 'all').strip().lower()
         if 'targetPlanId' in params:
