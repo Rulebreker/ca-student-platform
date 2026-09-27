@@ -2861,25 +2861,6 @@ class AdminDashboard {
       return;
     }
 
-    const tests = window.store.getTests();
-    const search = (this.mcqSearch || '').toLowerCase().trim();
-
-    const filteredTests = tests.filter(tst => {
-      if (!search) return true;
-      const subject = window.store.getSubjectById(tst.subjectId);
-      const subjectName = (subject ? subject.name : (tst.subject || '')).toLowerCase();
-      const title = (tst.title || '').toLowerCase();
-      const topic = (tst.topic || tst.chapter || '').toLowerCase();
-      return title.includes(search) || subjectName.includes(search) || topic.includes(search);
-    });
-
-    this.mcqPage = this.mcqPage || 1;
-    const pageSize = 10;
-    const totalPages = Math.max(1, Math.ceil(filteredTests.length / pageSize));
-    if (this.mcqPage > totalPages) this.mcqPage = totalPages;
-    const startIndex = (this.mcqPage - 1) * pageSize;
-    const pagedTests = filteredTests.slice(startIndex, startIndex + pageSize);
-
     container.innerHTML = `
       <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
         <div>
@@ -2911,176 +2892,46 @@ class AdminDashboard {
         </div>
       </div>
 
-      <div id="admin-mcq-table-container">
-      <div class="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
-        <table class="w-full text-left text-xs min-w-[950px]">
-          <thead>
-            <tr class="border-b border-slate-200 bg-slate-50/80 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              <th class="py-3 px-3">Test Title & Tier</th>
-              <th class="py-3 px-3">Subject</th>
-              <th class="py-3 px-3">Topic</th>
-              <th class="py-3 px-2 text-center">Questions</th>
-              <th class="py-3 px-2 text-center">Max Marks</th>
-              <th class="py-3 px-2 text-center">Duration</th>
-              <th class="py-3 px-2 text-center">Marking (+ / -)</th>
-              <th class="py-3 px-2 text-center">Attempt Limit</th>
-              <th class="py-3 px-3 text-center">Status</th>
-              <th class="py-3 px-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100">
-            ${filteredTests.length === 0 ? `
-              <tr>
-                <td colspan="10" class="py-12 text-center text-slate-400 text-xs">
-                  ${tests.length === 0 ? 'No mock tests registered yet. Click "Create MCQ Test" to start.' : 'No tests found matching search criteria.'}
-                </td>
-              </tr>
-            ` : pagedTests.map(tst => {
-              const subject = window.store.getSubjectById(tst.subjectId);
-              const subjectName = subject ? subject.name : (tst.subject || 'Accounting');
-              const qCount = window.store.getQuestionsByTestId(tst.id).length;
-              const posMark = typeof tst.marksPerCorrect === 'number' ? tst.marksPerCorrect : 2.0;
-              const negMark = typeof tst.negativeMarksPerWrong === 'number' ? tst.negativeMarksPerWrong : 0.5;
-              const maxAtt = tst.maxAttempts || 3;
-              const status = tst.status || (tst.isPublished ? 'Published' : 'Draft');
-
-              let statusBadgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
-              if (status === 'Published') statusBadgeClass = 'bg-emerald-50 text-emerald-800 border-emerald-200';
-              else if (status === 'Live') statusBadgeClass = 'bg-amber-50 text-amber-800 border-amber-200 animate-pulse';
-              else if (status === 'Scheduled') statusBadgeClass = 'bg-purple-50 text-purple-800 border-purple-200';
-              else if (status === 'Completed/Expired') statusBadgeClass = 'bg-rose-50 text-rose-800 border-rose-200';
-
-              const reqTier = (tst.requiredTier || tst.tier || 'free').toLowerCase();
-              let tierBadge = '<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-600 border border-slate-200">FREE</span>';
-              if (reqTier === 'elite') tierBadge = '<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-100 text-purple-800 border border-purple-200">ELITE</span>';
-              else if (reqTier === 'plus') tierBadge = '<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">PLUS</span>';
-              else if (reqTier === 'core') tierBadge = '<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-800 border border-blue-200">CORE</span>';
-
-              return `
-                <tr class="hover:bg-slate-50/70 transition-colors">
-                  <td class="py-3 px-3 max-w-[220px]">
-                    <div class="flex items-center gap-1.5">
-                      <span class="font-bold text-slate-900 line-clamp-1">${tst.title}</span>
-                      ${tierBadge}
-                    </div>
-                    <div class="flex items-center gap-2 mt-0.5">
-                      <span class="text-[10px] text-slate-400">${new Date(tst.createdAt || Date.now()).toLocaleDateString()}</span>
-                      ${tst.hideFromNonEligible ? '<span class="text-[10px] font-semibold text-rose-600">Hidden if ineligible</span>' : ''}
-                    </div>
-                  </td>
-                  <td class="py-3 px-3">
-                    <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700">
-                      ${subjectName}
-                    </span>
-                  </td>
-                  <td class="py-3 px-3 max-w-[130px] truncate text-slate-600 font-medium">${tst.topic || tst.chapter || 'Syllabus Core'}</td>
-                  <td class="py-3 px-2 text-center">
-                    <button 
-                      onclick="window.adminDashboard.openQuestionBuilder('${tst.id}')"
-                      class="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded text-[11px] transition-colors cursor-pointer"
-                      title="Manage Questions"
-                    >
-                      ${qCount} MCQs →
-                    </button>
-                  </td>
-                  <td class="py-3 px-2 text-center font-bold text-slate-800">${tst.maximumMarks || (qCount * posMark) || 10}</td>
-                  <td class="py-3 px-2 text-center text-slate-600 font-medium">${tst.durationMinutes}m</td>
-                  <td class="py-3 px-2 text-center font-semibold">
-                    <span class="text-emerald-700">+${posMark}</span> / <span class="text-rose-600">-${negMark}</span>
-                  </td>
-                  <td class="py-3 px-2 text-center font-bold text-slate-700">${maxAtt}</td>
-                  <td class="py-3 px-3 text-center">
-                    <span class="px-2 py-0.5 text-[10px] font-bold rounded-full border ${statusBadgeClass}">
-                      ${status}
-                    </span>
-                  </td>
-                  <td class="py-3 px-3 text-right">
-                    <div class="flex items-center justify-end gap-1.5">
-                      <button 
-                        onclick="window.adminDashboard.openTestModal('${tst.id}')"
-                        class="px-2 py-1 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                        title="Edit Test Details"
-                      >
-                        Edit
-                      </button>
-                      <button 
-                        onclick="window.adminDashboard.openQuestionBuilder('${tst.id}')"
-                        class="px-2 py-1 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition-colors font-semibold"
-                        title="Add/Review Questions"
-                      >
-                        Questions
-                      </button>
-                      <button 
-                        onclick="window.adminDashboard.previewTest('${tst.id}')"
-                        class="px-2 py-1 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded transition-colors font-semibold flex items-center gap-0.5"
-                        title="Preview Exact Student Interface"
-                      >
-                        <i data-lucide="eye" class="w-3 h-3"></i> Preview
-                      </button>
-                      <button 
-                        onclick="window.adminDashboard.openPublishModal('${tst.id}')"
-                        class="px-2 py-1 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 rounded transition-colors font-semibold"
-                        title="Publish / Schedule"
-                      >
-                        Publish
-                      </button>
-                      <button 
-                        onclick="window.adminDashboard.deleteTest('${tst.id}')"
-                        class="px-2 py-1 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded transition-colors"
-                        title="Delete Test"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              `;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Pagination Controls (10/page) -->
-      <div class="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-semibold text-slate-500 pt-3 px-1">
-        <div>
-          Showing <span class="font-bold text-slate-800">${filteredTests.length === 0 ? 0 : startIndex + 1}</span> to <span class="font-bold text-slate-800">${Math.min(startIndex + pageSize, filteredTests.length)}</span> of <span class="font-bold text-slate-800">${filteredTests.length}</span> tests
-        </div>
-        <div class="flex items-center gap-1.5">
-          <button 
-            onclick="window.adminDashboard.setMcqPage(${this.mcqPage - 1})"
-            ${this.mcqPage <= 1 ? 'disabled' : ''}
-            class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 transition-colors cursor-pointer flex items-center gap-1"
-          >
-            <i data-lucide="chevron-left" class="w-3.5 h-3.5"></i> Prev
-          </button>
-          ${Array.from({ length: totalPages }, (_, i) => i + 1)
-            .filter(p => p === 1 || p === totalPages || Math.abs(p - this.mcqPage) <= 2)
-            .map((p, idx, arr) => {
-              const prev = arr[idx - 1];
-              const showEllipsis = prev && p - prev > 1;
-              return `
-                ${showEllipsis ? '<span class="px-1.5 text-slate-400">...</span>' : ''}
-                <button 
-                  onclick="window.adminDashboard.setMcqPage(${p})"
-                  class="px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${this.mcqPage === p ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'}"
-                >
-                  ${p}
-                </button>
-              `;
-            }).join('')}
-          <button 
-            onclick="window.adminDashboard.setMcqPage(${this.mcqPage + 1})"
-            ${this.mcqPage >= totalPages ? 'disabled' : ''}
-            class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 transition-colors cursor-pointer flex items-center gap-1"
-          >
-            Next <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
-          </button>
-        </div>
-      </div>
-      </div>
+      <div id="admin-mcq-table-container"></div>
     `;
 
-    if (window.lucide) window.lucide.createIcons();
+    this.renderMCQTestsTableOnly();
+  }
+
+  toggleMcqTestSelection(testId, checked) {
+    this.mcqSelectedTests = this.mcqSelectedTests || new Set();
+    if (checked) this.mcqSelectedTests.add(testId); else this.mcqSelectedTests.delete(testId);
+    this.renderMCQTestsTableOnly();
+  }
+
+  toggleMcqPageSelection(checked, idsCsv) {
+    this.mcqSelectedTests = this.mcqSelectedTests || new Set();
+    String(idsCsv || '').split(',').filter(Boolean).forEach(id => {
+      if (checked) this.mcqSelectedTests.add(id); else this.mcqSelectedTests.delete(id);
+    });
+    this.renderMCQTestsTableOnly();
+  }
+
+  clearMcqTestSelection() {
+    this.mcqSelectedTests = new Set();
+    this.renderMCQTestsTableOnly();
+  }
+
+  async bulkDeleteTests() {
+    const ids = [...(this.mcqSelectedTests || [])];
+    if (!ids.length) return;
+    if (!confirm(`Permanently delete ${ids.length} test${ids.length === 1 ? '' : 's'} and all of their questions? This cannot be undone.`)) return;
+    const btn = document.getElementById('admin-mcq-bulk-delete');
+    if (btn) { btn.disabled = true; btn.textContent = 'Deleting...'; }
+    try {
+      const res = await window.store.apiPost('/api/tests/bulk-delete', { ids });
+      (res.deletedTestIds || []).concat(res.notFound || []).forEach(id => window.store.deleteTest(id));
+      this.mcqSelectedTests = new Set();
+      window.app.showToast(`Deleted ${(res.deletedTestIds || []).length} test(s) and ${res.deletedQuestionCount || 0} question(s).`, 'info');
+    } catch (err) {
+      window.app.showToast(`Bulk delete failed: ${err.message}`, 'error');
+    }
+    this.renderMCQTests(true);
   }
 
   setMcqPage(page) {
@@ -3118,12 +2969,30 @@ class AdminDashboard {
     if (this.mcqPage < 1) this.mcqPage = 1;
     const startIndex = (this.mcqPage - 1) * pageSize;
     const pagedTests = filteredTests.slice(startIndex, startIndex + pageSize);
+    const knownIds = new Set(tests.map(t => t.id));
+    this.mcqSelectedTests = new Set([...(this.mcqSelectedTests || [])].filter(id => knownIds.has(id)));
+    const selectedCount = this.mcqSelectedTests.size;
+    const pageIds = pagedTests.map(t => t.id);
+    const allPageSelected = pageIds.length > 0 && pageIds.every(id => this.mcqSelectedTests.has(id));
 
     tableContainer.innerHTML = `
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-2 px-1 text-xs ${selectedCount ? '' : 'hidden'}">
+        <span class="font-bold text-slate-700">${selectedCount} test${selectedCount === 1 ? '' : 's'} selected</span>
+        <div class="flex items-center gap-2">
+          <button onclick="window.adminDashboard.clearMcqTestSelection()" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-bold text-slate-700">Clear</button>
+          <button id="admin-mcq-bulk-delete" onclick="window.adminDashboard.bulkDeleteTests()" class="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold flex items-center gap-1">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Delete Selected (${selectedCount})
+          </button>
+        </div>
+      </div>
       <div class="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
         <table class="w-full text-left text-xs min-w-[950px]">
           <thead>
             <tr class="border-b border-slate-200 bg-slate-50/80 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+              <th class="py-3 pl-3 pr-1 w-8">
+                <input type="checkbox" aria-label="Select all tests on this page" ${allPageSelected ? 'checked' : ''}
+                  onchange="window.adminDashboard.toggleMcqPageSelection(this.checked, '${pageIds.join(',')}')" class="w-4 h-4 rounded cursor-pointer">
+              </th>
               <th class="py-3 px-3">Test Title & Tier</th>
               <th class="py-3 px-3">Subject</th>
               <th class="py-3 px-3">Topic</th>
@@ -3139,18 +3008,21 @@ class AdminDashboard {
           <tbody class="divide-y divide-slate-100">
             ${filteredTests.length === 0 ? `
               <tr>
-                <td colspan="10" class="py-12 text-center text-slate-400 text-xs">
+                <td colspan="11" class="py-12 text-center text-slate-400 text-xs">
                   ${tests.length === 0 ? 'No mock tests registered yet. Click "Create MCQ Test" to start.' : 'No tests found matching search criteria.'}
                 </td>
               </tr>
             ` : pagedTests.map(tst => {
               const subject = window.store.getSubjectById(tst.subjectId);
               const subjectName = subject ? subject.name : (tst.subject || 'Accounting');
-              const qCount = window.store.getQuestionsByTestId(tst.id).length;
+              // Questions loaded on this device, otherwise the server's count for the test
+              const localCount = window.store.getQuestionsByTestId(tst.id).length;
+              const qCount = localCount || Number(tst.totalQuestions) || 0;
               const posMark = typeof tst.marksPerCorrect === 'number' ? tst.marksPerCorrect : 2.0;
               const negMark = typeof tst.negativeMarksPerWrong === 'number' ? tst.negativeMarksPerWrong : 0.5;
               const maxAtt = tst.maxAttempts || 3;
               const status = tst.status || (tst.isPublished ? 'Published' : 'Draft');
+              const isSelected = this.mcqSelectedTests.has(tst.id);
 
               let statusBadgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
               if (status === 'Published') statusBadgeClass = 'bg-emerald-50 text-emerald-800 border-emerald-200';
@@ -3165,7 +3037,11 @@ class AdminDashboard {
               else if (reqTier === 'core') tierBadge = '<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-800 border border-blue-200">CORE</span>';
 
               return `
-                <tr class="hover:bg-slate-50/70 transition-colors">
+                <tr class="hover:bg-slate-50/70 transition-colors ${isSelected ? 'bg-rose-50/40' : ''}">
+                  <td class="py-3 pl-3 pr-1">
+                    <input type="checkbox" aria-label="Select test" ${isSelected ? 'checked' : ''}
+                      onchange="window.adminDashboard.toggleMcqTestSelection('${tst.id}', this.checked)" class="w-4 h-4 rounded cursor-pointer">
+                  </td>
                   <td class="py-3 px-3 max-w-[220px]">
                     <div class="flex items-center gap-1.5">
                       <span class="font-bold text-slate-900 line-clamp-1">${tst.title}</span>
@@ -3831,7 +3707,29 @@ class AdminDashboard {
   }
 
   // --- QUESTION BUILDER MODAL ---
-  openQuestionBuilder(testId) {
+  /** Load a test's questions from the server (source of truth) into the local store. */
+  async refreshTestQuestionsFromServer(testId) {
+    const user = window.auth.getCurrentUser();
+    const resp = await fetch(`/api/tests?testId=${encodeURIComponent(testId)}&_t=${Date.now()}`, {
+      headers: { 'Authorization': `Bearer ${user ? (user.token || '') : ''}` }
+    });
+    if (!resp.ok) return false;
+    const res = await resp.json();
+    if (!Array.isArray(res.questions)) return false;
+    window.store.replaceQuestionsForTest(testId, res.questions);
+    if (res.test) window.store.updateTest({ ...res.test, totalQuestions: res.questions.length });
+    return true;
+  }
+
+  openQuestionBuilder(testId, opts = {}) {
+    if (!opts.skipServerRefresh) {
+      this.refreshTestQuestionsFromServer(testId).then(ok => {
+        if (ok && this.activeTestQuestionsId === testId && !this._isEditingQuestion) {
+          this.openQuestionBuilder(testId, { skipServerRefresh: true });
+        }
+      }).catch(() => {});
+    }
+    if (this.activeTestQuestionsId !== testId) this.mcqSelectedQuestions = new Set();
     this.activeTestQuestionsId = testId;
     this._isEditingQuestion = false; // Clear editing guard — now in list view
     const test = window.store.getTestById(testId);
@@ -3840,7 +3738,8 @@ class AdminDashboard {
     const questions = window.store.getQuestionsByTestId(testId);
     const modalContent = document.getElementById('admin-generic-modal-content');
     if (!modalContent) return;
-
+    const questionIds = new Set(questions.map(q => q.id));
+    this.mcqSelectedQuestions = new Set([...(this.mcqSelectedQuestions || [])].filter(id => questionIds.has(id)));
 
     const posMark = typeof test.marksPerCorrect === 'number' ? test.marksPerCorrect : 2.0;
     const negMark = typeof test.negativeMarksPerWrong === 'number' ? test.negativeMarksPerWrong : 0.5;
@@ -3899,6 +3798,21 @@ class AdminDashboard {
           </div>
         </div>
 
+        <!-- Bulk selection -->
+        ${questions.length > 0 ? `
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3 text-xs">
+            <label class="flex items-center gap-2 font-semibold text-slate-600 cursor-pointer">
+              <input type="checkbox" ${questions.every(q => this.mcqSelectedQuestions.has(q.id)) ? 'checked' : ''}
+                onchange="window.adminDashboard.toggleAllQuestionSelection(this.checked)" class="w-4 h-4 rounded">
+              Select all (${questions.length})
+            </label>
+            ${this.mcqSelectedQuestions.size ? `
+              <button id="admin-q-bulk-delete" onclick="window.adminDashboard.bulkDeleteQuestions()"
+                class="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold flex items-center gap-1">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Delete Selected (${this.mcqSelectedQuestions.size})
+              </button>` : ''}
+          </div>` : ''}
+
         <!-- Questions List -->
         <div class="space-y-4">
           ${questions.length === 0 ? `
@@ -3922,6 +3836,8 @@ class AdminDashboard {
                 <!-- Question Card Header -->
                 <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
                   <div class="flex items-center gap-2">
+                    <input type="checkbox" aria-label="Select question" ${this.mcqSelectedQuestions.has(q.id) ? 'checked' : ''}
+                      onchange="window.adminDashboard.toggleQuestionSelection('${q.id}', this.checked)" class="w-4 h-4 rounded cursor-pointer">
                     <span class="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-[11px]">
                       Question ${idx + 1}
                     </span>
@@ -4785,15 +4701,9 @@ class AdminDashboard {
         return;
       }
 
+      const res = await resp.json().catch(() => ({}));
       window.store.deleteQuestion(id);
-
-      const test = window.store.getTestById(testId);
-      if (test) {
-        const remaining = window.store.getQuestionsByTestId(testId);
-        test.totalQuestions = remaining.length;
-        // Strictly preserve admin-configured maximumMarks
-        window.store.updateTest(test);
-      }
+      this._applyServerTestCounts(res.updatedTests);
 
       window.app.showToast('Question deleted.', 'info');
       this.openQuestionBuilder(testId);
@@ -4801,6 +4711,47 @@ class AdminDashboard {
       console.error('[deleteQuestion] Network error:', netErr);
       window.app.showToast('Network error: Could not delete question.', 'error');
     }
+  }
+
+  _applyServerTestCounts(updatedTests) {
+    (updatedTests || []).forEach(u => {
+      const test = window.store.getTestById(u.id);
+      if (test) {
+        test.totalQuestions = u.totalQuestions;  // admin-configured maximumMarks is preserved
+        window.store.updateTest(test);
+      }
+    });
+  }
+
+  toggleQuestionSelection(questionId, checked) {
+    this.mcqSelectedQuestions = this.mcqSelectedQuestions || new Set();
+    if (checked) this.mcqSelectedQuestions.add(questionId); else this.mcqSelectedQuestions.delete(questionId);
+    this.openQuestionBuilder(this.activeTestQuestionsId, { skipServerRefresh: true });
+  }
+
+  toggleAllQuestionSelection(checked) {
+    const ids = window.store.getQuestionsByTestId(this.activeTestQuestionsId).map(q => q.id);
+    this.mcqSelectedQuestions = checked ? new Set(ids) : new Set();
+    this.openQuestionBuilder(this.activeTestQuestionsId, { skipServerRefresh: true });
+  }
+
+  async bulkDeleteQuestions() {
+    const testId = this.activeTestQuestionsId;
+    const ids = [...(this.mcqSelectedQuestions || [])];
+    if (!ids.length) return;
+    if (!confirm(`Permanently delete ${ids.length} question${ids.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    const btn = document.getElementById('admin-q-bulk-delete');
+    if (btn) { btn.disabled = true; btn.textContent = 'Deleting...'; }
+    try {
+      const res = await window.store.apiPost('/api/tests/questions/bulk-delete', { ids });
+      (res.deletedQuestionIds || []).concat(res.notFound || []).forEach(id => window.store.deleteQuestion(id));
+      this._applyServerTestCounts(res.updatedTests);
+      this.mcqSelectedQuestions = new Set();
+      window.app.showToast(`Deleted ${(res.deletedQuestionIds || []).length} question(s).`, 'info');
+    } catch (err) {
+      window.app.showToast(`Bulk delete failed: ${err.message}`, 'error');
+    }
+    this.openQuestionBuilder(testId);
   }
 
   async verifyQuestionDraft(questionId) {

@@ -40,7 +40,8 @@ KEYED_DICT_COLLECTIONS = {
     'subscriptions': 'userId',       # dict keyed by user id
     'subscription_plans': 'id',      # dict keyed by plan id
 }
-STRING_LIST_COLLECTIONS = {'revoked_users', 'revoked_tokens', 'deleted_scheduled_tasks'}  # Mongo docs {_id: value}
+# Mongo docs {_id: value}. deleted_documents holds "<collection>:<id>" tombstones of deleted records.
+STRING_LIST_COLLECTIONS = {'revoked_users', 'revoked_tokens', 'deleted_scheduled_tasks', 'deleted_documents'}
 LIST_KEY_FIELDS = {'payment_sessions': 'paymentSessionId'}  # default key field is 'id'
 # Kept for callers that still import it
 DICT_COLLECTIONS = SINGLETON_COLLECTIONS | set(KEYED_DICT_COLLECTIONS) | {'ai_providers'}

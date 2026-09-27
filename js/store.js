@@ -2869,6 +2869,10 @@ class AppStore {
     }
     this.set(STORAGE_KEYS.QUESTIONS, deduped);
   }
+  replaceQuestionsForTest(testId, serverQuestions) {
+    const others = this.getQuestions().filter(q => q.testId !== testId);
+    this.saveQuestions(others.concat((serverQuestions || []).filter(q => q && q.id)));
+  }
   getQuestionsByTestId(testId) {
     return this.getQuestions().filter(q => q.testId === testId).sort((a,b) => a.number - b.number);
   }

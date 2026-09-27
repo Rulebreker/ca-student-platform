@@ -1022,12 +1022,105 @@ _collection_last_synced = {}
 
 # Every collection shared across server instances through MongoDB Atlas.
 SHARED_COLLECTIONS = [
-    'users', 'revoked_users', 'revoked_tokens', 'subscriptions', 'subscription_plans', 'payment_sessions',
+    'deleted_documents', 'users', 'revoked_users', 'revoked_tokens', 'subscriptions', 'subscription_plans', 'payment_sessions',
     'payment_channels', 'notifications', 'admin_audit_logs', 'tests', 'questions', 'test_attempts',
     'assignments', 'papers', 'submissions', 'subjects', 'bookmarks', 'xp_transactions', 'xp_reset_history',
     'xp_reset_settings', 'referrals', 'referral_settings', 'ai_source_documents', 'ai_generation_logs',
     'ai_autopilot_config', 'ai_scheduled_tasks', 'deleted_scheduled_tasks', 'ai_generation_jobs', 'ai_worker_status'
 ]
+
+
+# Deletion tombstones ("<collection>:<id>" in the deleted_documents collection). Deletions are
+# recorded in MongoDB so that no instance - including a fresh one seeded from backend_data.json -
+# can bring a deleted record back through the merge-only refresh or write-through.
+TOMBSTONED_COLLECTIONS = ('tests', 'questions')
+
+
+def tombstone_key(collection, doc_id):
+    return f"{collection}:{doc_id}"
+
+
+def apply_tombstones(data):
+    """Drop tombstoned tests/questions from this instance's data; fix counts of affected tests."""
+    tomb = set(data.get('deleted_documents') or [])
+    if not tomb:
+        return False
+    changed = False
+    affected_tests = set()
+    for coll in TOMBSTONED_COLLECTIONS:
+        items = data.get(coll)
+        if not isinstance(items, list):
+            continue
+        kept = [d for d in items if not (isinstance(d, dict) and tombstone_key(coll, d.get('id')) in tomb)]
+        if len(kept) != len(items):
+            if coll == 'questions':
+                affected_tests |= {d.get('testId') for d in items if isinstance(d, dict) and tombstone_key(coll, d.get('id')) in tomb}
+            data[coll] = kept
+            changed = True
+    if affected_tests:
+        counts = {}
+        for q in data.get('questions', []):
+            if isinstance(q, dict):
+                counts[q.get('testId')] = counts.get(q.get('testId'), 0) + 1
+        for t in data.get('tests', []):
+            if isinstance(t, dict) and t.get('id') in affected_tests:
+                t['totalQuestions'] = counts.get(t['id'], 0)
+    return changed
+
+
+def record_deletions(data, collection, ids):
+    """Delete documents everywhere: tombstone them (so no stale copy can resurrect them) and remove
+    them from MongoDB. Call before save_backend_data(data)."""
+    ids = [str(i) for i in ids if i]
+    if not ids:
+        return
+    tomb = data.setdefault('deleted_documents', [])
+    known = set(tomb)
+    new_keys = [tombstone_key(collection, i) for i in ids if tombstone_key(collection, i) not in known]
+    tomb.extend(new_keys)
+    if new_keys:
+        mongodb_manager.upsert_documents('deleted_documents', [{'_id': k, 'value': True} for k in new_keys], '_id')
+    for i in ids:
+        sync_to_database(f"{collection}/{i}", None, method='DELETE', sync=True)
+
+
+def delete_questions_everywhere(data, question_ids):
+    """Delete MCQ questions: renumber what remains in each affected test, update the test's
+    question count, tombstone and remove the questions from MongoDB. Caller saves data."""
+    wanted = set(str(i) for i in question_ids if i)
+    questions = data.get('questions', [])
+    removed = [q for q in questions if isinstance(q, dict) and str(q.get('id')) in wanted]
+    data['questions'] = [q for q in questions if not (isinstance(q, dict) and str(q.get('id')) in wanted)]
+    affected = {q.get('testId') for q in removed}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    updated_tests = []
+    for test_id in affected:
+        remaining = sorted((q for q in data['questions'] if isinstance(q, dict) and q.get('testId') == test_id),
+                           key=lambda x: x.get('number', 0) or 0)
+        for i, q in enumerate(remaining, start=1):
+            q['number'] = i
+        for t in data.get('tests', []):
+            if isinstance(t, dict) and t.get('id') == test_id:
+                t['totalQuestions'] = len(remaining)
+                t['updatedAt'] = now_iso
+                updated_tests.append({'id': test_id, 'totalQuestions': len(remaining)})
+    record_deletions(data, 'questions', list(wanted))   # tombstone even ids this instance did not have
+    return {'deletedQuestionIds': [q.get('id') for q in removed], 'notFound': sorted(wanted - {str(q.get('id')) for q in removed}),
+            'updatedTests': updated_tests}
+
+
+def delete_tests_everywhere(data, test_ids):
+    """Delete whole tests and all of their questions everywhere. Caller saves data."""
+    wanted = set(str(i) for i in test_ids if i)
+    tests = data.get('tests', [])
+    removed_tests = [t for t in tests if isinstance(t, dict) and str(t.get('id')) in wanted]
+    data['tests'] = [t for t in tests if not (isinstance(t, dict) and str(t.get('id')) in wanted)]
+    removed_qs = [q for q in data.get('questions', []) if isinstance(q, dict) and str(q.get('testId')) in wanted]
+    data['questions'] = [q for q in data.get('questions', []) if not (isinstance(q, dict) and str(q.get('testId')) in wanted)]
+    record_deletions(data, 'tests', list(wanted))   # tombstone even ids this instance did not have
+    record_deletions(data, 'questions', [q.get('id') for q in removed_qs])
+    return {'deletedTestIds': [t.get('id') for t in removed_tests], 'deletedQuestionCount': len(removed_qs),
+            'notFound': sorted(wanted - {str(t.get('id')) for t in removed_tests})}
 
 
 def _doc_ts(doc):
@@ -1089,6 +1182,11 @@ def refresh_collections_from_mongo(data, collections=None, min_interval=1.0):
     keys_to_fetch = [k for k in target_keys if (now - _collection_last_synced.get(k, 0)) >= min_interval]
     if not keys_to_fetch:
         return data
+    if any(k in TOMBSTONED_COLLECTIONS for k in keys_to_fetch) and 'deleted_documents' not in keys_to_fetch:
+        keys_to_fetch.insert(0, 'deleted_documents')
+    elif 'deleted_documents' in keys_to_fetch:
+        keys_to_fetch.remove('deleted_documents')
+        keys_to_fetch.insert(0, 'deleted_documents')
 
     updated = False
     for key in keys_to_fetch:
@@ -1130,7 +1228,7 @@ def refresh_collections_from_mongo(data, collections=None, min_interval=1.0):
                         elif u_email:
                             # Only complete records can create a user; partial PATCH remnants are ignored
                             users_dict[u_email] = dict(u)
-            elif key in ('revoked_users', 'revoked_tokens', 'deleted_scheduled_tasks'):
+            elif key in ('revoked_users', 'revoked_tokens', 'deleted_scheduled_tasks', 'deleted_documents'):
                 existing = data.setdefault(key, [])
                 live_set = REVOKED_USERS if key == 'revoked_users' else (REVOKED_TOKENS if key == 'revoked_tokens' else None)
                 for item in _as_items(cloud_data) if isinstance(cloud_data, list) else list(cloud_data):
@@ -1169,13 +1267,8 @@ def refresh_collections_from_mongo(data, collections=None, min_interval=1.0):
                         c['subscriptionTier'] = 'all'
                 data['payment_channels'] = _merge_documents(data.get('payment_channels', []), items)
             elif key == 'tests':
-                local_by_id = {t.get('id'): t for t in data.get('tests', []) if isinstance(t, dict)}
-                merged = _merge_documents(data.get('tests', []), _as_items(cloud_data))
-                for t in merged:
-                    cur = local_by_id.get(t.get('id'))
-                    if cur is not None and cur is not t and int(cur.get('totalQuestions', 0) or 0) > int(t.get('totalQuestions', 0) or 0):
-                        t['totalQuestions'] = cur['totalQuestions']
-                data['tests'] = merged
+                # newest copy wins (a count may legitimately go down after questions are deleted)
+                data['tests'] = _merge_documents(data.get('tests', []), _as_items(cloud_data))
             elif key in ('assignments', 'papers'):
                 # assignments and papers are the same collection in this app
                 items = _as_items(cloud_data)
@@ -1207,6 +1300,9 @@ def refresh_collections_from_mongo(data, collections=None, min_interval=1.0):
             updated = True
         except Exception as e:
             print(f"[MONGODB_REFRESH_WARN] {key}: {e}", flush=True)
+
+    if apply_tombstones(data):
+        updated = True
 
     if updated and os.path.exists(DATA_STORE_FILE):
         try:
@@ -1274,6 +1370,8 @@ def _write_through_to_mongo(data):
         return
     before = entry[1]
     after = {}
+    tomb = set(data.get('deleted_documents') or [])
+    tomb_checked_remote = False
     for name in SHARED_COLLECTIONS:
         if name not in data:
             continue
@@ -1297,7 +1395,13 @@ def _write_through_to_mongo(data):
             ok = mongodb_manager.upsert_documents(name, docs, '_id')
         else:
             key_field = mongodb_manager.list_key_field(name)
-            docs = [d for d in value if isinstance(d, dict) and str(d.get(key_field)) in set(changed)]
+            changed_set = set(changed)
+            if name in TOMBSTONED_COLLECTIONS and not tomb_checked_remote:
+                # this instance may have loaded its data before another instance deleted something
+                tomb |= set(mongodb_manager.load_collection_from_mongo('deleted_documents') or [])
+                tomb_checked_remote = True
+            docs = [d for d in value if isinstance(d, dict) and str(d.get(key_field)) in changed_set
+                    and tombstone_key(name, d.get(key_field)) not in tomb]
             ok = mongodb_manager.upsert_documents(name, docs, key_field)
         if not ok:
             after[name] = old  # retry these documents on the next save
@@ -1479,6 +1583,7 @@ def load_backend_data(refresh_collections=None, min_interval=10.0):
                     except Exception as refresh_err:
                         print(f"[MONGODB_REFRESH_WARN] {refresh_err}", flush=True)
 
+                apply_tombstones(d)
                 _remember_load_snapshot(d)
                 return d
             else:
@@ -5641,15 +5746,13 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 req_data = json.loads(body.decode('utf-8'))
                 target_id = req_data.get('id')
 
+                if not target_id:
+                    self.send_json(400, {'error': 'Missing test id for deletion', 'code': 400})
+                    return
                 data = load_backend_data(refresh_collections=['tests', 'questions'])
-                data['tests'] = [t for t in data.get('tests', []) if t.get('id') != target_id]
-                deleted_qs = [q for q in data.get('questions', []) if q.get('testId') == target_id]
-                data['questions'] = [q for q in data.get('questions', []) if q.get('testId') != target_id]
+                deleted = delete_tests_everywhere(data, [target_id])
                 save_backend_data(data)
-                sync_to_firebase(f"tests/{target_id}", None, method='DELETE')
-                for dq in deleted_qs:
-                    sync_to_firebase(f"questions/{dq['id']}", None, method='DELETE')
-                self.send_json(200, {'success': True, 'deletedId': target_id})
+                self.send_json(200, {'success': True, 'deletedId': target_id, **deleted})
                 return
             except Exception as e:
                 self.send_json(500, {'error': f'Delete error: {str(e)}', 'code': 500})
@@ -5830,28 +5933,38 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     return
 
                 data = load_backend_data(refresh_collections=['tests', 'questions'])
-                orig = next((q for q in data.get('questions', []) if q.get('id') == q_id), None)
-                if orig:
-                    test_id = orig.get('testId')
-                    data['questions'] = [q for q in data.get('questions', []) if q.get('id') != q_id]
-                    # Renumber remaining
-                    rem = [q for q in data.get('questions', []) if q.get('testId') == test_id]
-                    rem.sort(key=lambda x: x.get('number', 0))
-                    for i, q in enumerate(rem):
-                        q['number'] = i + 1
-                    updated_test_ref = None
-                    now_iso = datetime.now(timezone.utc).isoformat()
-                    for t in data.get('tests', []):
-                        if t.get('id') == test_id:
-                            t['totalQuestions'] = len(rem)
-                            t['updatedAt'] = now_iso
-                            updated_test_ref = t
-                    save_backend_data(data)
-                    # Sync deletion and test update to Firebase RTDB
-                    sync_to_firebase(f"questions/{q_id}", None, method='DELETE', sync=True)
-                    if updated_test_ref:
-                        sync_to_firebase(f"tests/{test_id}", updated_test_ref, method='PUT', sync=True)
-                self.send_json(200, {'success': True, 'deletedId': q_id})
+                result = delete_questions_everywhere(data, [q_id])
+                save_backend_data(data)
+                self.send_json(200, {'success': True, 'deletedId': q_id, **result})
+                return
+            except Exception as e:
+                self.send_json(500, {'error': f'Question delete error: {str(e)}', 'code': 500})
+                return
+
+        # 8a. Bulk delete MCQ questions or whole tests (admin)
+        if path in ('/api/tests/questions/bulk-delete', '/api/tests/bulk-delete'):
+            user = authenticate_token(self.get_auth_token())
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b'{}'
+                req_data = json.loads(body.decode('utf-8'))
+                ids = [str(i) for i in (req_data.get('ids') or []) if i]
+                if not ids:
+                    self.send_json(400, {'error': 'Provide a non-empty "ids" list.', 'code': 400})
+                    return
+                if len(ids) > 500:
+                    self.send_json(400, {'error': 'At most 500 items can be deleted at once.', 'code': 400})
+                    return
+                data = load_backend_data(refresh_collections=['tests', 'questions'])
+                if path == '/api/tests/bulk-delete':
+                    result = delete_tests_everywhere(data, ids)
+                else:
+                    result = delete_questions_everywhere(data, ids)
+                save_backend_data(data)
+                self.send_json(200, {'success': True, **result})
                 return
             except Exception as e:
                 self.send_json(500, {'error': f'Question delete error: {str(e)}', 'code': 500})
