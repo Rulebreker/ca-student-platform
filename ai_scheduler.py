@@ -492,7 +492,7 @@ def has_due_work(data: Dict[str, Any], now_utc: Optional[datetime] = None) -> bo
     for t in data.get('ai_scheduled_tasks') or []:
         if not isinstance(t, dict):
             continue
-        if is_due_to_start(t, now_utc) or is_stalled_recurring(t):
+        if is_due_to_start(t, now_utc) or is_stalled_recurring(t) or needs_processing_check(t, now_utc):
             return True
         if t.get('status') == 'live' and (t.get('expiresAt') or t.get('nextRunAt') or '9999') <= now_iso:
             return True
@@ -702,6 +702,7 @@ def dispatch_scheduled_task(
         return False, err_msg, None
 
     task['status'] = 'processing'
+    task['processingSince'] = now_iso
     task['activeJobId'] = job_record['id']
     task['claimedAt'] = task.get('claimedAt') or now_iso
     task['updatedAt'] = now_iso
@@ -771,6 +772,11 @@ def apply_job_outcome_to_task(
     task = get_scheduled_task_by_id(job.get('scheduledTaskId'), data)
     if not task:
         return
+    if task.get('activeJobId') != job.get('id'):
+        # the task moved on (recovered / rescheduled / another run); never apply a stale outcome to it
+        print(f"[SCHEDULER_JOB_OUTCOME_IGNORED] Job {job.get('id')} ({job.get('status')}) finished but task "
+              f"'{task.get('name')}' is no longer waiting for it (activeJobId={task.get('activeJobId')}).", flush=True)
+        return
     completed_utc = get_now_utc()
     completed_iso = format_iso_utc(completed_utc)
     task['activeJobId'] = None
@@ -814,11 +820,130 @@ def apply_job_outcome_to_task(
         firebase_sync_callback(f"ai_scheduled_tasks/{task.get('id')}", task, method='PUT', sync=True)
     print(f"[SCHEDULER_JOB_OUTCOME] Task '{task.get('name')}' -> {task['status']} (job {job.get('id')} {job.get('status')}).", flush=True)
 
+PROCESSING_STATUSES = ('processing', 'PROCESSING')
+TASK_PROCESSING_CHECK_AFTER_SECONDS = 120
+MISSING_JOB_GRACE_SECONDS = float(os.environ.get('AI_TASK_MISSING_JOB_GRACE_SECONDS', '1800'))
+PROCESSING_MAX_SECONDS = float(os.environ.get('AI_TASK_PROCESSING_MAX_SECONDS', '10800'))
+
+
+def _seconds_since(value: Any, now_utc: datetime) -> float:
+    try:
+        return (now_utc - parse_iso_utc(value)).total_seconds()
+    except Exception:
+        return float('inf')   # unknown age = very old
+
+
+def processing_age_seconds(task: Dict[str, Any], now_utc: datetime) -> float:
+    """How long the current run has been going (dispatch/claim time, else last update)."""
+    return min(_seconds_since(task.get(k), now_utc) for k in ('processingSince', 'claimedAt', 'updatedAt'))
+
+
+def needs_processing_check(task: Dict[str, Any], now_utc: datetime) -> bool:
+    """A running occurrence old enough to be worth checking (fresh dispatches are left alone), or a
+    RECOVERING transition whose instance died (older than the claim lease)."""
+    if not isinstance(task, dict):
+        return False
+    if task.get('status') in PROCESSING_STATUSES:
+        return _seconds_since(task.get('updatedAt'), now_utc) >= TASK_PROCESSING_CHECK_AFTER_SECONDS
+    if task.get('status') == 'RECOVERING':
+        return str(task.get('recoveryStartedAt') or '') < lease_cutoff_iso(now_utc)
+    return False
+
+
+def _job_test_record(job: Dict[str, Any], data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if job.get('status') not in ('COMPLETED', 'PARTIAL'):
+        return None
+    test_id = job.get('testId')
+    found = next((t for t in data.get('tests', []) if isinstance(t, dict) and test_id and t.get('id') == test_id), None)
+    return found or ((job.get('result') or {}).get('test'))
+
+
+def reconcile_processing_tasks(
+    data: Dict[str, Any],
+    save_callback: Any,
+    firebase_sync_callback: Any,
+    transition_fn: Any = None,
+    now_utc: Optional[datetime] = None
+) -> List[Dict[str, Any]]:
+    """
+    Recover scheduled tasks stuck in 'processing' (worker crashed/offline, job lost, or the job's
+    result never reached the task). Never starts a generation and never touches a healthy run:
+      * job still active and younger than PROCESSING_MAX_SECONDS -> left alone (job leases and the
+        queue timeout decide; expire_stale_jobs runs first so they are applied);
+      * job active for longer than PROCESSING_MAX_SECONDS (e.g. a hung worker that keeps
+        heartbeating) -> the job is cancelled; its FAILED outcome reschedules the task, and the
+        worker's late result is refused (lease no longer valid);
+      * job finished (terminal) but the task never heard -> the outcome is applied now;
+      * job record missing (or no job id) for longer than MISSING_JOB_GRACE_SECONDS -> recorded as
+        a failure: daily/weekly go to their next occurrence, one-time tasks end 'failed'.
+    Each recovery first moves the task to RECOVERING with transition_fn (atomic conditional update
+    in MongoDB on the status/updatedAt this instance saw), so concurrent instances recover a task
+    at most once. transition_fn returns True / False (lost) / None (no database).
+    """
+    now_utc = now_utc or get_now_utc()
+    candidates = [t for t in get_scheduled_tasks(data) if needs_processing_check(t, now_utc)]
+    if not candidates:
+        return []
+    ai_job_manager.expire_stale_jobs(data, save_callback, firebase_sync_callback)   # may finish jobs -> tasks updated
+    jobs = {j.get('id'): j for j in job_repository.JobRepository(data).list_jobs()}
+    results = []
+    for task in candidates:
+        if not needs_processing_check(task, now_utc):
+            continue   # expire_stale_jobs already delivered this task's outcome
+        job = jobs.get(task.get('activeJobId')) if task.get('activeJobId') else None
+        age = processing_age_seconds(task, now_utc)
+        if job and job.get('status') in ai_job_manager.ACTIVE_STATUSES:
+            if age < PROCESSING_MAX_SECONDS:
+                continue
+            action = 'cancelled_overdue_job'
+        elif job:
+            action = 'applied_missed_outcome'
+        else:
+            if age < MISSING_JOB_GRACE_SECONDS:
+                continue
+            action = 'recovered_lost_job'
+
+        now_iso = format_iso_utc(now_utc)
+        fields = {'status': 'RECOVERING', 'recoveryStartedAt': now_iso, 'updatedAt': now_iso}
+        expected = {'status': task.get('status'), 'updatedAt': task.get('updatedAt')}
+        won = transition_fn(task.get('id'), expected, dict(fields)) if transition_fn is not None else None
+        if won is False or (won is None and transition_fn is not None and IS_SERVERLESS):
+            print(f"[SCHEDULER_RECOVERY_SKIPPED] Task '{task.get('name')}' is being recovered elsewhere (or DB unavailable).", flush=True)
+            continue
+        task.update(fields)
+        history = task.get('recoveryHistory') if isinstance(task.get('recoveryHistory'), list) else []
+        history.append({'at': now_iso, 'action': action, 'jobId': task.get('activeJobId'),
+                        'jobStatus': (job or {}).get('status'), 'processingSeconds': None if age == float('inf') else int(age)})
+        task['recoveryHistory'] = history[-10:]
+
+        if action == 'cancelled_overdue_job':
+            print(f"[SCHEDULER_RECOVERY] Task '{task.get('name')}': job {job.get('id')} running {int(age)}s > limit; cancelling.", flush=True)
+            reason = f"Cancelled by scheduler recovery: no result after {int(age // 60)} minutes."
+            ai_job_manager.fail_overdue_job(job.get('id'), reason, data, save_callback, firebase_sync_callback)
+            if task.get('status') == 'RECOVERING':   # outcome not applied (e.g. job was not linked)
+                record_task_failure(task, reason, now_utc)
+        elif action == 'applied_missed_outcome':
+            print(f"[SCHEDULER_RECOVERY] Task '{task.get('name')}': applying missed outcome of job {job.get('id')} ({job.get('status')}).", flush=True)
+            apply_job_outcome_to_task(job, _job_test_record(job, data), data, firebase_sync_callback)
+        else:
+            record_task_failure(task, (f"Generation job {task.get('activeJobId')} was lost" if task.get('activeJobId')
+                                       else "The run never started a generation job") +
+                                f" (task stuck in processing for {int(age // 60) if age != float('inf') else '?'} min).", now_utc)
+        if task.get('status') == 'RECOVERING':   # safety net: never leave a task in the transient state
+            record_task_failure(task, 'Recovery could not determine the run outcome.', now_utc)
+        task['activeJobId'] = None
+        _persist_task(task, data, save_callback, firebase_sync_callback)
+        results.append({'taskId': task.get('id'), 'taskName': task.get('name'), 'action': action, 'success': True,
+                        'status': task.get('status'), 'nextRunAt': task.get('nextRunAt')})
+    return results
+
+
 def process_due_tasks(
     data: Dict[str, Any],
     save_callback: Any,
     firebase_sync_callback: Any,
-    claim_fn: Any = None
+    claim_fn: Any = None,
+    transition_fn: Any = None
 ) -> Dict[str, Any]:
     """
     Authoritative state evaluator and executor:
@@ -844,6 +969,10 @@ def process_due_tasks(
             _persist_task(t, data, save_callback, firebase_sync_callback)
             executed_results.append({'taskId': t.get('id'), 'taskName': t.get('name'), 'action': 'recovered_schedule',
                                      'success': True, 'nextRunAt': t.get('nextRunAt')})
+
+    # Phase 0b: tasks stuck in 'processing' (lost worker / job / result)
+    executed_results.extend(reconcile_processing_tasks(data, save_callback, firebase_sync_callback,
+                                                       transition_fn=transition_fn, now_utc=now_utc))
 
     # Phase 1: Due Start Events (scheduled -> live / completed); one instance per occurrence
     due_to_start = [t for t in tasks if is_due_to_start(t, now_utc)]
@@ -997,8 +1126,9 @@ def process_due_tasks(
 # DAEMON WORKER (FOR LOCAL / PERSISTENT SERVER ENVIRONMENTS)
 # ======================================================================
 
-def start_autopilot_scheduler(load_data_fn, save_data_fn, firebase_sync_fn):
-    """Start background scheduler thread for persistent server environments."""
+def start_autopilot_scheduler(load_data_fn, save_data_fn, firebase_sync_fn, tick_fn=None):
+    """Start background scheduler thread for persistent server environments. tick_fn (the server's
+    run_due_scheduler_tasks) is preferred: it uses the cheap due check and atomic claims."""
     global _scheduler_running, _scheduler_thread
     if _scheduler_running:
         return
@@ -1006,16 +1136,19 @@ def start_autopilot_scheduler(load_data_fn, save_data_fn, firebase_sync_fn):
     _scheduler_running = True
     _scheduler_thread = threading.Thread(
         target=_autopilot_worker_loop,
-        args=(load_data_fn, save_data_fn, firebase_sync_fn),
+        args=(load_data_fn, save_data_fn, firebase_sync_fn, tick_fn),
         daemon=True
     )
     _scheduler_thread.start()
     print("[AI_SCHEDULER] Persistent Auto-Pilot worker thread active.", flush=True)
 
-def _autopilot_worker_loop(load_data_fn, save_data_fn, firebase_sync_fn):
+def _autopilot_worker_loop(load_data_fn, save_data_fn, firebase_sync_fn, tick_fn=None):
     while _scheduler_running:
         try:
             time.sleep(30) # Poll every 30 seconds
+            if tick_fn is not None:
+                tick_fn()
+                continue
             with job_repository.STORE_LOCK:
                 data = load_data_fn()
                 process_due_tasks(data, save_data_fn, firebase_sync_fn)

@@ -2114,11 +2114,42 @@ def is_authorized_scheduler_tick(token):
     user = authenticate_token(token) if token else None
     return bool(user and user.get('role') == 'admin')
 
+def refresh_job_document(data, job_id):
+    """Worker calls may reach a different instance than the one that claimed / updated the job:
+    re-read that one job from MongoDB and keep the newer copy (by updatedTs)."""
+    if not job_id or not mongodb_manager.is_database_connected():
+        return
+    remote = mongodb_manager.load_document('ai_generation_jobs', job_id)
+    if not remote or not remote.get('id'):
+        return
+    jobs = data.get('ai_generation_jobs')
+    if not isinstance(jobs, list):
+        jobs = data['ai_generation_jobs'] = [] if not isinstance(jobs, dict) else list(jobs.values())
+    idx = next((i for i, j in enumerate(jobs) if isinstance(j, dict) and j.get('id') == job_id), None)
+    if idx is None:
+        jobs.insert(0, remote)
+    elif float(remote.get('updatedTs') or 0) >= float(jobs[idx].get('updatedTs') or 0):
+        jobs[idx] = remote
+    # the scheduled task waiting for this job may also have been updated elsewhere (e.g. dispatched there)
+    task_id = remote.get('scheduledTaskId')
+    if task_id and tombstone_key('ai_scheduled_tasks', task_id) not in all_tombstones(data):
+        remote_task = mongodb_manager.load_document('ai_scheduled_tasks', task_id)
+        if remote_task and remote_task.get('id'):
+            tasks = data.setdefault('ai_scheduled_tasks', [])
+            t_idx = next((i for i, t in enumerate(tasks) if isinstance(t, dict) and t.get('id') == task_id), None)
+            if t_idx is None:
+                tasks.append(remote_task)
+            elif str(remote_task.get('updatedAt') or '') >= str(tasks[t_idx].get('updatedAt') or ''):
+                tasks[t_idx] = remote_task
+
+
 def scheduler_work_due(now_utc=None):
     """Cheap check before the expensive refresh: is anything due? Unknown -> True (never skip work)."""
     now_utc = now_utc or ai_scheduler.get_now_utc()
     if mongodb_manager.is_database_connected():
-        due = mongodb_manager.scheduler_has_due_work(ai_scheduler.format_iso_utc(now_utc), ai_scheduler.lease_cutoff_iso(now_utc))
+        processing_check = ai_scheduler.format_iso_utc(now_utc - timedelta(seconds=ai_scheduler.TASK_PROCESSING_CHECK_AFTER_SECONDS))
+        due = mongodb_manager.scheduler_has_due_work(ai_scheduler.format_iso_utc(now_utc), ai_scheduler.lease_cutoff_iso(now_utc),
+                                                     processing_check)
         if due is None or due:
             return True
         # legacy single auto-pilot runs only while no scheduled tasks exist
@@ -2138,6 +2169,13 @@ def claim_scheduled_task_occurrence(task_id, expected_next_run_at, cutoff_iso, f
     return mongodb_manager.claim_scheduled_task(task_id, expected_next_run_at, cutoff_iso, fields)
 
 
+def transition_scheduled_task_state(task_id, expected, fields):
+    """Atomic MongoDB conditional task update (recovery); None when no database."""
+    if not mongodb_manager.is_database_connected():
+        return None
+    return mongodb_manager.transition_scheduled_task(task_id, expected, fields)
+
+
 def run_due_scheduler_tasks(force=False):
     """Evaluate Auto-Pilot tasks (queues generation jobs / hosts tests) under the job store lock.
     Skips the full data refresh when the cheap check finds nothing due."""
@@ -2151,7 +2189,8 @@ def run_due_scheduler_tasks(force=False):
     with job_repository.STORE_LOCK:
         data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests', 'ai_generation_jobs', 'ai_worker_status'])
         return ai_scheduler.process_due_tasks(data, save_backend_data, sync_to_firebase,
-                                              claim_fn=claim_scheduled_task_occurrence)
+                                              claim_fn=claim_scheduled_task_occurrence,
+                                              transition_fn=transition_scheduled_task_state)
 
 class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -3873,6 +3912,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 with job_repository.STORE_LOCK:
                     if path == '/api/admin/ai/worker/heartbeat':
                         data = load_backend_data(refresh_collections=['ai_worker_status', 'ai_generation_jobs'])
+                        refresh_job_document(data, req_data.get('currentJobId') or job_id)
                         res = ai_job_manager.update_worker_heartbeat(req_data, data, save_backend_data, sync_to_firebase)
                         self.send_json(200, dict(res, success=True))
                         return
@@ -3885,6 +3925,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                     if path == '/api/admin/ai/worker/progress':
                         data = load_backend_data(refresh_collections=['ai_generation_jobs'])
+                        refresh_job_document(data, job_id)
                         ok, err, code = ai_job_manager.update_job_progress_from_worker(
                             job_id, worker_id, req_data, data, save_backend_data, sync_to_firebase)
                         self.send_json(code, {'success': ok, 'error': err, 'code': code})
@@ -3892,6 +3933,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                     if path == '/api/admin/ai/worker/complete':
                         data = load_backend_data(refresh_collections=['ai_generation_jobs', 'tests', 'questions', 'ai_generation_logs', 'ai_scheduled_tasks'])
+                        refresh_job_document(data, job_id)
                         ok, err, res, code = ai_job_manager.complete_job_from_worker(
                             job_id, worker_id, req_data.get('questions', []), req_data.get('metrics', {}),
                             data, save_backend_data, sync_to_firebase)
@@ -3899,6 +3941,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         return
 
                     data = load_backend_data(refresh_collections=['ai_generation_jobs', 'tests', 'questions', 'ai_generation_logs', 'ai_scheduled_tasks'])
+                    refresh_job_document(data, job_id)
                     ok, err, code = ai_job_manager.fail_job_from_worker(
                         job_id, worker_id, str(req_data.get('error') or 'Job failed on worker'),
                         data, save_backend_data, sync_to_firebase)
@@ -6881,7 +6924,8 @@ def run_server(port=PORT):
         ai_scheduler.start_autopilot_scheduler(
             load_backend_data,
             save_backend_data,
-            lambda p, d, **kw: sync_to_firebase(p, d, **kw)
+            lambda p, d, **kw: sync_to_firebase(p, d, **kw),
+            tick_fn=run_due_scheduler_tasks   # cheap due check + atomic claims, like every other trigger
         )
         try:
             httpd.serve_forever()

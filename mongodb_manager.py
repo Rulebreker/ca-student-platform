@@ -213,6 +213,22 @@ def sync_document_to_mongo(path: str, data: Any, method: str = 'PUT', sync: bool
     return None
 
 
+def transition_scheduled_task(task_id: Any, expected: Dict[str, Any], fields: Dict[str, Any]) -> Optional[bool]:
+    """Atomic conditional update of a scheduled task: applies `fields` only if the stored document
+    still matches `expected` (e.g. the status/updatedAt this instance saw). True = applied,
+    False = changed by someone else, None = database unavailable."""
+    db = get_database()
+    if db is None:
+        return None
+    try:
+        flt = {'_id': str(task_id)}
+        flt.update(expected)
+        return db['ai_scheduled_tasks'].find_one_and_update(flt, {'$set': dict(fields)}, return_document=True) is not None
+    except Exception as e:
+        print(f"[MONGODB_SYNC_ERROR] scheduler transition failed for {task_id}: {e}", flush=True)
+        return None
+
+
 def claim_scheduled_task(task_id: Any, expected_next_run_at: Any, lease_cutoff_iso: str, fields: Dict[str, Any]) -> Optional[bool]:
     """Atomically claim one due occurrence of a scheduled task (findOneAndUpdate).
     Matches only while the task is enabled, still at the expected nextRunAt and either 'scheduled' or
@@ -241,7 +257,7 @@ def claim_scheduled_task(task_id: Any, expected_next_run_at: Any, lease_cutoff_i
         return None
 
 
-def scheduler_has_due_work(now_iso: str, lease_cutoff_iso: str) -> Optional[bool]:
+def scheduler_has_due_work(now_iso: str, lease_cutoff_iso: str, processing_check_iso: Optional[str] = None) -> Optional[bool]:
     """Cheap scheduler check (up to three find_one queries that return only an _id): is any task
     due to start, to expire or to recover, or any live test past its window? None = unknown."""
     db = get_database()
@@ -253,6 +269,8 @@ def scheduler_has_due_work(now_iso: str, lease_cutoff_iso: str) -> Optional[bool
             {'status': 'CLAIMING', 'claimedAt': {'$lt': lease_cutoff_iso}, 'nextRunAt': {'$lte': now_iso}},
             {'status': 'live', 'expiresAt': {'$lte': now_iso}},
             {'status': 'failed', 'enabled': {'$ne': False}, 'scheduleType': {'$in': ['recurring', 'weekly']}},
+            {'status': {'$in': ['processing', 'PROCESSING']}, 'updatedAt': {'$lte': processing_check_iso or now_iso}},
+            {'status': 'RECOVERING', 'recoveryStartedAt': {'$lt': lease_cutoff_iso}},
         ]}, {'_id': 1})
         if due_task:
             return True
@@ -262,6 +280,21 @@ def scheduler_has_due_work(now_iso: str, lease_cutoff_iso: str) -> Optional[bool
     except Exception as e:
         print(f"[MONGODB_SYNC_WARN] scheduler due check failed: {e}", flush=True)
         return None
+
+
+def load_document(collection_name: str, doc_id: Any) -> Optional[Dict[str, Any]]:
+    """One document by _id (without _id), or None when missing / database unavailable."""
+    db = get_database()
+    if db is None or not doc_id:
+        return None
+    try:
+        doc = db[collection_name].find_one({'_id': str(doc_id)})
+    except Exception as e:
+        print(f"[MONGODB_SYNC_WARN] load {collection_name}/{doc_id} failed: {e}", flush=True)
+        return None
+    if doc:
+        doc.pop('_id', None)
+    return doc
 
 
 def collection_is_empty(collection_name: str) -> Optional[bool]:

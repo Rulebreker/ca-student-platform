@@ -268,6 +268,18 @@ def cancel_generation_job(job_id: str, data: Dict[str, Any], save_callback: Any 
     return True, None
 
 
+def fail_overdue_job(job_id: str, reason: str, data: Dict[str, Any], save_callback: Any = None,
+                     sync_callback: Any = None) -> bool:
+    """Scheduler recovery: fail an active job that ran far too long. The worker's late progress /
+    complete / fail calls are refused afterwards (lease no longer valid), so nothing is hosted twice."""
+    repo = JobRepository(data, save_callback, sync_callback)
+    job = repo.get(job_id)
+    if not job or job.get('status') not in ACTIVE_STATUSES:
+        return False
+    _finalize_without_worker(repo, job, 'FAILED', reason)
+    return True
+
+
 def reset_all_stuck_jobs(data: Dict[str, Any], save_callback: Any = None, sync_callback: Any = None) -> int:
     """Forcefully fail every active job (admin 'Force Reset Pipeline')."""
     repo = JobRepository(data, save_callback, sync_callback)
