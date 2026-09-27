@@ -169,9 +169,19 @@ def validate_and_sanitize_upload(raw_data_or_b64, allowed_types=None, max_size_b
 
 import mongodb_manager
 
+# Collections whose direct document writes are checked against deletion tombstones (low write volume;
+# bulk question writes go through write-through, which already filters tombstones).
+DIRECT_WRITE_TOMBSTONE_CHECK = ('ai_scheduled_tasks', 'tests', 'payment_sessions')
+
 def sync_to_database(path, data, method='PUT', sync=None):
     """Sync updates to MongoDB Atlas natively, maintaining local JSON mirror."""
     should_sync = True if IS_SERVERLESS else bool(sync)
+    parts = str(path).strip('/').split('/', 1)
+    if method != 'DELETE' and len(parts) == 2 and parts[0] in DIRECT_WRITE_TOMBSTONE_CHECK \
+            and mongodb_manager.is_tombstoned(parts[0], parts[1]):
+        # an instance with a stale copy (e.g. the scheduler tick) must not re-create a deleted record
+        print(f"[MONGODB_SYNC_SKIPPED] {parts[0]}/{parts[1]} was deleted; write ignored.", flush=True)
+        return False
     try:
         return mongodb_manager.sync_document_to_mongo(path, data, method=method, sync=should_sync)
     except Exception as e:
@@ -1035,16 +1045,24 @@ SHARED_COLLECTIONS = [
 # Deletion tombstones ("<collection>:<id>" in the deleted_documents collection). Deletions are
 # recorded in MongoDB so that no instance - including a fresh one seeded from backend_data.json -
 # can bring a deleted record back through the merge-only refresh or write-through.
-TOMBSTONED_COLLECTIONS = ('tests', 'questions', 'payment_sessions')
+TOMBSTONED_COLLECTIONS = ('tests', 'questions', 'payment_sessions', 'ai_scheduled_tasks')
 
 
 def tombstone_key(collection, doc_id):
     return f"{collection}:{doc_id}"
 
 
-def apply_tombstones(data):
-    """Drop tombstoned tests/questions/payment sessions from this instance's data; fix counts of affected tests."""
+def all_tombstones(data):
+    """deleted_documents plus the older scheduler-only list (deleted_scheduled_tasks holds bare task ids)."""
     tomb = set(data.get('deleted_documents') or [])
+    tomb |= {tombstone_key('ai_scheduled_tasks', i) for i in (data.get('deleted_scheduled_tasks') or []) if i}
+    return tomb
+
+
+def apply_tombstones(data):
+    """Drop tombstoned tests/questions/payment sessions/scheduled tasks from this instance's data;
+    fix counts of affected tests."""
+    tomb = all_tombstones(data)
     if not tomb:
         return False
     changed = False
@@ -1234,11 +1252,13 @@ def refresh_collections_from_mongo(data, collections=None, min_interval=1.0):
     keys_to_fetch = [k for k in target_keys if (now - _collection_last_synced.get(k, 0)) >= min_interval]
     if not keys_to_fetch:
         return data
-    if any(k in TOMBSTONED_COLLECTIONS for k in keys_to_fetch) and 'deleted_documents' not in keys_to_fetch:
-        keys_to_fetch.insert(0, 'deleted_documents')
-    elif 'deleted_documents' in keys_to_fetch:
-        keys_to_fetch.remove('deleted_documents')
-        keys_to_fetch.insert(0, 'deleted_documents')
+    # tombstones first, so the merge below can never bring a deleted record back
+    tomb_keys = []
+    if any(k in TOMBSTONED_COLLECTIONS for k in keys_to_fetch) or 'deleted_documents' in keys_to_fetch:
+        tomb_keys.append('deleted_documents')
+    if 'ai_scheduled_tasks' in keys_to_fetch or 'deleted_scheduled_tasks' in keys_to_fetch:
+        tomb_keys.append('deleted_scheduled_tasks')
+    keys_to_fetch = tomb_keys + [k for k in keys_to_fetch if k not in tomb_keys]
 
     updated = False
     for key in keys_to_fetch:
@@ -1330,11 +1350,12 @@ def refresh_collections_from_mongo(data, collections=None, min_interval=1.0):
             elif key == 'subjects':
                 data['subjects'] = _merge_documents(data.get('subjects', []), _as_items(cloud_data))
             elif key == 'ai_scheduled_tasks':
-                tombstones = set(data.get('deleted_scheduled_tasks', []))
+                tombstones = all_tombstones(data)
                 merged = _merge_documents(data.get('ai_scheduled_tasks', []), _as_items(cloud_data))
                 data['ai_scheduled_tasks'] = [
                     t for t in merged
-                    if t.get('id') not in tombstones and not t.get('isDeleted') and t.get('status') != 'deleted'
+                    if tombstone_key('ai_scheduled_tasks', t.get('id')) not in tombstones
+                    and not t.get('isDeleted') and t.get('status') != 'deleted'
                 ]
             elif key == 'ai_generation_jobs':
                 merged = _merge_documents(data.get('ai_generation_jobs', []), _as_items(cloud_data))
@@ -1422,7 +1443,7 @@ def _write_through_to_mongo(data):
         return
     before = entry[1]
     after = {}
-    tomb = set(data.get('deleted_documents') or [])
+    tomb = all_tombstones(data)
     tomb_checked_remote = False
     for name in SHARED_COLLECTIONS:
         if name not in data:
@@ -1451,6 +1472,8 @@ def _write_through_to_mongo(data):
             if name in TOMBSTONED_COLLECTIONS and not tomb_checked_remote:
                 # this instance may have loaded its data before another instance deleted something
                 tomb |= set(mongodb_manager.load_collection_from_mongo('deleted_documents') or [])
+                tomb |= {tombstone_key('ai_scheduled_tasks', i)
+                         for i in (mongodb_manager.load_collection_from_mongo('deleted_scheduled_tasks') or [])}
                 tomb_checked_remote = True
             docs = [d for d in value if isinstance(d, dict) and str(d.get(key_field)) in changed_set
                     and tombstone_key(name, d.get(key_field)) not in tomb]
@@ -3658,7 +3681,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json(400, {'success': False, 'error': 'Invalid task payload: title and subject are required.', 'code': 400})
                     return
                 
-                data = load_backend_data(refresh_collections=['ai_scheduled_tasks'])
+                data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests'])
                 task = ai_scheduler.save_scheduled_task(task_input, data)
                 save_backend_data(data)
                 sync_to_firebase(f"ai_scheduled_tasks/{task['id']}", task, method='PUT', sync=True)
@@ -3687,21 +3710,27 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json(400, {'success': False, 'error': 'Task ID is required.', 'code': 400})
                     return
                 
-                data = load_backend_data(refresh_collections=['ai_scheduled_tasks'])
-                ok = ai_scheduler.delete_scheduled_task(task_id, data)
-                if not ok:
-                    sync_collections_from_firebase(data, collections=['ai_scheduled_tasks'], min_interval=0.0)
-                    ok = ai_scheduler.delete_scheduled_task(task_id, data)
-                if ok:
-                    save_backend_data(data)
-                    sync_to_firebase(f"ai_scheduled_tasks/{task_id}", None, method='DELETE', sync=True)
-                    self.send_json(200, {'success': True, 'deletedId': task_id})
-                else:
-                    # Idempotency: if already deleted, return confirmed deletion
-                    if task_id in data.get('deleted_scheduled_tasks', []):
-                        self.send_json(200, {'success': True, 'deletedId': task_id, 'alreadyDeleted': True})
-                    else:
+                if not isinstance(task_id, str) or len(task_id) > 120:
+                    self.send_json(400, {'success': False, 'error': 'Invalid task ID.', 'code': 400})
+                    return
+                if IS_SERVERLESS and not mongodb_manager.is_database_connected():
+                    self.send_json(503, {'success': False, 'error': 'Database is unavailable. Nothing was deleted - please try again.'})
+                    return
+
+                with job_repository.STORE_LOCK:
+                    data = load_backend_data(refresh_collections=['ai_scheduled_tasks'], min_interval=0.0)
+                    already = tombstone_key('ai_scheduled_tasks', task_id) in all_tombstones(data)
+                    found = ai_scheduler.delete_scheduled_task(task_id, data)   # also records the legacy tombstone
+                    if not found and not already:
                         self.send_json(404, {'success': False, 'error': f"Task '{task_id}' not found.", 'code': 404})
+                        return
+                    # shared tombstone + removal from MongoDB, so no instance or scheduler tick can restore it
+                    failed = record_deletions(data, 'ai_scheduled_tasks', [task_id])
+                    save_backend_data(data)
+                if failed:
+                    self.send_json(502, {'success': False, 'error': 'The task could not be removed from the database. Please try again.'})
+                    return
+                self.send_json(200, {'success': True, 'deletedId': task_id, **({'alreadyDeleted': True} if already and not found else {})})
                 return
             except Exception as e:
                 self.send_json(500, {'success': False, 'error': f'Failed to delete task: {str(e)}', 'code': 500})

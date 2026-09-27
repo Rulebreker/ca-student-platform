@@ -213,6 +213,21 @@ def sync_document_to_mongo(path: str, data: Any, method: str = 'PUT', sync: bool
     return None
 
 
+def is_tombstoned(collection_name: str, doc_id: Any) -> bool:
+    """True if the document was deleted (deletion tombstone in MongoDB). False when unknown/offline."""
+    db = get_database()
+    if db is None:
+        return False
+    try:
+        if db['deleted_documents'].find_one({'_id': f"{collection_name}:{doc_id}"}, {'_id': 1}):
+            return True
+        if collection_name == 'ai_scheduled_tasks' and db['deleted_scheduled_tasks'].find_one({'_id': str(doc_id)}, {'_id': 1}):
+            return True
+    except Exception as e:
+        print(f"[MONGODB_SYNC_WARN] tombstone check failed for {collection_name}/{doc_id}: {e}", flush=True)
+    return False
+
+
 def upsert_documents(collection_name: str, docs: List[Dict[str, Any]], id_field: str) -> bool:
     """Synchronous bulk upsert of whole documents (write-through from save_backend_data)."""
     db = get_database()

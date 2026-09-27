@@ -102,6 +102,56 @@ def update_autopilot_config(new_config: Dict[str, Any], data: Dict[str, Any]) ->
 # MULTI-TASK SCHEDULER ENGINE (INDEPENDENT TASKS)
 # ======================================================================
 
+SCHEDULE_TYPES = ('one_time', 'recurring', 'weekly')   # 'recurring' = every day
+WEEKDAY_NAMES = ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')   # datetime.weekday() order
+TEST_SOURCES = ('ai_generate', 'existing_test')
+MAX_LIVE_WINDOW_MINUTES = 1440
+
+
+def is_recurring(task: Dict[str, Any]) -> bool:
+    """Daily and weekly schedules repeat; one-time events complete."""
+    return task.get('scheduleType') in ('recurring', 'weekly')
+
+
+def clean_weekdays(value: Any) -> List[int]:
+    """Weekdays as sorted unique ints 0 (Monday) .. 6 (Sunday)."""
+    days = set()
+    for v in value if isinstance(value, (list, tuple)) else []:
+        try:
+            d = int(v)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= d <= 6:
+            days.add(d)
+    return sorted(days)
+
+
+def _parse_hhmm(value: str) -> Tuple[int, int]:
+    hh, mm = [int(x) for x in str(value).strip().split(':')[:2]]
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        raise ValueError(f"Invalid time '{value}' (use HH:MM, 24-hour IST).")
+    return hh, mm
+
+
+def next_occurrence_ist(from_ist: datetime, time_str: str, weekdays: Optional[List[int]] = None) -> datetime:
+    """First moment strictly after from_ist at time_str (IST) on one of weekdays (None = any day)."""
+    hh, mm = _parse_hhmm(time_str)
+    for add in range(0, 8):
+        cand = (from_ist + timedelta(days=add)).replace(hour=hh, minute=mm, second=0, microsecond=0)
+        if cand > from_ist and (not weekdays or cand.weekday() in weekdays):
+            return cand
+    raise ValueError('No matching weekday selected.')
+
+
+def describe_schedule(task: Dict[str, Any]) -> str:
+    if task.get('scheduleType') == 'weekly':
+        days = ', '.join(WEEKDAY_NAMES[d] for d in clean_weekdays(task.get('weekdays')))
+        return f"Every {days} at {task.get('dailyTime', '09:00')} IST"
+    if task.get('scheduleType') == 'recurring':
+        return f"Daily at {task.get('dailyTime', '09:00')} IST"
+    return f"One-time {task.get('scheduledDate', '')} {task.get('scheduledTime', '')} IST"
+
+
 def calculate_next_run(task: Dict[str, Any], from_time_utc: Optional[datetime] = None) -> Optional[str]:
     """
     Calculate the next execution timestamp (UTC ISO format) for a scheduled task.
@@ -136,14 +186,13 @@ def calculate_next_run(task: Dict[str, Any], from_time_utc: Optional[datetime] =
         except Exception:
             return None
 
-    else: # recurring daily
+    else: # recurring daily / weekly on chosen days
         daily_time = str(task.get('dailyTime', '09:00')).strip()
+        weekdays = clean_weekdays(task.get('weekdays')) if schedule_type == 'weekly' else None
+        if schedule_type == 'weekly' and not weekdays:
+            return None
         try:
-            tp = [int(x) for x in daily_time.split(':')]
-            target_ist = from_ist.replace(hour=tp[0], minute=tp[1], second=0, microsecond=0)
-            if target_ist <= from_ist:
-                target_ist += timedelta(days=1)
-            return format_iso_utc(target_ist)
+            return format_iso_utc(next_occurrence_ist(from_ist, daily_time, weekdays))
         except Exception:
             return None
 
@@ -194,11 +243,24 @@ def save_scheduled_task(task_input: Dict[str, Any], data: Dict[str, Any]) -> Dic
     now_ist = now_utc.astimezone(IST_TZ)
 
     schedule_type = task_input.get('scheduleType', 'recurring')
-    if schedule_type not in ['one_time', 'recurring']:
+    if schedule_type not in SCHEDULE_TYPES:
         schedule_type = 'recurring'
+    weekdays = clean_weekdays(task_input.get('weekdays'))
+    if schedule_type == 'weekly' and not weekdays:
+        raise ValueError("Select at least one weekday for a weekly schedule.")
+
+    test_source = task_input.get('testSource') or 'ai_generate'
+    if test_source not in TEST_SOURCES:
+        raise ValueError("Invalid test source.")
+    existing_test = None
+    if test_source == 'existing_test':
+        existing_test_id = str(task_input.get('existingTestId') or '').strip()
+        existing_test = next((t for t in data.get('tests', []) if isinstance(t, dict) and t.get('id') == existing_test_id), None)
+        if not existing_test:
+            raise ValueError("Select an existing MCQ test to host.")
 
     is_live_event = bool(task_input.get('isLiveEvent', True))
-    live_duration_minutes = max(5, min(360, int(task_input.get('liveDurationMinutes', 15))))
+    live_duration_minutes = max(5, min(MAX_LIVE_WINDOW_MINUTES, int(task_input.get('liveDurationMinutes', 15))))
 
     # Extract & Validate Date / Time in IST
     scheduled_date = str(task_input.get('scheduledDate', '')).strip()
@@ -232,14 +294,11 @@ def save_scheduled_task(task_input: Dict[str, Any], data: Dict[str, Any]) -> Dic
         expires_at = format_iso_utc(dt_expire)
         next_run_at = starts_at
 
-    else: # recurring
+    else: # recurring daily / weekly
         try:
-            tp = [int(x) for x in daily_time.split(':')]
-            target_ist = now_ist.replace(hour=tp[0], minute=tp[1], second=0, microsecond=0)
-            if target_ist <= now_ist:
-                target_ist += timedelta(days=1)
+            target_ist = next_occurrence_ist(now_ist, daily_time, weekdays if schedule_type == 'weekly' else None)
         except Exception as e:
-            raise ValueError(f"Invalid daily time format: {e}")
+            raise ValueError(f"Invalid schedule time: {e}")
 
         starts_at = format_iso_utc(target_ist)
         expires_at = format_iso_utc(target_ist + timedelta(minutes=live_duration_minutes))
@@ -272,6 +331,10 @@ def save_scheduled_task(task_input: Dict[str, Any], data: Dict[str, Any]) -> Dic
     # Update task fields
     existing['name'] = str(task_input.get('name') or task_input.get('title') or 'Scheduled MCQ Practice').strip()
     existing['scheduleType'] = schedule_type
+    existing['weekdays'] = weekdays if schedule_type == 'weekly' else []
+    existing['testSource'] = test_source
+    existing['existingTestId'] = existing_test.get('id') if existing_test else None
+    existing['existingTestTitle'] = existing_test.get('title') if existing_test else None
     existing['dailyTime'] = daily_time
     existing['scheduledDate'] = scheduled_date
     existing['scheduledTime'] = scheduled_time
@@ -461,7 +524,7 @@ def _fail_task(task: Dict[str, Any], err_msg: str, data: Dict[str, Any], save_ca
     task['lastError'] = err_msg
     task['activeJobId'] = None
     task['updatedAt'] = format_iso_utc(now_utc)
-    if task.get('scheduleType') == 'recurring':
+    if is_recurring(task):
         task['nextRunAt'] = calculate_next_run(task, now_utc)
     _persist_task(task, data, save_callback, firebase_sync_callback)
 
@@ -514,6 +577,8 @@ def dispatch_scheduled_task(
     """
     task_id = task.get('id')
     now_iso = format_iso_utc(get_now_utc())
+    if task.get('testSource') == 'existing_test':
+        return host_existing_test(task, data, save_callback, firebase_sync_callback)
     print(f"[SCHEDULER_DISPATCH] Queuing job for scheduled task '{task.get('name')}' (ID: {task_id})...", flush=True)
 
     worker_status = ai_job_manager.get_worker_status(data)
@@ -539,6 +604,58 @@ def dispatch_scheduled_task(
     return True, None, {'job': job_record, 'queuedForWorker': True}
 
 
+def host_existing_test(
+    task: Dict[str, Any],
+    data: Dict[str, Any],
+    save_callback: Any,
+    firebase_sync_callback: Any
+) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+    """Make an already-created MCQ test live for this occurrence (no generation, no worker needed)."""
+    test_id = task.get('existingTestId')
+    test = next((t for t in data.get('tests', []) if isinstance(t, dict) and t.get('id') == test_id), None)
+    if not test:
+        err_msg = "The selected test no longer exists. Edit the schedule and choose another test."
+        _fail_task(task, err_msg, data, save_callback, firebase_sync_callback)
+        return False, err_msg, None
+    q_count = sum(1 for q in data.get('questions', []) if isinstance(q, dict) and q.get('testId') == test_id)
+    if q_count == 0 and not int(test.get('totalQuestions') or 0):
+        err_msg = f"Test '{test.get('title')}' has no questions; it was not made live."
+        _fail_task(task, err_msg, data, save_callback, firebase_sync_callback)
+        return False, err_msg, None
+
+    now_utc = get_now_utc()
+    now_iso = format_iso_utc(now_utc)
+    test['isPublished'] = True
+    test['updatedAt'] = now_iso
+    task['lastRunAt'] = now_iso
+    task['lastTestId'] = test_id
+    task['lastTestTitle'] = test.get('title')
+    task['lastError'] = None
+    task['activeJobId'] = None
+    task['executionCount'] = task.get('executionCount', 0) + 1
+    task['updatedAt'] = now_iso
+    if bool(task.get('isLiveEvent', True)):
+        expires_at = format_iso_utc(now_utc + timedelta(minutes=int(task.get('liveDurationMinutes', 15))))
+        test['isLive'] = True
+        test['status'] = 'Live'
+        test['liveStartsAt'] = now_iso
+        test['liveExpiresAt'] = expires_at
+        test.pop('expiredAt', None)
+        task['status'] = 'live'
+        task['startsAt'] = now_iso
+        task['expiresAt'] = expires_at
+        task['nextRunAt'] = expires_at  # the tick at expiry ends the live window and advances the schedule
+    else:
+        test['status'] = 'Published'
+        task['status'] = 'scheduled' if is_recurring(task) else 'completed'
+        task['nextRunAt'] = calculate_next_run(task, now_utc) if is_recurring(task) else None
+    if firebase_sync_callback:
+        firebase_sync_callback(f"tests/{test_id}", test, method='PUT', sync=True)
+    _persist_task(task, data, save_callback, firebase_sync_callback)
+    print(f"[SCHEDULER_HOST_EXISTING] Task '{task.get('name')}' hosted test '{test.get('title')}' ({test_id}) -> {task['status']}.", flush=True)
+    return True, None, {'test': {'id': test_id, 'title': test.get('title')}, 'hostedExistingTest': True}
+
+
 def apply_job_outcome_to_task(
     job: Dict[str, Any],
     test_record: Optional[Dict[str, Any]],
@@ -558,7 +675,7 @@ def apply_job_outcome_to_task(
     if not test_record:
         task['status'] = 'failed'
         task['lastError'] = job.get('error') or f"Generation job {job.get('status')}"
-        if task.get('scheduleType') == 'recurring':
+        if is_recurring(task):
             task['nextRunAt'] = calculate_next_run(task, completed_utc)
     else:
         test_id = test_record.get('id')
@@ -584,7 +701,7 @@ def apply_job_outcome_to_task(
             task['startsAt'] = starts_at
             task['expiresAt'] = expires_at
             task['nextRunAt'] = expires_at  # next tick at expiry time expires the live event
-        elif task.get('scheduleType') == 'recurring':
+        elif is_recurring(task):
             task['status'] = 'scheduled'
             task['nextRunAt'] = calculate_next_run(task, completed_utc)
         else:
@@ -632,7 +749,7 @@ def process_due_tasks(
         executed_results.append({
             'taskId': t.get('id'),
             'taskName': t.get('name'),
-            'action': 'queued_generation' if ok else 'dispatch_failed',
+            'action': ('hosted_existing_test' if (res or {}).get('hostedExistingTest') else 'queued_generation') if ok else 'dispatch_failed',
             'jobId': (res or {}).get('job', {}).get('id'),
             'success': ok,
             'error': err,
@@ -662,9 +779,9 @@ def process_due_tasks(
                     print(f"[SCHEDULER_EXPIRE] Test '{test_id}' marked EXPIRED.", flush=True)
                     break
 
-        if t.get('scheduleType') == 'recurring':
+        if is_recurring(t):
             t['status'] = 'scheduled'
-            # Advance to next day in IST
+            # Advance to the next daily / weekly occurrence in IST
             next_start = calculate_next_run(t, now_utc)
             t['startsAt'] = next_start
             t['nextRunAt'] = next_start

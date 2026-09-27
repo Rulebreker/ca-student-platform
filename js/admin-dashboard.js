@@ -8792,14 +8792,17 @@ class AdminDashboard {
                       <div class="flex items-center gap-2 flex-wrap">
                         <h4 class="text-sm font-bold text-slate-900">${escapeHtml(task.name)}</h4>
                         <span class="px-2 py-0.5 text-[11px] font-bold rounded bg-rose-50 text-rose-700 border border-rose-100">${escapeHtml(task.examLevel || 'CA Foundation')}</span>
-                        <span class="px-2 py-0.5 text-[11px] font-bold rounded ${task.scheduleType === 'recurring' ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-purple-50 text-purple-700 border border-purple-100'}">
-                          ${task.scheduleType === 'recurring' ? `🔁 Daily at ${escapeHtml(task.dailyTime || '20:00')} IST` : `🎯 One-Time: ${formatIstDateTime(task.scheduledDateTime || task.nextRunAt)}`}
+                        <span class="px-2 py-0.5 text-[11px] font-bold rounded ${task.scheduleType === 'one_time' ? 'bg-purple-50 text-purple-700 border border-purple-100' : 'bg-blue-50 text-blue-700 border border-blue-100'}">
+                          ${task.scheduleType === 'weekly'
+                            ? `🗓️ Every ${(task.weekdays || []).map(d => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][d]).join(', ')} at ${escapeHtml(task.dailyTime || '09:00')} IST`
+                            : task.scheduleType === 'recurring' ? `🔁 Daily at ${escapeHtml(task.dailyTime || '20:00')} IST` : `🎯 One-Time: ${formatIstDateTime(task.scheduledDateTime || task.nextRunAt)}`}
                         </span>
+                        ${task.testSource === 'existing_test' ? `<span class="px-2 py-0.5 text-[11px] font-bold rounded bg-emerald-50 text-emerald-700 border border-emerald-100" title="${escapeHtml(task.existingTestId || '')}">📄 Hosts existing test: ${escapeHtml(task.existingTestTitle || task.existingTestId || '')}</span>` : ''}
                         ${task.isLiveEvent ? `<span class="px-2 py-0.5 text-[11px] font-bold rounded bg-rose-50 text-rose-700 border border-rose-100">⚡ Live Window: ${task.liveDurationMinutes || 60}m</span>` : ''}
                       </div>
-                      <p class="text-xs text-slate-500 mt-1">
+                      ${task.testSource === 'existing_test' ? '' : `<p class="text-xs text-slate-500 mt-1">
                         Title Template: <code class="text-[11px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 font-mono">${escapeHtml(task.titleTemplate || '[Subject] Daily Conceptual Sprint')}</code>
-                      </p>
+                      </p>`}
                     </div>
 
                     <!-- Status Badge -->
@@ -8836,6 +8839,19 @@ class AdminDashboard {
                   </div>
 
                   <!-- Specs Grid -->
+                  ${task.testSource === 'existing_test' ? `
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-slate-50 p-3 rounded-lg border border-slate-100">
+                    <div>
+                      <span class="text-slate-400 font-medium block text-[10px] uppercase">Test Made Live</span>
+                      <span class="font-bold text-slate-800 block truncate" title="${escapeHtml(task.existingTestTitle || '')}">${escapeHtml(task.existingTestTitle || task.existingTestId || '')}</span>
+                      <span class="text-slate-500 text-[11px] block">Uses the test's own questions, marks and plan settings</span>
+                    </div>
+                    <div>
+                      <span class="text-slate-400 font-medium block text-[10px] uppercase">Next Scheduled Run</span>
+                      <span class="font-bold text-slate-800 block">${formatIstDateTime(task.nextRunAt)}</span>
+                      <span class="text-rose-600 text-[11px] font-semibold block">${task.enabled ? getCountdownText(task.nextRunAt) : 'Schedule Paused'}</span>
+                    </div>
+                  </div>` : `
                   <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50 p-3 rounded-lg border border-slate-100">
                     <div>
                       <span class="text-slate-400 font-medium block text-[10px] uppercase">Subject &amp; Chapter</span>
@@ -8857,7 +8873,7 @@ class AdminDashboard {
                       <span class="font-bold text-slate-800 block">${formatIstDateTime(task.nextRunAt)}</span>
                       <span class="text-rose-600 text-[11px] font-semibold block">${task.enabled ? getCountdownText(task.nextRunAt) : 'Schedule Paused'}</span>
                     </div>
-                  </div>
+                  </div>`}
 
                   <!-- Telemetry / Last Run State -->
                   <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 bg-white px-1">
@@ -8867,7 +8883,7 @@ class AdminDashboard {
                       ${task.lastTestTitle ? `<span>Last Hosted: <b class="text-emerald-700">${escapeHtml(task.lastTestTitle)}</b> <span class="text-slate-400 text-[10px]">(${escapeHtml(task.lastTestId || '')})</span></span>` : ''}
                       ${task.lastError ? `<span class="text-rose-600 font-semibold truncate max-w-xs" title="${escapeHtml(task.lastError)}">Error: ${escapeHtml(task.lastError)}</span>` : ''}
                     </div>
-                    <div class="flex items-center gap-1.5 flex-wrap">
+                    <div class="flex items-center gap-1.5 flex-wrap ${task.testSource === 'existing_test' ? 'hidden' : ''}">
                       <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
                         ${escapeHtml(task.questionCategory || 'Direct Questions')}
                       </span>
@@ -8968,15 +8984,29 @@ class AdminDashboard {
                       Daily Recurring
                     </label>
                     <label class="flex items-center gap-1.5 cursor-pointer font-semibold text-slate-700">
+                      <input type="radio" name="ai-sched-type-radio" value="weekly" onchange="window.adminDashboard.handleScheduleTypeChange('weekly')" class="text-rose-600 focus:ring-rose-500" />
+                      Weekly
+                    </label>
+                    <label class="flex items-center gap-1.5 cursor-pointer font-semibold text-slate-700">
                       <input type="radio" name="ai-sched-type-radio" value="one_time" onchange="window.adminDashboard.handleScheduleTypeChange('one_time')" class="text-rose-600 focus:ring-rose-500" />
                       One-Time Event
                     </label>
+                  </div>
+                  <div id="ai-sched-weekdays-container" class="hidden mt-2.5">
+                    <label class="block text-[11px] font-bold text-slate-700 mb-1">Repeat on <span class="text-rose-600">*</span></label>
+                    <div class="flex flex-wrap gap-1.5">
+                      ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d, i) => `
+                        <label class="cursor-pointer">
+                          <input type="checkbox" id="ai-sched-wd-${i}" value="${i}" class="peer sr-only" />
+                          <span class="inline-block px-2.5 py-1 text-[11px] font-bold rounded-lg border border-slate-300 bg-white text-slate-600 peer-checked:bg-rose-600 peer-checked:border-rose-600 peer-checked:text-white peer-focus-visible:ring-2 peer-focus-visible:ring-rose-400 select-none">${d}</span>
+                        </label>`).join('')}
+                    </div>
                   </div>
                 </div>
 
                 <!-- Recurring Daily Time (IST) -->
                 <div id="ai-sched-daily-time-container">
-                  <label class="block text-xs font-bold text-slate-700 mb-1">Daily Time (IST) <span class="text-rose-600">*</span></label>
+                  <label id="ai-sched-daily-time-label" class="block text-xs font-bold text-slate-700 mb-1">Daily Time (IST) <span class="text-rose-600">*</span></label>
                   <input type="time" id="ai-sched-daily-time" value="09:00" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none" />
                   <span class="text-[10px] text-slate-400 mt-0.5 block">Indian Standard Time (UTC+05:30)</span>
                 </div>
@@ -8997,6 +9027,26 @@ class AdminDashboard {
                 </div>
               </div>
 
+              <!-- Test Source -->
+              <div class="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <label class="block text-xs font-bold text-slate-700">Which test goes live? <span class="text-rose-600">*</span></label>
+                <div class="flex flex-wrap items-center gap-4 text-xs">
+                  <label class="flex items-center gap-1.5 cursor-pointer font-semibold text-slate-700">
+                    <input type="radio" name="ai-sched-source-radio" value="ai_generate" checked onchange="window.adminDashboard.handleScheduleSourceChange('ai_generate')" class="text-rose-600 focus:ring-rose-500" />
+                    Generate a new test with AI each time
+                  </label>
+                  <label class="flex items-center gap-1.5 cursor-pointer font-semibold text-slate-700">
+                    <input type="radio" name="ai-sched-source-radio" value="existing_test" onchange="window.adminDashboard.handleScheduleSourceChange('existing_test')" class="text-rose-600 focus:ring-rose-500" />
+                    Host an existing test
+                  </label>
+                </div>
+                <div id="ai-sched-existing-test-container" class="hidden">
+                  <select id="ai-sched-existing-test" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:outline-none bg-white"></select>
+                  <span class="text-[10px] text-slate-400 mt-0.5 block">This test is published and made live at each scheduled time (no AI generation, the Local Qwen Worker is not needed).</span>
+                </div>
+              </div>
+
+              <div id="ai-sched-generate-fields" class="space-y-4">
               <!-- Cascading Syllabus -->
               <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
@@ -9131,6 +9181,7 @@ class AdminDashboard {
                 </div>
                 <input type="checkbox" id="ai-sched-autopublish" checked class="w-4 h-4 text-rose-600 rounded focus:ring-rose-500 cursor-pointer" />
               </div>
+              </div>
 
               <!-- Live Event Configuration -->
               <div class="p-3.5 bg-rose-50/50 border border-rose-200 rounded-xl space-y-2.5">
@@ -9170,12 +9221,44 @@ class AdminDashboard {
   handleScheduleTypeChange(type) {
     const dailyContainer = document.getElementById('ai-sched-daily-time-container');
     const datetimeContainer = document.getElementById('ai-sched-datetime-container');
-    if (type === 'recurring') {
-      if (dailyContainer) dailyContainer.classList.remove('hidden');
-      if (datetimeContainer) datetimeContainer.classList.add('hidden');
-    } else {
-      if (dailyContainer) dailyContainer.classList.add('hidden');
-      if (datetimeContainer) datetimeContainer.classList.remove('hidden');
+    const weekdaysContainer = document.getElementById('ai-sched-weekdays-container');
+    const timeLabel = document.getElementById('ai-sched-daily-time-label');
+    const repeating = type === 'recurring' || type === 'weekly';
+    if (dailyContainer) dailyContainer.classList.toggle('hidden', !repeating);
+    if (datetimeContainer) datetimeContainer.classList.toggle('hidden', repeating);
+    if (weekdaysContainer) weekdaysContainer.classList.toggle('hidden', type !== 'weekly');
+    if (timeLabel) timeLabel.innerHTML = `${type === 'weekly' ? 'Time on those days (IST)' : 'Daily Time (IST)'} <span class="text-rose-600">*</span>`;
+  }
+
+  handleScheduleSourceChange(source) {
+    const existing = source === 'existing_test';
+    const picker = document.getElementById('ai-sched-existing-test-container');
+    const genFields = document.getElementById('ai-sched-generate-fields');
+    if (picker) picker.classList.toggle('hidden', !existing);
+    if (genFields) genFields.classList.toggle('hidden', existing);
+  }
+
+  /** Fill the existing-test picker from the loaded MCQ tests. */
+  populateScheduleTestOptions(selectedId) {
+    const sel = document.getElementById('ai-sched-existing-test');
+    if (!sel) return;
+    const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const tests = ((window.store && window.store.getTests()) || [])
+      .filter(t => t && t.id)
+      .sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')));
+    const hasSelected = !selectedId || tests.some(t => t.id === selectedId);
+    sel.innerHTML = `<option value="">-- Select a test --</option>` +
+      (hasSelected ? '' : `<option value="${esc(selectedId)}" selected>(test not loaded) ${esc(selectedId)}</option>`) +
+      tests.map(t => {
+        const q = (window.store.getQuestionsByTestId(t.id) || []).length || Number(t.totalQuestions) || 0;
+        return `<option value="${esc(t.id)}" ${t.id === selectedId ? 'selected' : ''}>${esc(t.title || t.id)} (${q} Qs)</option>`;
+      }).join('');
+  }
+
+  _setScheduleWeekdays(days) {
+    for (let i = 0; i < 7; i++) {
+      const cb = document.getElementById(`ai-sched-wd-${i}`);
+      if (cb) cb.checked = (days || []).includes(i);
     }
   }
 
@@ -9227,6 +9310,11 @@ class AdminDashboard {
     const recurringRadio = document.querySelector('input[name="ai-sched-type-radio"][value="recurring"]');
     if (recurringRadio) recurringRadio.checked = true;
     this.handleScheduleTypeChange('recurring');
+    this._setScheduleWeekdays([0]);
+    const genRadio = document.querySelector('input[name="ai-sched-source-radio"][value="ai_generate"]');
+    if (genRadio) genRadio.checked = true;
+    this.populateScheduleTestOptions('');
+    this.handleScheduleSourceChange('ai_generate');
 
     this.setupCascadingSyllabus('ai-sched-level', 'ai-sched-subject', 'ai-sched-chapter', 'foundation', 'sub-1', '');
 
@@ -9296,10 +9384,16 @@ class AdminDashboard {
     document.getElementById('ai-sched-plan-elite').checked = plans.includes('elite');
     document.getElementById('ai-sched-autopublish').checked = task.autoPublish !== false;
 
-    const isOneTime = task.scheduleType === 'one_time';
-    const radio = document.querySelector(`input[name="ai-sched-type-radio"][value="${isOneTime ? 'one_time' : 'recurring'}"]`);
+    const cadence = ['one_time', 'weekly'].includes(task.scheduleType) ? task.scheduleType : 'recurring';
+    const radio = document.querySelector(`input[name="ai-sched-type-radio"][value="${cadence}"]`);
     if (radio) radio.checked = true;
-    this.handleScheduleTypeChange(isOneTime ? 'one_time' : 'recurring');
+    this.handleScheduleTypeChange(cadence);
+    this._setScheduleWeekdays(task.weekdays && task.weekdays.length ? task.weekdays : [0]);
+    const source = task.testSource === 'existing_test' ? 'existing_test' : 'ai_generate';
+    const sourceRadio = document.querySelector(`input[name="ai-sched-source-radio"][value="${source}"]`);
+    if (sourceRadio) sourceRadio.checked = true;
+    this.populateScheduleTestOptions(task.existingTestId || '');
+    this.handleScheduleSourceChange(source);
 
     this.setupCascadingSyllabus(
       'ai-sched-level',
@@ -9355,6 +9449,22 @@ class AdminDashboard {
 
     const scheduledDateTime = scheduleType === 'one_time' ? `${scheduledDate}T${scheduledTime}:00` : null;
 
+    const weekdays = [];
+    for (let i = 0; i < 7; i++) {
+      if (document.getElementById(`ai-sched-wd-${i}`)?.checked) weekdays.push(i);
+    }
+    if (scheduleType === 'weekly' && weekdays.length === 0) {
+      window.app.showToast('Select at least one day for the weekly schedule.', 'error');
+      return;
+    }
+    const sourceRadio = document.querySelector('input[name="ai-sched-source-radio"]:checked');
+    const testSource = sourceRadio ? sourceRadio.value : 'ai_generate';
+    const existingTestId = document.getElementById('ai-sched-existing-test')?.value || '';
+    if (testSource === 'existing_test' && !existingTestId) {
+      window.app.showToast('Select the test that should go live.', 'error');
+      return;
+    }
+
     const levelSelect = document.getElementById('ai-sched-level');
     const examLevel = levelSelect?.value || 'CA Foundation';
     const examLevelId = levelSelect?.selectedOptions[0]?.dataset.id || 'foundation';
@@ -9398,6 +9508,9 @@ class AdminDashboard {
       scheduledDate,
       scheduledTime,
       scheduledDateTime,
+      weekdays: scheduleType === 'weekly' ? weekdays : [],
+      testSource,
+      existingTestId: testSource === 'existing_test' ? existingTestId : undefined,
       isLiveEvent,
       liveDurationMinutes,
       examLevel,

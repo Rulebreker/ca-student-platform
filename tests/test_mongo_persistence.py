@@ -30,7 +30,7 @@ class FakeCollection:
     def find(self, _flt=None):
         return [copy.deepcopy(d) for d in self.docs.values()]
 
-    def find_one(self, flt):
+    def find_one(self, flt, projection=None):
         d = self.docs.get(flt.get('_id'))
         return copy.deepcopy(d) if d else None
 
