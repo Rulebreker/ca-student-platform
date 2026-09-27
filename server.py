@@ -5,6 +5,7 @@ import ai_job_manager
 import ai_scheduler
 import job_repository
 import syllabus_hierarchy
+import password_reset
 import http.server
 import socketserver
 import os
@@ -1834,6 +1835,14 @@ def is_user_revoked(u, data, token=None):
     return token_revoked or bool(ids & REVOKED_USERS) or bool(ids & persisted_users)
 
 
+_URL_TOKEN_RE = re.compile(r'([?&]token=)[^&\s"]+')
+
+
+def redact_url_tokens(text):
+    """Hide ?token=... values (password-reset links, legacy auth query tokens) in log lines."""
+    return _URL_TOKEN_RE.sub(r'\1[redacted]', text) if isinstance(text, str) else text
+
+
 def scrub_session_tokens(payload, _depth=0):
     """Remove sessionTokens (a user's other devices) from any API response."""
     if _depth > 6:
@@ -2115,6 +2124,20 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         raw_path = parsed_url.path
         return raw_path.rstrip('/') if raw_path != '/' else '/'
 
+    def get_client_ip(self):
+        """Client IP for rate limiting (Vercel sets x-real-ip / x-forwarded-for at its edge)."""
+        real_ip = (self.headers.get('x-real-ip') or '').strip()
+        if real_ip:
+            return real_ip
+        forwarded = (self.headers.get('x-forwarded-for') or '').split(',')[0].strip()
+        if forwarded:
+            return forwarded
+        return self.client_address[0] if self.client_address else 'unknown'
+
+    def log_message(self, format, *args):
+        # request lines may carry ?token=... (password reset links); never write it to the log
+        super().log_message(format, *(redact_url_tokens(a) if isinstance(a, str) else a for a in args))
+
     def get_auth_token(self):
         auth_header = self.headers.get('Authorization', '')
         if auth_header.startswith('Bearer '):
@@ -2131,9 +2154,15 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         check_opportunistic_scheduler_tick()
-        print(f"[SERVER] Incoming GET: {self.path}", flush=True)
+        print(f"[SERVER] Incoming GET: {redact_url_tokens(self.path)}", flush=True)
         raw_path = self._get_request_path()
         path = raw_path.rstrip('/') if raw_path != '/' else '/'
+
+        # Password pages are routes of the single-page app (vercel.json rewrites them in production)
+        if path in ('/forgot-password', '/reset-password'):
+            self.path = '/index.html'
+            super().do_GET()
+            return
         effective_full = self.headers.get('x-matched-path') or self.headers.get('x-forwarded-uri') or self.path
         query = urllib.parse.parse_qs(urllib.parse.urlparse(effective_full).query)
 
@@ -4017,6 +4046,117 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             except Exception as e:
                 self.send_json(500, {'success': False, 'error': f'Plan config error: {str(e)}'})
+                return
+
+        # 0a. Forgot password: email a single-use reset link (same response whether or not the account exists)
+        if path == '/api/auth/forgot-password':
+            started = time.monotonic()
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if 0 < content_length <= 4096 else b''
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+                email = password_reset.normalize_email(req_data.get('email') if isinstance(req_data, dict) else '')
+            except Exception:
+                email = ''
+            if not password_reset.is_valid_email(email):
+                self.send_json(400, {'success': False, 'error': 'Please enter a valid email address.'})
+                return
+            client_ip = self.get_client_ip()
+            if not (password_reset.hit_rate_limit('forgot-ip', client_ip, password_reset.FORGOT_LIMIT_PER_IP) and
+                    password_reset.hit_rate_limit('forgot-email', email, password_reset.FORGOT_LIMIT_PER_EMAIL)):
+                self.send_json(429, {'success': False, 'error': 'Too many password reset requests. Please wait a few minutes and try again.'})
+                return
+            try:
+                data = load_backend_data(refresh_collections=['users', 'revoked_users'])
+                account = next((u for u in (data.get('users') or {}).values()
+                                if isinstance(u, dict) and str(u.get('email') or '').strip().lower() == email), None)
+                if account and account.get('isActive', True) and not account.get('isDeleted') and not is_user_revoked(account, data):
+                    raw_token = password_reset.create_password_reset(account.get('id'))
+                    if raw_token:
+                        sent = password_reset.send_password_reset_email(
+                            account.get('email'), account.get('name'), password_reset.build_reset_url(raw_token))
+                        print(f"[PASSWORD_RESET] reset link requested for user {account.get('id')} (email sent: {sent})", flush=True)
+                    raw_token = None
+            except Exception as e:
+                print(f"[PASSWORD_RESET] forgot-password error ({type(e).__name__})", flush=True)
+            # similar response time whether or not an email was sent
+            remaining = password_reset.FORGOT_MIN_RESPONSE_SECONDS + secrets.randbelow(400) / 1000.0 - (time.monotonic() - started)
+            if remaining > 0:
+                time.sleep(remaining)
+            self.send_json(200, {'success': True, 'message': password_reset.GENERIC_FORGOT_MESSAGE})
+            return
+
+        # 0b. Reset password with a token from the emailed link
+        if path == '/api/auth/reset-password':
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if 0 < content_length <= 4096 else b''
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+                if not isinstance(req_data, dict):
+                    req_data = {}
+            except Exception:
+                req_data = {}
+            if not password_reset.hit_rate_limit('reset-ip', self.get_client_ip(), password_reset.RESET_LIMIT_PER_IP):
+                self.send_json(429, {'success': False, 'error': 'Too many attempts. Please wait a few minutes and try again.'})
+                return
+            raw_token = str(req_data.get('token') or '').strip()
+            new_password = req_data.get('newPassword')
+            confirm_password = req_data.get('confirmPassword')
+            token_errors = {
+                password_reset.TOKEN_INVALID: ('RESET_TOKEN_INVALID', 'This password reset link is invalid. Please request a new one.'),
+                password_reset.TOKEN_EXPIRED: ('RESET_TOKEN_EXPIRED', 'This password reset link has expired. Please request a new one.'),
+                password_reset.TOKEN_USED: ('RESET_TOKEN_USED', 'This password reset link has already been used. Please request a new one.'),
+            }
+            try:
+                status, user_id = password_reset.check_password_reset(raw_token)
+                if status != password_reset.TOKEN_OK:
+                    code, msg = token_errors[status]
+                    self.send_json(400, {'success': False, 'code': code, 'error': msg})
+                    return
+                if not isinstance(new_password, str) or not isinstance(confirm_password, str) or not new_password or not confirm_password:
+                    self.send_json(400, {'success': False, 'code': 'PASSWORD_REQUIRED', 'error': 'Please enter and confirm your new password.'})
+                    return
+                if new_password != confirm_password:
+                    self.send_json(400, {'success': False, 'code': 'PASSWORD_MISMATCH', 'error': 'New password and confirmation do not match.'})
+                    return
+                policy_error = password_reset.validate_password_strength(new_password)
+                if policy_error:
+                    self.send_json(400, {'success': False, 'code': 'PASSWORD_POLICY', 'error': policy_error})
+                    return
+
+                data = load_backend_data(refresh_collections=['users', 'revoked_users', 'revoked_tokens'])
+                account = next((u for u in (data.get('users') or {}).values()
+                                if isinstance(u, dict) and str(u.get('id')) == str(user_id)), None)
+                if not account or not account.get('isActive', True) or account.get('isDeleted') or is_user_revoked(account, data):
+                    code, msg = token_errors[password_reset.TOKEN_INVALID]
+                    self.send_json(400, {'success': False, 'code': code, 'error': msg})
+                    return
+
+                status, consumed_user_id = password_reset.consume_password_reset(raw_token)
+                if status != password_reset.TOKEN_OK or str(consumed_user_id) != str(user_id):
+                    code, msg = token_errors.get(status, token_errors[password_reset.TOKEN_INVALID])
+                    self.send_json(400, {'success': False, 'code': code, 'error': msg})
+                    return
+
+                hashed = hash_password(new_password)
+                account['password'] = hashed
+                account['passwordChangedAt'] = datetime.now(timezone.utc).isoformat()
+                # A password reset signs the user out everywhere; they log in with the new password
+                end_all_user_sessions(account, data)
+                save_backend_data(data)
+                sync_to_firebase(f"users/{account.get('id')}", {
+                    'password': hashed,
+                    'passwordChangedAt': account['passwordChangedAt'],
+                    'token': None,
+                    'sessionTokens': []
+                }, method='PATCH', sync=True)
+                sync_to_firebase('revoked_tokens', data.get('revoked_tokens', []), sync=True)
+                print(f"[PASSWORD_RESET] password reset completed for user {account.get('id')}", flush=True)
+                self.send_json(200, {'success': True, 'message': password_reset.RESET_SUCCESS_MESSAGE})
+                return
+            except Exception as e:
+                print(f"[PASSWORD_RESET] reset-password error ({type(e).__name__})", flush=True)
+                self.send_json(500, {'success': False, 'error': 'Unable to reset your password right now. Please try again later.'})
                 return
 
         # 0. User Login with Secure Password Verification

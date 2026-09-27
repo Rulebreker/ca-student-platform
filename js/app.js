@@ -75,6 +75,8 @@ class App {
         const lastPart = pathParts[pathParts.length - 1];
         if (lastPart === 'test' || lastPart === 'tests') {
           rawHash = 'tests';
+        } else if (lastPart === 'forgot-password' || lastPart === 'reset-password') {
+          rawHash = lastPart;
         } else {
           // Unauthenticated visitors or default landing opens Homepage
           rawHash = 'home';
@@ -225,6 +227,8 @@ class App {
       'view-admin',
       'view-teacher',
       'view-passes',
+      'view-forgot-password',
+      'view-reset-password',
       'view-403'
     ];
 
@@ -303,6 +307,10 @@ class App {
       window.adminDashboard.render();
     } else if (viewName === 'teacher') {
       window.teacherPortal.render();
+    } else if (viewName === 'forgot-password') {
+      window.passwordReset.renderForgotPassword();
+    } else if (viewName === 'reset-password') {
+      window.passwordReset.renderResetPassword();
     } else if (viewName === 'home') {
       if (window.auth && typeof window.auth.onAuthChange === 'function') {
         window.auth.onAuthChange();
@@ -486,6 +494,7 @@ class App {
             <div>
               <div class="flex items-center justify-between mb-1">
                 <label class="font-bold text-slate-700">Password</label>
+                <button type="button" onclick="window.app.closeModal('auth-modal'); window.app.navigate('forgot-password');" class="text-[11px] font-bold text-blue-600 hover:underline">Forgot Password?</button>
               </div>
               <div class="relative">
                 <input type="password" id="auth-password" required value="" placeholder="Enter your password" class="w-full pl-3.5 pr-10 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-slate-800">
