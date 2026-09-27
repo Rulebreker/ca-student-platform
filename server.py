@@ -7,6 +7,9 @@ import job_repository
 import syllabus_hierarchy
 import password_reset
 import image_store
+import exam_levels
+import leaderboard_service
+import sample_accounts
 import http.server
 import socketserver
 import os
@@ -713,6 +716,8 @@ INITIAL_USERS = {
         'referralCount': 0
     },
 }
+
+sample_accounts.register_seed_users(INITIAL_USERS)
 
 INITIAL_PAPERS = [
     {
@@ -1617,7 +1622,8 @@ def load_backend_data(refresh_collections=None, min_interval=10.0):
                 if 'xp_reset_settings' not in d: d['xp_reset_settings'] = {'enabled': False, 'nextReset': None, 'intervalDays': 90, 'customSeconds': None, 'lastReset': None}
                 # Sync seed users and hashed passwords (skipping any permanently revoked accounts)
                 revoked_set = set(str(x).lower().strip() for x in d.get('revoked_users', []))
-                for email, init_u in INITIAL_USERS.items():
+                # sample students are only (re)created when EXCELLENCECA_SAMPLE_DATA=1 (local development)
+                for email, init_u in sample_accounts.without_sample_students(INITIAL_USERS).items():
                     u_email = str(email or '').lower().strip()
                     u_id = str(init_u.get('id') or '').lower().strip()
                     u_uname = str(init_u.get('username') or '').lower().lstrip('@').strip()
@@ -1666,7 +1672,7 @@ def load_backend_data(refresh_collections=None, min_interval=10.0):
                 return {}
 
         data = {
-            'users': INITIAL_USERS,
+            'users': {k: dict(v) for k, v in sample_accounts.without_sample_students(INITIAL_USERS).items()},
             'papers': INITIAL_PAPERS,
             'submissions': [],
             'tests': [],
@@ -1685,11 +1691,88 @@ def load_backend_data(refresh_collections=None, min_interval=10.0):
         save_backend_data(data)
         return data
 
+def _merge_collection_changes(name, disk_value, mine, before_fp):
+    """This request's changes to one shared collection (vs. its load snapshot), applied onto the copy
+    currently on disk: documents it changed/added/removed win; every other document keeps the disk
+    version (which another request may have updated meanwhile)."""
+    after_fp = _collection_fingerprints(name, mine)
+    if name in mongodb_manager.STRING_LIST_COLLECTIONS:
+        if not isinstance(disk_value, list) or not isinstance(mine, list):
+            return mine
+        removed = {k for k in before_fp if k not in after_fp}
+        added = [v for v in mine if v and str(v) not in before_fp]
+        kept = [v for v in disk_value if str(v) not in removed]
+        known = {str(v) for v in kept}
+        return kept + [v for v in added if str(v) not in known]
+    if name in mongodb_manager.SINGLETON_COLLECTIONS:
+        return mine if (after_fp != before_fp or disk_value is None) else disk_value
+    if name in mongodb_manager.KEYED_DICT_COLLECTIONS or isinstance(mine, dict):
+        if not isinstance(disk_value, dict) or not isinstance(mine, dict):
+            return mine
+        result = dict(disk_value)
+        for k, v in mine.items():
+            if not isinstance(v, dict) or before_fp.get(str(k)) != after_fp.get(str(k)):
+                result[k] = v                       # changed or added by this request
+        for k in before_fp:
+            if k not in after_fp:
+                result.pop(k, None)                 # removed by this request
+        return result
+    if not isinstance(disk_value, list) or not isinstance(mine, list):
+        return mine
+    key_field = mongodb_manager.list_key_field(name)
+    if any(not isinstance(d, dict) or not d.get(key_field) for d in mine):
+        return mine                                 # untracked documents: previous behaviour
+    disk_by_key = {str(d.get(key_field)): d for d in disk_value if isinstance(d, dict) and d.get(key_field)}
+    result, seen = [], set()
+    for d in mine:
+        k = str(d.get(key_field))
+        if k in seen:
+            continue
+        seen.add(k)
+        if before_fp.get(k) != after_fp.get(k):
+            result.append(d)                        # changed or added by this request
+        elif k in disk_by_key:
+            result.append(disk_by_key[k])           # unchanged here: newest disk copy
+        elif k not in before_fp:
+            result.append(d)
+        # else: unchanged here but deleted by another request meanwhile -> stays deleted
+    added_elsewhere = [d for k, d in disk_by_key.items() if k not in seen and k not in before_fp]
+    untracked_on_disk = [d for d in disk_value if not (isinstance(d, dict) and d.get(key_field))]
+    return added_elsewhere + result + untracked_on_disk
+
+
+def _merged_for_disk(data):
+    """What to write: `data` merged document-by-document onto the current file, so a request that
+    saves a stale copy (loaded before another request's save) cannot undo that other request's
+    changes (lost update). Dicts without a load snapshot are written as they are."""
+    with _snapshot_lock:
+        entry = _load_snapshots.get(id(data))
+    if not entry or entry[0] is not data or not os.path.exists(DATA_STORE_FILE):
+        return data
+    try:
+        with open(DATA_STORE_FILE, 'r', encoding='utf-8') as f:
+            disk = json.load(f)
+    except Exception:
+        return data
+    if not isinstance(disk, dict):
+        return data
+    snap = entry[1]
+    merged = dict(disk)
+    for key, value in data.items():
+        if key in snap:
+            merged[key] = _merge_collection_changes(key, disk.get(key), value, snap[key])
+        else:
+            merged[key] = value
+    apply_tombstones(merged)   # a deleted record on disk is never carried forward by the merge
+    return merged
+
+
 def save_backend_data(data):
     with _backend_data_lock:
-        tmp_file = DATA_STORE_FILE + f".tmp.{os.getpid()}"
+        to_write = _merged_for_disk(data)
+        tmp_file = DATA_STORE_FILE + f".tmp.{os.getpid()}.{threading.get_ident()}"
         with open(tmp_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2)
+            json.dump(to_write, f, indent=2)
         try:
             os.replace(tmp_file, DATA_STORE_FILE)
         except OSError:
@@ -1699,6 +1782,12 @@ def save_backend_data(data):
         _write_through_to_mongo(data)
     except Exception as wt_err:
         print(f"[WRITE_THROUGH_ERROR] {wt_err}", flush=True)
+    if mongodb_manager.get_database() is None:
+        # no write-through ran: this save is the new baseline for the next save of the same dict
+        with _snapshot_lock:
+            if id(data) in _load_snapshots and _load_snapshots[id(data)][0] is data:
+                _load_snapshots[id(data)] = (data, {name: _collection_fingerprints(name, data.get(name))
+                                                    for name in SHARED_COLLECTIONS if name in data})
 
 _xp_reset_lock = threading.Lock()
 
@@ -2812,9 +2901,17 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             now_iso = datetime.now(timezone.utc).isoformat()
             is_admin_or_teacher = user and user.get('role') in ['admin', 'teacher']
             user_tier = get_user_tier(user.get('id') if user else None, data) if not is_admin_or_teacher else 'admin'
+            level_scope = exam_levels.content_scope(user)
+            subjects = data.get('subjects') or []
             result = []
             for p in papers:
+                if not exam_levels.in_scope(p, level_scope, subjects):
+                    continue  # another exam level's paper
                 p_copy = dict(p)
+                lvl = exam_levels.record_level_id(p, subjects)
+                if lvl:
+                    p_copy['examLevelId'] = lvl
+                    p_copy['examLevel'] = exam_levels.display_name(lvl)
                 sched_time = p.get('scheduledPublishTime')
                 live_start = p.get('liveStartTime')
                 live_end = p.get('liveEndTime')
@@ -2892,6 +2989,40 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(200, {'submissions': user_subs})
             return
 
+        # Leaderboard (server-backed). A student always gets their own exam level's leaderboard, read
+        # from the authenticated account; only staff may choose a level with ?examLevel=.
+        if path == '/api/leaderboard':
+            user = authenticate_token(self.get_auth_token())
+            if not user:
+                self.send_json(401, {'success': False, 'error': 'Please sign in to view the leaderboard.', 'code': 401})
+                return
+            data = load_backend_data(refresh_collections=['users', 'test_attempts', 'submissions', 'tests', 'papers',
+                                                          'subscriptions', 'revoked_users'], min_interval=30.0)
+            subject = (query.get('subject', ['all'])[0] or 'all').strip()[:120] or 'all'
+            if user.get('role') in ('admin', 'teacher'):
+                requested = (query.get('examLevel', ['all'])[0] or 'all').strip()
+                level_id = exam_levels.canonical_id(requested)
+                if requested.lower() != 'all' and not level_id:
+                    self.send_json(400, {'success': False, 'error': 'Unknown exam level.', 'code': 400})
+                    return
+            else:
+                level_id = exam_levels.content_scope(user)   # never taken from the request
+                if not level_id:
+                    self.send_json(409, {'success': False, 'code': 'EXAM_LEVEL_REQUIRED',
+                                         'error': 'Choose your exam level in Profile to see your leaderboard.'})
+                    return
+            rows = leaderboard_service.build_leaderboard(data, level_id, subject,
+                                                         include_samples=sample_accounts.sample_data_enabled())
+            self.send_json(200, {
+                'success': True,
+                'examLevelId': level_id or 'all',
+                'examLevel': exam_levels.display_name(level_id) if level_id else 'All Levels',
+                'subject': subject,
+                'rows': rows,
+                'generatedAt': datetime.now(timezone.utc).isoformat()
+            })
+            return
+
         # MCQ Tests Catalog & Questions Delivery
         if path == '/api/tests':
             token = self.get_auth_token()
@@ -2904,10 +3035,13 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 save_backend_data(data)
             tests = data.get('tests', [])
             user_tier = get_user_tier(user.get('id') if user else None, data) if not is_admin else 'admin'
+            # exam-level scope of the requesting student (None = unrestricted); enforced here, not only in the UI
+            level_scope = exam_levels.content_scope(user)
+            subjects = data.get('subjects') or []
 
             if test_id:
                 target_test = next((t for t in tests if t.get('id') == test_id), None)
-                if not target_test:
+                if not target_test or not exam_levels.in_scope(target_test, level_scope, subjects):
                     self.send_json(404, {'error': 'Test not found', 'code': 404})
                     return
                 # Check permissions
@@ -2982,6 +3116,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     pub_tests = [t for t in tests if t.get('isPublished', True) or t.get('status') in ('Published', 'Live')]
                     enriched_tests = []
                     for t in pub_tests:
+                        if not exam_levels.in_scope(t, level_scope, subjects):
+                            continue  # another exam level's content
                         if not check_test_visibility(user_tier, t):
                             continue  # Hidden completely from non-eligible students
                         is_eligible = check_test_eligibility(user_tier, t)
@@ -2990,8 +3126,14 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         t_copy['requiredTier'] = req_tier
                         t_copy['tier'] = req_tier
                         t_copy['isLocked'] = not is_eligible
+                        # premium = flagged premium or not open to the free tier (visual identity,
+                        # independent of whether this student can open it)
+                        t_copy['isPremium'] = bool(t.get('isPremium')) or not check_test_eligibility('free', t)
+                        t_copy['examLevelId'] = exam_levels.record_level_id(t, subjects)
+                        if t_copy['examLevelId']:
+                            t_copy['examLevel'] = exam_levels.display_name(t_copy['examLevelId'])
                         enriched_tests.append(t_copy)
-                    self.send_json(200, {'tests': enriched_tests, 'userTier': user_tier})
+                    self.send_json(200, {'tests': enriched_tests, 'userTier': user_tier, 'examLevelScope': level_scope})
                 return
 
         # Attempt History
@@ -3184,6 +3326,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         (mapped and (p.get('questionPdfId') == mapped or p.get('answerPdfId') == mapped))
                     )), None)
 
+                if target_paper and not exam_levels.in_scope(target_paper, exam_levels.content_scope(user), data.get('subjects') or []):
+                    self.send_json(404, {'error': 'File not found', 'code': 404})
+                    return
                 if target_paper:
                     req_tier = str(target_paper.get('requiredTier') or 'free').lower()
                     user_tier = get_user_tier(user.get('id'), data)
@@ -3395,10 +3540,16 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             data = load_backend_data(refresh_collections=['ai_scheduled_tasks'])
             tasks = ai_scheduler.get_scheduled_tasks(data)
+            level_filter = (query.get('examLevel', ['all'])[0] or 'all').strip()
+            if level_filter.lower() != 'all' and not exam_levels.canonical_id(level_filter):
+                self.send_json(400, {'success': False, 'error': 'Unknown exam level filter.', 'code': 400})
+                return
+            tasks = ai_scheduler.filter_tasks_by_exam_level(tasks, level_filter, data.get('subjects'))
             now_utc = ai_scheduler.get_now_utc()
             self.send_json(200, {
                 'success': True,
                 'tasks': tasks,
+                'examLevel': exam_levels.canonical_id(level_filter) or 'all',
                 'serverTimeUtc': ai_scheduler.format_iso_utc(now_utc),
                 'serverTimeIst': now_utc.astimezone(ai_scheduler.IST_TZ).strftime('%Y-%m-%d %H:%M:%S IST')
             })
@@ -3816,6 +3967,40 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             except Exception as e:
                 self.send_json(500, {'success': False, 'error': f'Failed to delete task: {str(e)}', 'code': 500})
+                return
+
+        # 6.2b Duplicate Scheduled Task (new independent, paused schedule with the same configuration)
+        if path == '/api/admin/ai/scheduler/tasks/duplicate':
+            user = authenticate_token(self.get_auth_token())
+            if not user or user.get('role') != 'admin':
+                self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
+                return
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if 0 < content_length <= 64 * 1024 else b'{}'
+                req_data = json.loads(body.decode('utf-8')) if body else {}
+                task_id = req_data.get('id') or req_data.get('taskId') if isinstance(req_data, dict) else None
+                if not isinstance(task_id, str) or not task_id or len(task_id) > 120:
+                    self.send_json(400, {'success': False, 'error': 'Task ID is required.', 'code': 400})
+                    return
+                with job_repository.STORE_LOCK:
+                    data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests'], min_interval=0.0)
+                    try:
+                        new_task = ai_scheduler.duplicate_scheduled_task(task_id, data)
+                    except LookupError:
+                        self.send_json(404, {'success': False, 'error': f"Task '{task_id}' not found.", 'code': 404})
+                        return
+                    save_backend_data(data)
+                    sync_to_firebase(f"ai_scheduled_tasks/{new_task['id']}", new_task, method='PUT', sync=True)
+                print(f"[SCHEDULER_DUPLICATE] {user.get('email')} duplicated {task_id} -> {new_task['id']} (paused)", flush=True)
+                self.send_json(200, {'success': True, 'task': new_task})
+                return
+            except ValueError as ve:
+                self.send_json(400, {'success': False, 'error': str(ve), 'code': 400})
+                return
+            except Exception as e:
+                print(f"[SCHEDULER_DUPLICATE] error ({type(e).__name__}): {e}", flush=True)
+                self.send_json(500, {'success': False, 'error': 'Failed to duplicate the scheduled task.', 'code': 500})
                 return
 
         # 6.3 Toggle Scheduled Task (Pause / Resume)
@@ -4498,6 +4683,12 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 if not matched_user.get('password', '').startswith('sha256:'):
                     matched_user['password'] = hash_password(password)
 
+                # One-time migration: canonical exam level derived from the account's existing caLevel
+                if matched_user.get('role') == 'student' and not matched_user.get('examLevelId'):
+                    legacy_level = exam_levels.user_level_id(matched_user)
+                    if legacy_level:
+                        exam_levels.stamp_user(matched_user, legacy_level)
+
                 # Issue fresh active session token on login and sync to persistent storage and Firebase
                 # New session for this device; the user's other logged-in devices stay signed in
                 new_session_tok = start_user_session(matched_user)
@@ -4540,6 +4731,14 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     self.send_json(400, {'success': False, 'error': 'Email and password are required.'})
                     return
 
+                # Exam level is mandatory: CA Foundation, CA Intermediate or CA Final (canonical id stored)
+                reg_level = (exam_levels.canonical_id(post_data.get('examLevelId'))
+                             or exam_levels.canonical_id(post_data.get('caLevel')))
+                if not exam_levels.is_student_selectable(reg_level):
+                    self.send_json(400, {'success': False, 'code': 'EXAM_LEVEL_REQUIRED',
+                                         'error': 'Please select your Exam Level: CA Foundation, CA Intermediate or CA Final.'})
+                    return
+
                 data = load_backend_data()
                 revoked_set = set(str(x).lower().strip() for x in data.get('revoked_users', []))
                 if raw_email in revoked_set or (raw_uname and raw_uname in revoked_set):
@@ -4567,7 +4766,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     'username': raw_uname,
                     'email': raw_email,
                     'phone': post_data.get('phone', ''),
-                    'caLevel': post_data.get('caLevel', 'CA FOUNDATION'),
+                    'examLevelId': reg_level,
+                    'caLevel': exam_levels.legacy_user_label(reg_level),
                     'password': hashed_pass,
                     'role': 'student',
                     'token': new_token,
@@ -5444,6 +5644,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     'referralCount': 0,
                     'createdAt': datetime.now(timezone.utc).isoformat()
                 }
+                provisioned_level = exam_levels.canonical_id(post_data.get('examLevelId')) or exam_levels.canonical_id(ca_level)
+                if raw_role == 'student' and provisioned_level:
+                    exam_levels.stamp_user(new_user, provisioned_level)
                 if raw_role == 'teacher':
                     new_user['privileges'] = _clean_teacher_privileges(post_data.get('privileges'))
                     new_user['assignedSubjects'] = [str(s) for s in (post_data.get('assignedSubjects') or []) if s][:50]
@@ -5518,6 +5721,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 for field in ('name', 'phone', 'caLevel', 'registrationNo'):
                     if field in req_data and req_data[field] is not None:
                         target[field] = str(req_data[field]).strip()
+                admin_level = exam_levels.canonical_id(req_data.get('examLevelId')) or exam_levels.canonical_id(req_data.get('caLevel'))
+                if admin_level:
+                    exam_levels.stamp_user(target, admin_level)   # keeps examLevelId and caLevel in step
                 if new_uname:
                     target['username'] = new_uname
                 if 'privileges' in req_data and target.get('role') == 'teacher':
@@ -5833,6 +6039,11 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         paper_data['durationMinutes'] = 180
 
                 data = load_backend_data(refresh_collections=['papers', 'assignments'])
+                level_error = exam_levels.level_conflict(paper_data, data.get('subjects') or [])
+                if level_error:
+                    self.send_json(400, {'error': level_error, 'code': 400})
+                    return
+                exam_levels.stamp_record(paper_data, data.get('subjects') or [])   # canonical examLevelId
                 papers = data.get('papers', [])
                 paper_id = paper_data.get('id')
                 if paper_id:
@@ -6026,7 +6237,16 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 test_data['marksPerCorrect'] = float(test_data.get('marksPerCorrect', 2.0))
                 test_data['negativeMarksPerWrong'] = float(test_data.get('negativeMarksPerWrong', 0.5))
                 test_data['pointsPerCorrect'] = float(test_data.get('pointsPerCorrect', test_data.get('marksPerCorrect', 2.0)))
-                test_data['examLevel'] = test_data.get('examLevel', 'CA Foundation')
+                # Exam level: explicit choice (admin form always sends one), checked against the subject;
+                # else the subject's level. Only a request with neither keeps the historical
+                # CA Foundation default (backward compatibility for old API clients).
+                level_error = exam_levels.level_conflict(test_data, data.get('subjects') or [])
+                if level_error:
+                    self.send_json(400, {'error': level_error, 'code': 400})
+                    return
+                if not exam_levels.stamp_record(test_data, data.get('subjects') or []):
+                    test_data['examLevel'] = 'CA Foundation'
+                    exam_levels.stamp_record(test_data)
                 test_data['unattemptedMarks'] = float(test_data.get('unattemptedMarks', 0.0))
                 test_data['maxAttempts'] = int(test_data.get('maxAttempts', 3))
                 test_data['maximumMarks'] = float(test_data.get('maximumMarks', 10.0))
@@ -6513,8 +6733,21 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     target_u['name'] = req_data['name'].strip()
                 if 'phone' in req_data:
                     target_u['phone'] = str(req_data['phone']).strip()
-                if 'caLevel' in req_data:
-                    target_u['caLevel'] = str(req_data['caLevel']).strip()
+                if 'examLevelId' in req_data or 'caLevel' in req_data:
+                    requested = req_data.get('examLevelId') if 'examLevelId' in req_data else req_data.get('caLevel')
+                    new_level = exam_levels.canonical_id(requested)
+                    if target_u.get('role') == 'student':
+                        # students choose CA Foundation, CA Intermediate or CA Final; nothing else about the
+                        # account (subscription, XP, attempts) changes with the level
+                        if not exam_levels.is_student_selectable(new_level):
+                            self.send_json(400, {'success': False, 'code': 'INVALID_EXAM_LEVEL',
+                                                 'error': 'Exam Level must be CA Foundation, CA Intermediate or CA Final.'})
+                            return
+                        exam_levels.stamp_user(target_u, new_level)
+                    elif new_level:
+                        exam_levels.stamp_user(target_u, new_level)
+                    else:
+                        target_u['caLevel'] = str(requested or '').strip()   # staff labels ('Senior Faculty')
                 if 'state' in req_data:
                     target_u['state'] = str(req_data['state']).strip()
                 if 'district' in req_data:
@@ -6618,6 +6851,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 data = load_backend_data()
                 tests = data.get('tests', [])
                 target = next((t for t in tests if t.get('id') == test_id), None)
+                if target and not exam_levels.in_scope(target, exam_levels.content_scope(user), data.get('subjects') or []):
+                    self.send_json(404, {'error': 'Test not found', 'code': 404})
+                    return
                 if target:
                     user_tier = get_user_tier(user.get('id'), data)
                     if not check_test_eligibility(user_tier, target):

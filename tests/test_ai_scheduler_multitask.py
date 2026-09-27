@@ -100,11 +100,15 @@ def run_test():
     assert task2_id != task1_id, "Task IDs must be distinct"
     print(f"  [Created Task 2]: ID={task2_id}, Name={task2.get('name')}, NextRun={task2.get('nextRunAt')}")
 
+    # One-time event three days ahead in IST, computed from the clock (never goes stale)
+    from datetime import datetime, timedelta, timezone
+    ist = timezone(timedelta(hours=5, minutes=30))
+    one_time_ist = (datetime.now(ist) + timedelta(days=3)).replace(hour=16, minute=30, second=0, microsecond=0)
     task3_data = {
         'name': 'Economics One-Time Practice',
         'scheduleType': 'one_time',
-        'scheduledDate': '2026-09-25',
-        'scheduledTime': '16:30',
+        'scheduledDate': one_time_ist.strftime('%Y-%m-%d'),
+        'scheduledTime': one_time_ist.strftime('%H:%M'),
         'subject': 'Business Economics',
         'subjectId': 'sub-3',
         'chapter': 'Theory of Demand and Supply',
@@ -127,6 +131,8 @@ def run_test():
     task3 = res3.get('task', {})
     task3_id = task3.get('id')
     assert task3_id, "Task 3 must have an ID"
+    expected_utc = one_time_ist.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    assert task3.get('nextRunAt') == expected_utc, f"one-time task must run at 16:30 IST ({expected_utc}), got {task3.get('nextRunAt')}"
     print(f"  [Created Task 3]: ID={task3_id}, Name={task3.get('name')}, NextRun={task3.get('nextRunAt')}")
 
     print("\n=== TEST 3: Verify All Tasks Coexist Independently ===")
@@ -152,12 +158,26 @@ def run_test():
     assert toggle_res2.get('task', {}).get('nextRunAt') is not None
     print(f"  Task 2 paused and resumed successfully. Next run: {toggle_res2.get('task', {}).get('nextRunAt')}")
 
-    print("\n=== TEST 5: POST /api/admin/ai/scheduler/tasks/run-now (Synchronous Hosting) ===")
+    print("\n=== TEST 5: POST /api/admin/ai/scheduler/tasks/run-now (queued for the Local Qwen Worker) ===")
     status, run_res = api_request('/api/admin/ai/scheduler/tasks/run-now', method='POST', body={'id': task1_id})
     print(f"Status: {status}, Success: {run_res.get('success')}")
     assert status == 200, f"Expected 200 from run-now, got {status}: {run_res}"
     assert run_res.get('success') is True
-    updated_t1 = run_res.get('task', {})
+    job_id = (run_res.get('result') or {}).get('job', {}).get('id')
+    assert job_id, f"run-now must queue a generation job: {run_res}"
+    assert run_res.get('task', {}).get('activeJobId') == job_id
+
+    # The task records its run when the worker finishes the job (asynchronous by design).
+    job = {}
+    for attempt in range(150):
+        time.sleep(2)
+        _, s_res = api_request(f'/api/admin/ai/jobs/status?jobId={job_id}')
+        job = s_res.get('job', {})
+        if job.get('status') in ('COMPLETED', 'FAILED', 'EXPIRED', 'PARTIAL'):
+            break
+    assert job.get('status') == 'COMPLETED', f"Scheduled job did not complete: {job.get('status')} {job.get('error')}"
+    _, list_res = api_request('/api/admin/ai/scheduler/tasks')
+    updated_t1 = next((t for t in list_res.get('tasks', []) if t.get('id') == task1_id), {})
     assert updated_t1.get('lastRunAt') is not None, "lastRunAt must be recorded"
     assert updated_t1.get('lastTestId') is not None, "lastTestId must be recorded"
     assert updated_t1.get('executionCount') == 1, "executionCount must increment"

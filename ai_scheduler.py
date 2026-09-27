@@ -1,4 +1,5 @@
 import os
+import copy
 import json
 import time
 import uuid
@@ -8,6 +9,7 @@ from typing import Dict, Any, List, Optional, Tuple
 
 import ai_job_manager
 import job_repository
+import exam_levels
 
 IS_SERVERLESS = bool(os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME'))
 
@@ -259,6 +261,24 @@ def save_scheduled_task(task_input: Dict[str, Any], data: Dict[str, Any]) -> Dic
         if not existing_test:
             raise ValueError("Select an existing MCQ test to host.")
 
+    # Exam level (canonical id). A hosted existing test brings its own level; a generated test takes
+    # the chosen level, which must agree with the chosen subject so content never crosses levels.
+    subjects = data.get('subjects') or []
+    chosen_level = (exam_levels.canonical_id(task_input.get('examLevelId'))
+                    or exam_levels.canonical_id(task_input.get('examLevel')))
+    if existing_test is not None:
+        level_id = exam_levels.record_level_id(existing_test, subjects) or chosen_level
+    else:
+        # same default subject as below ('sub-1'), so the level always matches the stored subject
+        subject_level = exam_levels.record_level_id({'subjectId': task_input.get('subjectId', 'sub-1')}, subjects)
+        if chosen_level and subject_level and chosen_level != subject_level:
+            raise ValueError(f"The selected subject belongs to {exam_levels.display_name(subject_level)}, "
+                             f"not {exam_levels.display_name(chosen_level)}.")
+        level_id = chosen_level or subject_level
+    if not level_id and existing_test is None:
+        raise ValueError("Select the exam level (CA Foundation, CA Intermediate or CA Final) for this schedule.")
+    # (a hosted legacy test without any level keeps an unknown level rather than a guessed one)
+
     is_live_event = bool(task_input.get('isLiveEvent', True))
     live_duration_minutes = max(5, min(MAX_LIVE_WINDOW_MINUTES, int(task_input.get('liveDurationMinutes', 15))))
 
@@ -346,8 +366,8 @@ def save_scheduled_task(task_input: Dict[str, Any], data: Dict[str, Any]) -> Dic
     existing['expiresAt'] = expires_at
 
     existing['titleTemplate'] = str(task_input.get('titleTemplate') or '[Subject] - [Chapter] Practice Test').strip()
-    existing['examLevel'] = task_input.get('examLevel', 'CA Foundation')
-    existing['examLevelId'] = task_input.get('examLevelId', 'foundation')
+    existing['examLevelId'] = level_id
+    existing['examLevel'] = exam_levels.display_name(level_id)
     existing['subject'] = task_input.get('subject', 'Accounting')
     existing['subjectId'] = task_input.get('subjectId', 'sub-1')
     existing['chapter'] = task_input.get('chapter', '')
@@ -379,6 +399,68 @@ def save_scheduled_task(task_input: Dict[str, Any], data: Dict[str, Any]) -> Dic
         existing['nextRunAt'] = None
 
     return existing
+
+# Configuration copied by "Duplicate". Everything else (id, timestamps, status, nextRunAt, run and
+# failure history, job/test links, claim state) belongs to the original schedule only.
+DUPLICATE_CONFIG_FIELDS = (
+    'scheduleType', 'dailyTime', 'weekdays', 'scheduledDate', 'scheduledTime', 'isLiveEvent',
+    'liveDurationMinutes', 'titleTemplate', 'examLevel', 'examLevelId', 'subject', 'subjectId', 'chapter',
+    'chapterId', 'topic', 'difficulty', 'questionCategory', 'questionSpeed', 'questionCount',
+    'durationMinutes', 'marksPerCorrect', 'negativeMarksPerWrong', 'platformXp', 'maxAttempts',
+    'allowedPlans', 'autoPublish', 'testSource', 'existingTestId',
+)
+DUPLICATE_EXTRA_FIELDS = ('sourceDocId',)   # not handled by save_scheduled_task
+
+
+def _duplicate_name(name: str, data: Dict[str, Any]) -> str:
+    base = str(name or 'Scheduled MCQ Practice').strip()
+    taken = {str(t.get('name') or '').strip() for t in get_scheduled_tasks(data)}
+    candidate = f"{base} (Copy)"
+    n = 2
+    while candidate in taken:
+        candidate = f"{base} (Copy {n})"
+        n += 1
+    return candidate
+
+
+def duplicate_scheduled_task(task_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new, independent schedule from an existing one's configuration. The copy starts
+    PAUSED (it never runs next to the original by accident) with a fresh id and no history; the
+    admin reviews it and resumes it. A one-time copy whose date has passed moves to tomorrow."""
+    source = get_scheduled_task_by_id(task_id, data)
+    if not source:
+        raise LookupError(f"Task '{task_id}' not found.")
+    task_input = {k: copy.deepcopy(source[k]) for k in DUPLICATE_CONFIG_FIELDS if k in source}
+    task_input['name'] = _duplicate_name(source.get('name'), data)
+    task_input['enabled'] = False
+    if task_input.get('scheduleType') == 'one_time':
+        now_ist = get_now_utc().astimezone(IST_TZ)
+        try:
+            hh, mm = _parse_hhmm(task_input.get('scheduledTime') or '09:00')
+            dp = [int(x) for x in str(task_input.get('scheduledDate')).split('-')]
+            when = datetime(dp[0], dp[1], dp[2], hh, mm, tzinfo=IST_TZ)
+        except Exception:
+            when = None
+        if when is None or when <= now_ist + timedelta(minutes=5):
+            task_input['scheduledDate'] = (now_ist + timedelta(days=1)).strftime('%Y-%m-%d')
+            task_input['scheduledTime'] = task_input.get('scheduledTime') or '09:00'
+        task_input.pop('scheduledDateTime', None)
+    new_task = save_scheduled_task(task_input, data)   # new id, fresh status / nextRunAt
+    for k in DUPLICATE_EXTRA_FIELDS:
+        if k in source:
+            new_task[k] = copy.deepcopy(source[k])
+    new_task['duplicatedFrom'] = task_id
+    return new_task
+
+
+def filter_tasks_by_exam_level(tasks: List[Dict[str, Any]], level: Optional[str],
+                               subjects: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """Admin filter on the stored exam level (canonical id); 'all' / empty = no filter."""
+    wanted = exam_levels.canonical_id(level)
+    if not level or str(level).lower() == 'all' or not wanted:
+        return list(tasks)
+    return [t for t in tasks if exam_levels.record_level_id(t, subjects) == wanted]
+
 
 def delete_scheduled_task(
     task_id: str,

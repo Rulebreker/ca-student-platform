@@ -416,12 +416,12 @@ class App {
             </div>
 
             <div>
-              <label class="block font-bold text-slate-700 mb-1">CA Level (Select from list) *</label>
+              <label class="block font-bold text-slate-700 mb-1">Exam Level * <span class="font-semibold text-rose-600">(required)</span></label>
               <select id="reg-level" required class="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 bg-white">
-                <option value="" disabled selected>-- Select your CA Course Level --</option>
-                <option value="CA FOUNDATION">CA FOUNDATION</option>
-                <option value="CA INTERMEDIATE">CA INTERMEDIATE</option>
-                <option value="CA FINAL">CA FINAL</option>
+                <option value="" disabled selected>-- Select your Exam Level --</option>
+                <option value="foundation">CA Foundation</option>
+                <option value="intermediate">CA Intermediate</option>
+                <option value="final">CA Final</option>
               </select>
             </div>
 
@@ -714,7 +714,10 @@ class App {
     if (roleBadge) roleBadge.textContent = (user.role || 'STUDENT').toUpperCase();
 
     const levelBadge = document.getElementById('profile-page-level-badge');
-    if (levelBadge) levelBadge.textContent = (user.caLevel || 'CA INTERMEDIATE').toUpperCase();
+    if (levelBadge) {
+      const lvlName = window.ExamLevels.displayName(window.ExamLevels.userLevelId(user));
+      levelBadge.textContent = (lvlName || user.caLevel || 'Select exam level').toUpperCase();
+    }
 
     // 2. Academic Standing & Authoritative XP
     const rankNumEl = document.getElementById('profile-page-rank-number');
@@ -758,10 +761,9 @@ class App {
 
     const editLevel = document.getElementById('profile-page-edit-level');
     if (editLevel) {
-      const userLevel = (user.caLevel || 'CA INTERMEDIATE').toUpperCase();
-      if (userLevel.includes('FOUNDATION')) editLevel.value = 'CA FOUNDATION';
-      else if (userLevel.includes('FINAL')) editLevel.value = 'CA FINAL';
-      else editLevel.value = 'CA INTERMEDIATE';
+      // CA Foundation / CA Intermediate / CA Final; an unreadable level shows the placeholder
+      const lvl = window.ExamLevels.userLevelId(user);
+      editLevel.value = window.ExamLevels.isStudentSelectable(lvl) ? lvl : '';
     }
 
     // Populate States & Districts
@@ -905,53 +907,7 @@ class App {
 
   handleProfileUpdate(e) {
     e.preventDefault();
-    const user = window.auth.getCurrentUser();
-    if (!user) return;
-
-    const name = document.getElementById('profile-edit-name').value.trim();
-    const caLevel = document.getElementById('profile-edit-level').value;
-    const state = document.getElementById('profile-edit-state').value;
-    const district = document.getElementById('profile-edit-district').value;
-
-    if (!name) {
-      this.showToast('Full name is required.', 'error');
-      return;
-    }
-
-    user.name = name;
-    user.caLevel = caLevel;
-    user.state = state;
-    user.district = district;
-    user.city = district;
-
-    window.store.updateUser(user);
-    window.auth.currentUser = user;
-    window.auth.onAuthChange();
-
-    // Sync profile updates to backend server
-    if (typeof fetch !== 'undefined') {
-      const token = (user.token || '');
-      fetch('/api/user/profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({
-          name: user.name,
-          phone: user.phone,
-          caLevel: user.caLevel,
-          state: user.state,
-          district: user.district,
-          city: user.city
-        })
-      }).catch(err => console.warn('Backend profile sync error:', err));
-    }
-
-    // Update display name in profile modal header and dashboard
-    const pName = document.getElementById('profile-display-name');
-    if (pName) pName.textContent = name;
-    const dName = document.getElementById('dashboard-welcome-name');
-    if (dName) dName.textContent = name;
-
-    this.showToast('Profile information updated successfully!', 'success');
+    return this.saveProfileDetails('profile-edit', e.target);
   }
 
   handleProfileAvatarChange(e) {
@@ -1091,48 +1047,93 @@ class App {
 
   handleProfilePageUpdate(e) {
     e.preventDefault();
+    return this.saveProfileDetails('profile-page-edit', e.target);
+  }
+
+  /**
+   * Save name / exam level / location through /api/user/profile and apply the server's result.
+   * An exam-level change re-scopes MCQ tests, test papers and the leaderboard at once; subscription,
+   * XP and history are untouched (the server changes only the level fields).
+   */
+  async saveProfileDetails(prefix, form) {
     const user = window.auth.getCurrentUser();
     if (!user) return;
-
-    const name = document.getElementById('profile-page-edit-name').value.trim();
-    const caLevel = document.getElementById('profile-page-edit-level').value;
-    const state = document.getElementById('profile-page-edit-state').value;
-    const district = document.getElementById('profile-page-edit-district').value;
+    const name = (document.getElementById(`${prefix}-name`)?.value || '').trim();
+    const levelEl = document.getElementById(`${prefix}-level`);
+    const levelId = window.ExamLevels.canonicalId(levelEl ? levelEl.value : '');
+    const state = document.getElementById(`${prefix}-state`)?.value || user.state;
+    const district = document.getElementById(`${prefix}-district`)?.value || user.district;
 
     if (!name) {
       this.showToast('Full name is required.', 'error');
       return;
     }
-
-    user.name = name;
-    user.caLevel = caLevel;
-    user.state = state;
-    user.district = district;
-    user.city = district;
-
-    window.store.updateUser(user);
-    window.auth.currentUser = user;
-    window.auth.onAuthChange();
-
-    // Sync profile updates to backend server
-    if (typeof fetch !== 'undefined') {
-      const token = (user.token || '');
-      fetch('/api/user/profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({
-          name: user.name,
-          phone: user.phone,
-          caLevel: user.caLevel,
-          state: user.state,
-          district: user.district,
-          city: user.city
-        })
-      }).catch(err => console.warn('Backend profile sync error:', err));
+    const isStudent = user.role === 'student';
+    if (isStudent && !window.ExamLevels.isStudentSelectable(levelId)) {
+      this.showToast('Please select your Exam Level: CA Foundation, CA Intermediate or CA Final.', 'error');
+      if (levelEl) levelEl.focus();
+      return;
     }
 
-    this.renderProfilePage();
-    this.showToast('Profile information updated successfully!', 'success');
+    const submitBtn = form ? form.querySelector('button[type="submit"]') : null;
+    const originalHtml = submitBtn ? submitBtn.innerHTML : '';
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving...'; }
+    const previousScope = window.ExamLevels.contentScope(user);
+    try {
+      const payload = { name, phone: user.phone, state, district, city: district };
+      if (isStudent || levelId) payload.examLevelId = levelId;
+      const resp = await fetch('/api/user/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${user.token || ''}` },
+        body: JSON.stringify(payload)
+      });
+      const res = await resp.json().catch(() => ({}));
+      if (!resp.ok || !res.success) {
+        this.showToast(res.error || 'Profile could not be saved. Please try again.', 'error');
+        return;
+      }
+      const updated = { ...user, ...res.user, token: user.token };
+      window.store.updateUser(updated);
+      window.store.setCurrentUser(updated);
+      window.auth.currentUser = updated;
+      window.auth.onAuthChange();
+
+      const pName = document.getElementById('profile-display-name');
+      if (pName) pName.textContent = name;
+      const dName = document.getElementById('dashboard-welcome-name');
+      if (dName) dName.textContent = name;
+
+      const newScope = window.ExamLevels.contentScope(updated);
+      if (newScope !== previousScope) {
+        this.applyExamLevelChange();
+        this.showToast(`Exam level updated to ${window.ExamLevels.displayName(newScope)}. Your tests, papers and leaderboard now show ${window.ExamLevels.displayName(newScope)} content.`, 'success');
+      } else {
+        this.showToast('Profile information updated successfully!', 'success');
+      }
+      if (this.currentView === 'profile') this.renderProfilePage();
+    } catch (err) {
+      this.showToast('Network error: profile could not be saved.', 'error');
+    } finally {
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = originalHtml; if (window.lucide) window.lucide.createIcons(); }
+    }
+  }
+
+  /** Drop the previous level's cached content and re-fetch everything for the new scope. */
+  applyExamLevelChange() {
+    const scope = window.ExamLevels.currentScope();
+    if (window.store) {
+      // stale content of the previous level must not linger in the local cache
+      window.store.saveTests((window.store.getTests() || []).filter(t => window.ExamLevels.inScope(t, scope)));
+      window.store.saveAssignments((window.store.getAssignments() || []).filter(a => window.ExamLevels.inScope(a, scope)));
+    }
+    if (window.testEngine) { window.testEngine.selectedLevel = 'all'; window.testEngine.selectedSubject = 'all'; window.testEngine.currentPage = 1; }
+    if (window.assignmentPortal) { window.assignmentPortal.selectedLevel = 'all'; window.assignmentPortal.selectedSubject = 'all'; window.assignmentPortal.currentPage = 1; }
+    if (window.leaderboardManager) {
+      window.leaderboardManager.selectedExamLevelFilter = 'all';
+      window.leaderboardManager.selectedSubjectFilter = 'all';
+      if (typeof window.leaderboardManager.calculateAllStandings === 'function') window.leaderboardManager.calculateAllStandings();
+    }
+    if (window.serverSync && typeof window.serverSync.refreshNow === 'function') window.serverSync.refreshNow();
   }
 
   handleProfilePagePasswordChange(e) {

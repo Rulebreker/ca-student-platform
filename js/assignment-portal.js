@@ -544,18 +544,11 @@ class AssignmentPortal {
       return (tierLevels[curUserTier] ?? 0) >= (tierLevels[reqTier] ?? 0);
     });
 
-    // Filter assignments by active exam level
-    let levelAssignments = visibleAssignments;
-    if (this.selectedLevel && this.selectedLevel !== 'all') {
-      const targetLvl = this.selectedLevel.toUpperCase();
-      levelAssignments = visibleAssignments.filter(a => {
-        const aLvl = (a.examLevel || 'CA Foundation').toUpperCase();
-        if (targetLvl.includes('FOUNDATION')) return aLvl.includes('FOUNDATION');
-        if (targetLvl.includes('INTER')) return aLvl.includes('INTER');
-        if (targetLvl.includes('FINAL')) return aLvl.includes('FINAL');
-        return aLvl === targetLvl;
-      });
-    }
+    // Filter assignments by the student's exam level (also enforced by /api/papers) and the level filter
+    const levelScope = window.ExamLevels.currentScope();
+    if (levelScope) this.selectedLevel = window.ExamLevels.displayName(levelScope);
+    const levelAssignments = visibleAssignments.filter(a => window.ExamLevels.inScope(a, levelScope)
+      && window.ExamLevels.matchesFilter(a, this.selectedLevel));
 
     // Get ONLY valid descriptive subjects for the selected exam level
     // Test Papers section is for descriptive papers {PDF} only - exclude Quantitative Aptitude and Business Economics
@@ -572,7 +565,15 @@ class AssignmentPortal {
     const bmCount = user && window.store && window.store.getBookmarks ? window.store.getBookmarks(user.id).filter(b => b.itemType === 'paper' || levelAssignments.some(a => a.id === b.itemId)).length : 0;
     const examLevels = ['all', 'CA Foundation', 'CA Intermediate', 'CA Final'];
 
-    if (levelContainer) {
+    if (levelContainer && levelScope) {
+      levelContainer.innerHTML = `
+        <span class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-slate-900 text-white shadow-xs whitespace-nowrap inline-flex items-center gap-1.5">
+          <i data-lucide="graduation-cap" class="w-3.5 h-3.5"></i> ${window.ExamLevels.displayName(levelScope)}
+        </span>
+        <button type="button" onclick="window.app.navigate('profile')" class="px-2.5 py-1.5 text-[11px] font-semibold text-blue-700 hover:underline whitespace-nowrap cursor-pointer">
+          Change exam level in Profile
+        </button>`;
+    } else if (levelContainer) {
       levelContainer.innerHTML = examLevels.map(lvl => {
         const isActive = this.selectedLevel === lvl;
         const label = lvl === 'all' ? 'All Levels' : lvl;
@@ -776,17 +777,10 @@ class AssignmentPortal {
       return (tierLevels[curUserTier] ?? 0) >= (tierLevels[reqTier] ?? 0);
     });
 
-    // 0. Exam Level filter
-    if (this.selectedLevel && this.selectedLevel !== 'all') {
-      const targetLvl = this.selectedLevel.toUpperCase();
-      list = list.filter(a => {
-        const aLvl = (a.examLevel || 'CA Foundation').toUpperCase();
-        if (targetLvl.includes('FOUNDATION')) return aLvl.includes('FOUNDATION');
-        if (targetLvl.includes('INTER')) return aLvl.includes('INTER');
-        if (targetLvl.includes('FINAL')) return aLvl.includes('FINAL');
-        return aLvl === targetLvl;
-      });
-    }
+    // 0. Exam Level: the student's own level, then the level filter
+    const levelScope = window.ExamLevels.currentScope();
+    if (levelScope) this.selectedLevel = window.ExamLevels.displayName(levelScope);
+    list = list.filter(a => window.ExamLevels.inScope(a, levelScope) && window.ExamLevels.matchesFilter(a, this.selectedLevel));
 
     // 0.5 Bookmarked only filter
     if (this.filterBookmarkedOnly) {

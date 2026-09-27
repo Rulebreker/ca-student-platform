@@ -379,145 +379,6 @@ class LeaderboardManager {
   }
 
   // ==========================================
-  // 2. CONTEXT-AWARE XP CALCULATION ENGINE
-  // ==========================================
-  calculateStudentXp(student, allAttempts, allSubmissions, xpSettings, context = {}) {
-    if (!student) return { totalXp: 0, mcqXp: 0, descriptiveXp: 0, referralXp: 0, baseXp: 0, correctQuestions: 0 };
-
-    const subjectFilter = (context.subject || 'all').toLowerCase();
-    const examLevelFilter = (context.examLevel || 'all').toLowerCase();
-
-    const isSubjectFiltered = subjectFilter !== 'all';
-    const isLevelFiltered = examLevelFilter !== 'all';
-
-    const allTests = window.store ? window.store.getTests() : [];
-    const allAssignments = window.store ? window.store.getAssignments() : [];
-    const allSubjects = window.store ? window.store.getSubjects() : [];
-
-    const testsMap = {};
-    allTests.forEach(t => { testsMap[t.id] = t; });
-
-    const assignmentsMap = {};
-    allAssignments.forEach(a => { assignmentsMap[a.id] = a; });
-
-    const subjectsMap = {};
-    allSubjects.forEach(s => { 
-      subjectsMap[s.id] = s;
-      subjectsMap[s.name.toLowerCase()] = s;
-    });
-
-    const studentAttempts = allAttempts.filter(a => a.userId === student.id);
-    const studentSubmissions = allSubmissions.filter(s => s.studentId === student.id && s.status === 'Evaluated');
-
-    // A) MCQ XP
-    const testBestMap = {};
-    let totalCorrectCount = 0;
-
-    studentAttempts.forEach(att => {
-      const test = testsMap[att.testId];
-      if (!test) return;
-
-      const subObj = subjectsMap[test.subjectId];
-      const testSubjectName = (subObj ? subObj.name : (test.subject || '')).toLowerCase();
-      const testLevel = (test.examLevel || (subObj && subObj.level ? subObj.level : (test.level || 'CA Foundation'))).toLowerCase();
-
-      // Check subject match
-      if (isSubjectFiltered && testSubjectName !== subjectFilter && test.subjectId !== subjectFilter) {
-        return;
-      }
-
-      // Check exam level match
-      if (isLevelFiltered && !testLevel.includes(examLevelFilter.replace('ca ', ''))) {
-        return;
-      }
-
-      const earnedPoints = (att.earnedPoints !== undefined && att.earnedPoints !== null)
-        ? Number(att.earnedPoints)
-        : Number(att.grossMarks || att.finalScore || 0);
-      const correct = Number(att.correctCount || 0);
-
-      if (!testBestMap[att.testId] || earnedPoints > testBestMap[att.testId].points) {
-        testBestMap[att.testId] = { points: earnedPoints, correct: correct };
-      }
-    });
-
-    let mcqXp = 0;
-    Object.values(testBestMap).forEach(item => {
-      mcqXp += Math.round(item.points);
-      totalCorrectCount += item.correct;
-    });
-
-    // B) Descriptive XP
-    let descriptiveXp = 0;
-    studentSubmissions.forEach(sub => {
-      const asg = assignmentsMap[sub.assignmentId];
-      if (!asg) return;
-
-      const subObj = subjectsMap[asg.subjectId] || subjectsMap[(asg.subject || '').toLowerCase()];
-      const asgSubjectName = (subObj ? subObj.name : (asg.subject || '')).toLowerCase();
-      const asgLevel = (asg.examLevel || (subObj && subObj.level ? subObj.level : (asg.level || 'CA Foundation'))).toLowerCase();
-
-      if (isSubjectFiltered && asgSubjectName !== subjectFilter && asg.subjectId !== subjectFilter) {
-        return;
-      }
-
-      if (isLevelFiltered && !asgLevel.includes(examLevelFilter.replace('ca ', ''))) {
-        return;
-      }
-
-      const earnedPoints = (sub.pointsAwarded !== undefined && sub.pointsAwarded !== null)
-        ? Number(sub.pointsAwarded)
-        : Number(sub.marksObtained || 0);
-      descriptiveXp += Math.round(earnedPoints);
-    });
-
-    // C) Referral XP: strictly for overall view; never applied to subject-only leaderboard
-    let referralXp = 0;
-    if (!isSubjectFiltered && !isLevelFiltered) {
-      const referralXpRate = Number(xpSettings.referralXp || 500);
-      referralXp = (Number(student.referralCount || 0)) * referralXpRate;
-    }
-
-    // D) Base XP: context-aware
-    let baseXp = 0;
-    if (isSubjectFiltered) {
-      const subjKey = Object.keys(student.subjectXp || {}).find(k => k.toLowerCase() === subjectFilter);
-      if (subjKey && student.subjectXp[subjKey] !== undefined) {
-        baseXp = Number(student.subjectXp[subjKey]);
-      } else {
-        baseXp = Math.round(Number(student.baseXp || 0) * 0.25);
-      }
-    } else if (isLevelFiltered) {
-      const studentLevel = (student.caLevel || 'CA Foundation').toLowerCase();
-      if (studentLevel.includes(examLevelFilter.replace('ca ', ''))) {
-        baseXp = Number(student.baseXp || 0);
-      } else {
-        baseXp = 0;
-      }
-    } else {
-      baseXp = Number(student.baseXp || 0);
-    }
-
-    let totalXp = mcqXp + descriptiveXp + referralXp + baseXp;
-
-    // Hard Fix: If overall view (not subject or level filtered) and student.totalXp is explicitly defined
-    // (e.g. after an admin point reset, point deduction, or bulk-set),
-    // student.totalXp is authoritative so points never resurrect from historical attempts.
-    if (!isSubjectFiltered && !isLevelFiltered && student.totalXp !== undefined && student.totalXp !== null) {
-      totalXp = Number(student.totalXp);
-    }
-
-    return {
-      totalXp: Math.max(0, totalXp),
-      mcqXp,
-      descriptiveXp,
-      referralXp,
-      baseXp,
-      correctQuestions: totalCorrectCount
-    };
-  }
-
-  // ==========================================
   // 3. TIER RESOLVER & PROGRESSION
   // ==========================================
   resolveTier(totalXp, rankTiers) {
@@ -569,66 +430,88 @@ class LeaderboardManager {
   // ==========================================
   // 4. STANDINGS CALCULATION (CONTEXTUAL)
   // ==========================================
-  calculateAllStandings() {
-    const students = window.store ? window.store.getStudents().filter(s => s.isActive !== false) : [];
-    const allAttempts = window.store ? window.store.getAttempts() : [];
-    const allSubmissions = window.store ? window.store.getSubmissions() : [];
-    const rankTiers = window.store ? window.store.getRankTiers() : [];
-    const xpSettings = window.store ? window.store.getXpSettings() : { referralXp: 500 };
+  /** A student's leaderboard is their own exam level (changed in Profile); staff/visitors choose freely. */
+  applyLevelScope() {
+    const scope = window.ExamLevels ? window.ExamLevels.currentScope() : null;
+    if (scope) this.selectedExamLevelFilter = window.ExamLevels.displayName(scope);
+    return scope;
+  }
 
-    const context = {
-      subject: this.selectedSubjectFilter,
-      examLevel: this.selectedExamLevelFilter
-    };
+  /** Identity of the leaderboard currently needed (user, their level, subject, staff level choice). */
+  _leaderboardKey() {
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    const staffLevel = window.ExamLevels.contentScope(user) ? '' : (window.ExamLevels.canonicalId(this.selectedExamLevelFilter) || 'all');
+    return [user ? user.id : '', window.ExamLevels.userLevelId(user) || '', this.selectedSubjectFilter || 'all', staffLevel].join('|');
+  }
 
-    // 1. Calculate context XP for all active students
-    const computed = students.map(st => {
-      const xpData = this.calculateStudentXp(st, allAttempts, allSubmissions, xpSettings, context);
-      const tierData = this.resolveTier(xpData.totalXp, rankTiers);
-
-      let subTier = 'free';
-      if (st.subscription && (st.subscription.status === 'active' || st.subscription.status === 'manually_granted')) {
-        const exp = st.subscription.expiresAt ? new Date(st.subscription.expiresAt) : null;
-        if (!exp || exp > new Date()) {
-          subTier = (st.subscription.planTier || st.subscription.tier || 'core').toLowerCase();
-        }
-      } else if (window.store && typeof window.store.getUserSubscription === 'function') {
-        const uSub = window.store.getUserSubscription(st.id);
-        if (uSub && (uSub.status === 'active' || uSub.status === 'manually_granted')) {
-          const exp = uSub.expiresAt ? new Date(uSub.expiresAt) : null;
-          if (!exp || exp > new Date()) {
-            subTier = (uSub.planTier || uSub.tier || 'core').toLowerCase();
-          }
-        }
+  /** Ranked rows from GET /api/leaderboard. The server reads a student's exam level from their account;
+   *  only staff send a level. Re-renders the views that show ranks when the rows actually changed. */
+  async fetchStandings() {
+    const user = window.auth ? window.auth.getCurrentUser() : null;
+    if (!user) return;
+    const key = this._leaderboardKey();
+    if (this._fetchingKey === key) return;
+    this._fetchingKey = key;
+    let changed = false;
+    const previousError = this.serverError || null;
+    try {
+      const params = new URLSearchParams({ subject: this.selectedSubjectFilter || 'all' });
+      if (!window.ExamLevels.contentScope(user)) {
+        params.set('examLevel', window.ExamLevels.canonicalId(this.selectedExamLevelFilter) || 'all');
       }
+      const resp = await fetch(`/api/leaderboard?${params.toString()}`, { headers: { 'Authorization': `Bearer ${user.token || ''}` } });
+      const res = await resp.json().catch(() => ({}));
+      const rows = resp.ok && res.success && Array.isArray(res.rows) ? res.rows : [];
+      this.serverError = resp.ok && res.success ? null : (res.error || 'Leaderboard is unavailable right now.');
+      const signature = JSON.stringify(rows);
+      changed = signature !== this._rowsSignature || key !== this._fetchedKey;
+      this.serverRows = rows;
+      this._rowsSignature = signature;
+      this._fetchedKey = key;
+      this._fetchedAt = Date.now();
+    } catch (e) {
+      this.serverError = 'Leaderboard is unavailable (network error).';
+      this.serverRows = [];
+      this._rowsSignature = '[]';
+      this._fetchedKey = key;
+      this._fetchedAt = Date.now();   // retry after the normal refresh interval, not on every render
+    } finally {
+      this._fetchingKey = null;
+    }
+    if (!changed && (this.serverError || null) === previousError) return;
+    this.calculateAllStandings({ noRefresh: true });
+    const view = window.app ? window.app.currentView : '';
+    if (view === 'leaderboard') this.render();
+    else if (view === 'profile' && typeof window.app.renderProfilePage === 'function') window.app.renderProfilePage();
+    else if (view === 'dashboard' && window.studentDashboard && typeof window.studentDashboard.render === 'function') window.studentDashboard.render();
+  }
 
+  calculateAllStandings(opts = {}) {
+    this.applyLevelScope();
+    const key = this._leaderboardKey();
+    if (!opts.noRefresh && (this._fetchedKey !== key || !this._fetchedAt || Date.now() - this._fetchedAt > 5000)) {
+      this.fetchStandings();   // background refresh; views re-render when the rows change
+    }
+    const rows = this._fetchedKey === key ? (this.serverRows || []) : [];
+    const rankTiers = window.store ? window.store.getRankTiers() : [];
+
+    const computed = rows.map(r => {
+      const tierData = this.resolveTier(r.totalXp, rankTiers);
       return {
-        id: st.id,
-        name: st.name,
-        email: st.email,
-        caLevel: st.caLevel || 'CA Student',
-        avatar: st.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120',
-        state: st.state || 'Uttar Pradesh',
-        district: st.district || st.city || 'Meerut',
-        city: st.city || 'Meerut',
-        totalXp: xpData.totalXp,
-        mcqXp: xpData.mcqXp,
-        descriptiveXp: xpData.descriptiveXp,
-        referralXp: xpData.referralXp,
-        correctQuestions: xpData.correctQuestions,
+        ...r,
+        avatar: r.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120',
         tier: tierData.currentTier,
         nextTier: tierData.nextTier,
         xpToNext: tierData.xpToNext,
         progressPercent: tierData.progressPercent,
         isMaxRank: tierData.isMaxRank,
-        previousRank: st.previousRank || null,
-        achievementBadges: st.achievementBadges || [],
-        subscriptionTier: subTier
+        previousRank: r.previousRank || null,
+        achievementBadges: r.achievementBadges || []
       };
     });
 
-    // 2. Sort by Total Context XP descending
-    computed.sort((a, b) => b.totalXp - a.totalXp || b.correctQuestions - a.correctQuestions || a.name.localeCompare(b.name));
+    // Same order as the server: Total XP, then correct answers, then name
+    computed.sort((a, b) => b.totalXp - a.totalXp || b.correctQuestions - a.correctQuestions || String(a.name).localeCompare(String(b.name)));
 
     this.cachedStandings = computed;
     return computed;
@@ -728,7 +611,9 @@ class LeaderboardManager {
 
         <!-- DYNAMIC RESULTS (PODIUM + TABLE) -->
         <div id="leaderboard-results-area" class="space-y-8">
-          ${this.renderResultsArea(filteredStandings, currentUser)}
+          ${this.serverError && standings.length === 0
+            ? `<div class="p-6 text-center text-sm font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-2xl">${this.serverError}</div>`
+            : this.renderResultsArea(filteredStandings, currentUser)}
         </div>
 
         <!-- STICKY "YOUR POSITION" CARD -->
@@ -753,6 +638,7 @@ class LeaderboardManager {
   }
 
   filterStandings(standings) {
+    this.applyLevelScope();
     return (standings || []).filter(st => {
       // 1. Rank filter
       if (this.selectedRankFilter !== 'all') {
@@ -761,11 +647,9 @@ class LeaderboardManager {
         if (!familyMatch && !exactMatch) return false;
       }
 
-      // 2. Exam Level filter
+      // 2. Exam Level filter (canonical level of the student)
       if (this.selectedExamLevelFilter !== 'all') {
-        const normFilter = this.selectedExamLevelFilter.toLowerCase().replace('ca ', '').trim();
-        const normStudentLevel = (st.caLevel || '').toLowerCase();
-        if (!normStudentLevel.includes(normFilter)) return false;
+        if ((st.examLevelId || window.ExamLevels.userLevelId(st)) !== window.ExamLevels.canonicalId(this.selectedExamLevelFilter)) return false;
       }
 
       // 3. State filter
@@ -1217,7 +1101,14 @@ class LeaderboardManager {
           <!-- 2. Exam Level Filter -->
           <div>
             <label class="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">Exam Level</label>
-            <select 
+            ${this.applyLevelScope() ? `
+            <select id="lb-examlevel-filter" disabled title="Your exam level - change it in Profile"
+              class="w-full px-3 py-2 text-xs font-bold border border-slate-200 rounded-xl bg-slate-100 text-slate-800 cursor-not-allowed">
+              <option selected>${this.selectedExamLevelFilter}</option>
+            </select>
+            <button type="button" onclick="window.app.navigate('profile')" class="mt-1 text-[10px] font-semibold text-blue-700 hover:underline cursor-pointer">Change in Profile</button>
+            ` : `
+            <select
               id="lb-examlevel-filter"
               onchange="window.leaderboardManager.handleExamLevelFilterChange(this.value)"
               class="w-full px-3 py-2 text-xs font-bold border border-slate-200 rounded-xl bg-slate-50 hover:bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer transition-colors"
@@ -1226,7 +1117,7 @@ class LeaderboardManager {
               ${examLevels.map(lvl => `
                 <option value="${lvl}" ${this.selectedExamLevelFilter.toLowerCase() === lvl.toLowerCase() ? 'selected' : ''}>${lvl}</option>
               `).join('')}
-            </select>
+            </select>`}
           </div>
 
           <!-- 3. Subject Filter -->
@@ -1887,6 +1778,7 @@ class LeaderboardManager {
   }
 
   handleExamLevelFilterChange(value) {
+    if (this.applyLevelScope()) return;   // a student's board stays on their own level
     this.selectedExamLevelFilter = value;
     this.currentPage = 1;
     this.render();
@@ -1978,6 +1870,7 @@ class LeaderboardManager {
   resetFilters() {
     this.selectedRankFilter = 'all';
     this.selectedExamLevelFilter = 'all';
+    this.applyLevelScope();
     this.selectedSubjectFilter = 'all';
     this.selectedStateFilter = 'all';
     this.selectedDistrictFilter = 'all';

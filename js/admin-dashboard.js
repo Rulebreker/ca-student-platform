@@ -8664,7 +8664,8 @@ class AdminDashboard {
     let tasks = [];
     let serverTimeIst = '';
     try {
-      const resp = await fetch(`/api/admin/ai/scheduler/tasks?_t=${Date.now()}`, {
+      const levelParam = encodeURIComponent(this.schedLevelFilter || 'all');
+      const resp = await fetch(`/api/admin/ai/scheduler/tasks?examLevel=${levelParam}&_t=${Date.now()}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await resp.json();
@@ -8757,13 +8758,28 @@ class AdminDashboard {
 
         <!-- Task List or Empty State -->
         <div class="space-y-4">
-          <div class="flex items-center justify-between">
+          <div class="flex flex-wrap items-center justify-between gap-2">
             <h4 class="text-xs font-bold uppercase tracking-wider text-slate-600">
               Configured Schedules (${tasks.length})
             </h4>
+            <label class="flex items-center gap-2 text-xs font-bold text-slate-600">
+              Exam Level
+              <select id="ai-sched-level-filter" onchange="window.adminDashboard.setScheduleLevelFilter(this.value)"
+                class="px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-rose-500 focus:outline-none cursor-pointer">
+                <option value="all" ${(this.schedLevelFilter || 'all') === 'all' ? 'selected' : ''}>All</option>
+                <option value="foundation" ${this.schedLevelFilter === 'foundation' ? 'selected' : ''}>CA Foundation</option>
+                <option value="intermediate" ${this.schedLevelFilter === 'intermediate' ? 'selected' : ''}>CA Intermediate</option>
+                <option value="final" ${this.schedLevelFilter === 'final' ? 'selected' : ''}>CA Final</option>
+              </select>
+            </label>
           </div>
 
-          ${tasks.length === 0 ? `
+          ${tasks.length === 0 && (this.schedLevelFilter || 'all') !== 'all' ? `
+            <div class="bg-white border border-dashed border-slate-300 rounded-2xl p-10 text-center text-xs text-slate-500">
+              No scheduled MCQs for <b>${window.ExamLevels.displayName(this.schedLevelFilter)}</b>.
+              <button type="button" onclick="window.adminDashboard.setScheduleLevelFilter('all')" class="ml-1 font-bold text-rose-700 hover:underline cursor-pointer">Show all levels</button>
+            </div>
+          ` : tasks.length === 0 ? `
             <div class="bg-white border border-dashed border-slate-300 rounded-2xl p-12 text-center space-y-4">
               <div class="w-14 h-14 mx-auto rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center">
                 <i data-lucide="calendar-plus" class="w-7 h-7"></i>
@@ -8791,7 +8807,8 @@ class AdminDashboard {
                     <div>
                       <div class="flex items-center gap-2 flex-wrap">
                         <h4 class="text-sm font-bold text-slate-900">${escapeHtml(task.name)}</h4>
-                        <span class="px-2 py-0.5 text-[11px] font-bold rounded bg-rose-50 text-rose-700 border border-rose-100">${escapeHtml(task.examLevel || 'CA Foundation')}</span>
+                        <span class="px-2 py-0.5 text-[11px] font-bold rounded bg-rose-50 text-rose-700 border border-rose-100">${escapeHtml(window.ExamLevels.displayName(window.ExamLevels.recordLevelId(task)) || task.examLevel || 'Exam level not set')}</span>
+                        ${task.duplicatedFrom && !task.enabled ? '<span class="px-2 py-0.5 text-[11px] font-bold rounded bg-slate-100 text-slate-600 border border-slate-200">Copy - paused, review then resume</span>' : ''}
                         <span class="px-2 py-0.5 text-[11px] font-bold rounded ${task.scheduleType === 'one_time' ? 'bg-purple-50 text-purple-700 border border-purple-100' : 'bg-blue-50 text-blue-700 border border-blue-100'}">
                           ${task.scheduleType === 'weekly'
                             ? `🗓️ Every ${(task.weekdays || []).map(d => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][d]).join(', ')} at ${escapeHtml(task.dailyTime || '09:00')} IST`
@@ -8898,8 +8915,8 @@ class AdminDashboard {
                   </div>
 
                   <!-- Action Bar -->
-                  <div class="flex items-center justify-between pt-3 border-t border-slate-100 gap-2">
-                    <div class="flex items-center gap-2">
+                  <div class="flex flex-wrap items-center justify-between pt-3 border-t border-slate-100 gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
                       <!-- Run Now Button -->
                       <button 
                         id="btn-run-task-${escapeHtml(task.id)}"
@@ -8921,7 +8938,18 @@ class AdminDashboard {
                       </button>
                     </div>
 
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <!-- Duplicate Button -->
+                      <button
+                        id="btn-dup-task-${escapeHtml(task.id)}"
+                        onclick="window.adminDashboard.duplicateScheduledTask('${escapeHtml(task.id)}')"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+                        title="Create a new, paused schedule with the same settings"
+                      >
+                        <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                        <span>Duplicate</span>
+                      </button>
+
                       <!-- Edit Button -->
                       <button 
                         onclick="window.adminDashboard.openEditScheduleModal('${escapeHtml(task.id)}')"
@@ -9580,6 +9608,35 @@ class AdminDashboard {
         if (window.lucide) window.lucide.createIcons();
       }
     }
+  }
+
+  setScheduleLevelFilter(level) {
+    this.schedLevelFilter = window.ExamLevels.canonicalId(level) || 'all';
+    this.renderAiAutopilotSubTab(document.getElementById('ai-subtab-container'));
+  }
+
+  async duplicateScheduledTask(taskId) {
+    const btn = document.getElementById(`btn-dup-task-${taskId}`);
+    if (btn) {
+      if (btn.disabled) return;   // one click = one copy
+      btn.disabled = true;
+      btn.innerHTML = '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Duplicating...';
+      if (window.lucide) window.lucide.createIcons();
+    }
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    try {
+      const resp = await fetch('/api/admin/ai/scheduler/tasks/duplicate', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${currentUser ? (currentUser.token || '') : ''}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId })
+      });
+      const res = await resp.json().catch(() => ({}));
+      if (!resp.ok || !res.success) throw new Error(res.error || 'Failed to duplicate task');
+      window.app.showToast(`Created "${res.task.name}" (paused). Review it, then Resume to activate.`, 'success');
+    } catch (err) {
+      window.app.showToast(`Duplicate failed: ${err.message}`, 'error');
+    }
+    await this.renderAiAutopilotSubTab(document.getElementById('ai-subtab-container'));
   }
 
   async deleteScheduledTask(taskId) {

@@ -118,6 +118,24 @@ class TestEngine {
     return true;
   }
 
+  /** Premium = flagged premium, or not open to the free tier. Visual identity only - access is
+   * decided by isTestEligibleForStudent (a premium test stays premium-looking once unlocked). */
+  isPremiumTest(test) {
+    if (!test) return false;
+    return test.isPremium === true || !this.isTestEligibleForStudent(test, 'free');
+  }
+
+  /** Student's exam-level scope (null = unrestricted: visitors, staff, accounts without a readable level). */
+  getLevelScope() {
+    return window.ExamLevels ? window.ExamLevels.currentScope() : null;
+  }
+
+  /** Active level filter: a scoped student is always on their own level. */
+  getActiveLevelFilter() {
+    const scope = this.getLevelScope();
+    return scope ? window.ExamLevels.displayName(scope) : (this.selectedLevel || 'all');
+  }
+
   formatRequiredPlans(allowedPlans, requiredTier = 'core') {
     if (Array.isArray(allowedPlans) && allowedPlans.length > 0) {
       const clean = allowedPlans.map(p => String(p).toLowerCase().trim()).filter(p => p !== 'free');
@@ -151,17 +169,10 @@ class TestEngine {
     const allVisibleTests = allPublishedTests.filter(t => this.isTestVisibleForStudent(t, userTier));
 
     // Scoped tests for the active exam level
-    let levelVisibleTests = allVisibleTests;
-    if (this.selectedLevel && this.selectedLevel !== 'all') {
-      const targetLvl = this.selectedLevel.toUpperCase();
-      levelVisibleTests = allVisibleTests.filter(t => {
-        const tLvl = (t.examLevel || 'CA Foundation').toUpperCase();
-        if (targetLvl.includes('FOUNDATION')) return tLvl.includes('FOUNDATION');
-        if (targetLvl.includes('INTER')) return tLvl.includes('INTER');
-        if (targetLvl.includes('FINAL')) return tLvl.includes('FINAL');
-        return tLvl === targetLvl;
-      });
-    }
+    const levelScope = this.getLevelScope();
+    this.selectedLevel = this.getActiveLevelFilter();
+    let levelVisibleTests = allVisibleTests.filter(t => window.ExamLevels.inScope(t, levelScope)
+      && window.ExamLevels.matchesFilter(t, this.selectedLevel));
 
     // Scoped subjects for the active exam level
     const subjects = (this.selectedLevel && this.selectedLevel !== 'all' && window.store && window.store.getSubjectsByLevel)
@@ -183,7 +194,16 @@ class TestEngine {
       : 0;
     const levels = ['all', 'CA Foundation', 'CA Intermediate', 'CA Final'];
 
-    if (levelContainer) {
+    if (levelContainer && levelScope) {
+      // a student sees only their own exam level; it is changed in Profile
+      levelContainer.innerHTML = `
+        <span class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-slate-900 text-white shadow-xs whitespace-nowrap inline-flex items-center gap-1.5">
+          <i data-lucide="graduation-cap" class="w-3.5 h-3.5"></i> ${window.ExamLevels.displayName(levelScope)}
+        </span>
+        <button type="button" onclick="window.app.navigate('profile')" class="px-2.5 py-1.5 text-[11px] font-semibold text-blue-700 hover:underline whitespace-nowrap cursor-pointer">
+          Change exam level in Profile
+        </button>`;
+    } else if (levelContainer) {
       levelContainer.innerHTML = levels.map(lvl => {
         const isLvlActive = this.selectedLevel === lvl;
         const label = lvl === 'all' ? 'All Levels' : lvl;
@@ -362,17 +382,10 @@ class TestEngine {
     let list = window.store.getTests().filter(t => t.isPublished || t.status === 'Published' || t.status === 'Live');
     const user = window.auth ? window.auth.getCurrentUser() : null;
 
-    // 0. Exam Level filter
-    if (this.selectedLevel && this.selectedLevel !== 'all') {
-      const targetLvl = this.selectedLevel.toUpperCase();
-      list = list.filter(t => {
-        const tLvl = (t.examLevel || 'CA Foundation').toUpperCase();
-        if (targetLvl.includes('FOUNDATION')) return tLvl.includes('FOUNDATION');
-        if (targetLvl.includes('INTER')) return tLvl.includes('INTER');
-        if (targetLvl.includes('FINAL')) return tLvl.includes('FINAL');
-        return tLvl === targetLvl;
-      });
-    }
+    // 0. Exam Level: the student's own level (also enforced by /api/tests), then the level filter
+    const levelScope = this.getLevelScope();
+    const levelFilter = this.getActiveLevelFilter();
+    list = list.filter(t => window.ExamLevels.inScope(t, levelScope) && window.ExamLevels.matchesFilter(t, levelFilter));
 
     // 1. Bookmarked only filter
     if (this.filterBookmarkedOnly) {
@@ -467,6 +480,7 @@ class TestEngine {
     const userTier = this.getUserTier();
     const cardsHtml = pagedTests.map(test => {
       const isEligible = this.isTestEligibleForStudent(test, userTier);
+      const isPremium = this.isPremiumTest(test);
       const subject = window.store.getSubjectById(test.subjectId) || { name: test.subject || 'CA Practice' };
       const testAttempts = user ? userAttempts.filter(a => a.testId === test.id) : [];
       const attemptsUsed = testAttempts.length;
@@ -498,7 +512,7 @@ class TestEngine {
       }
 
       return `
-        <div class="bg-white border ${isCurrentlyLive ? 'border-rose-300 ring-1 ring-rose-200' : isEligible ? 'border-slate-200' : 'border-amber-200/90'} rounded-xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between relative group">
+        <div data-premium="${isPremium ? '1' : '0'}" data-locked="${isEligible ? '0' : '1'}" class="bg-white border ${isCurrentlyLive ? 'border-rose-300 ring-1 ring-rose-200' : isPremium ? 'border-amber-200/90 ring-1 ring-amber-100 shadow-amber-100/60' : 'border-slate-200'} rounded-xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between relative group">
           <div>
             <div class="flex items-center justify-between gap-2 mb-3">
               <div class="flex items-center gap-1.5 flex-wrap">
@@ -506,7 +520,7 @@ class TestEngine {
                   ${subject.name}
                 </span>
                 <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                  ${test.examLevel || 'CA Foundation'}
+                  ${window.ExamLevels.displayName(window.ExamLevels.recordLevelId(test)) || test.examLevel || 'CA Foundation'}
                 </span>
                 ${isCurrentlyLive ? `
                   <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-600 text-white shadow-xs animate-pulse">
@@ -522,6 +536,10 @@ class TestEngine {
                 ${!isEligible ? `
                   <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
                     <i data-lucide="lock" class="w-3 h-3 text-amber-700"></i> Locked
+                  </span>
+                ` : isPremium ? `
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                    <i data-lucide="crown" class="w-3 h-3 text-amber-700"></i> Premium
                   </span>
                 ` : ''}
               </div>
@@ -609,7 +627,9 @@ class TestEngine {
                   onclick="window.testEngine.showInstructionsModal('${test.id}')"
                   class="w-full py-2.5 text-xs font-bold rounded-lg ${
                     canTake 
-                      ? (isCurrentlyLive ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-sm' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm')
+                      ? (isCurrentlyLive ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-sm'
+                        : isPremium ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-sm'
+                        : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm')
                       : 'bg-slate-100 text-slate-400 cursor-not-allowed'
                   } transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                   ${!canTake ? 'disabled' : ''}

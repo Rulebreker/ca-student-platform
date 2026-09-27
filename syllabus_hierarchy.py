@@ -939,7 +939,8 @@ def get_authoritative_chapter_metadata(
     # 1. Direct registry lookup by canonical chapterId
     if clean_ch_id and clean_ch_id in CHAPTER_METADATA_REGISTRY:
         meta = dict(CHAPTER_METADATA_REGISTRY[clean_ch_id])
-        if exam_level:
+        # the chapter's own level is authoritative; a requested level may not relabel it
+        if exam_level and not meta.get('examLevelId'):
             meta['examLevel'] = exam_level
         if subject:
             meta['subject'] = subject
@@ -958,14 +959,17 @@ def get_authoritative_chapter_metadata(
                     continue
                 if (clean_ch_id and ch.get('id') == clean_ch_id) or \
                    (clean_ch_name and ch.get('name', '').strip().lower() == clean_ch_name):
+                    import exam_levels  # local import: exam_levels imports this module
+                    lvl_id = (exam_levels.canonical_id(s.get('levelId')) or exam_levels.canonical_id(s.get('level'))
+                              or exam_levels.canonical_id(exam_level) or 'foundation')
                     return {
                         'chapterId': ch.get('id') or clean_ch_id or f"ch-{int(time.time()*1000)}",
                         'chapterName': ch.get('name') or chapter_name or 'General',
                         'chapterNumber': ch.get('number', 1),
                         'subject': s_name or subject or 'Accounting',
                         'subjectId': s_id,
-                        'examLevel': s.get('level') or exam_level or 'CA Foundation',
-                        'examLevelId': s.get('levelId') or 'foundation',
+                        'examLevel': exam_levels.display_name(lvl_id),
+                        'examLevelId': lvl_id,
                         'chapterDescription': ch.get('description') or f"Syllabus scope and conceptual guidelines for {ch.get('name')}.",
                         'allowedTopics': ch.get('allowedTopics') or [ch.get('name') or 'General Topics'],
                         'allowedConcepts': ch.get('allowedConcepts') or [ch.get('name') or 'Core Principles']

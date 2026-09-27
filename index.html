@@ -939,7 +939,7 @@
               <!-- CA Level Selection -->
               <div>
                 <label class="block font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
-                  <i data-lucide="graduation-cap" class="w-3.5 h-3.5 text-blue-600"></i> CA Exam Level <span class="text-rose-500">*</span>
+                  <i data-lucide="graduation-cap" class="w-3.5 h-3.5 text-blue-600"></i> Exam Level <span class="text-rose-500">* (required)</span>
                 </label>
                 <div class="relative">
                   <select 
@@ -947,10 +947,10 @@
                     required 
                     class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-bold text-slate-800 bg-white"
                   >
-                    <option value="" disabled selected>-- Select your CA Course Level --</option>
-                    <option value="CA FOUNDATION">CA FOUNDATION</option>
-                    <option value="CA INTERMEDIATE">CA INTERMEDIATE</option>
-                    <option value="CA FINAL">CA FINAL</option>
+                    <option value="" disabled selected>-- Select your Exam Level (required) --</option>
+                    <option value="foundation">CA Foundation</option>
+                    <option value="intermediate">CA Intermediate</option>
+                    <option value="final">CA Final</option>
                   </select>
                 </div>
                 <span class="text-[11px] text-slate-400 mt-1 block">Course level determines your mock papers, question difficulty, and syllabus lectures.</span>
@@ -1202,11 +1202,13 @@
                 </div>
 
                 <div>
-                  <label class="block font-bold text-slate-700 mb-1.5">CA Course Level <span class="text-rose-500">*</span></label>
+                  <label class="block font-bold text-slate-700 mb-1.5">Exam Level <span class="text-rose-500">*</span></label>
+                  <p class="text-[11px] text-slate-500 mb-1.5">Changes which MCQ tests, test papers and leaderboard you see. Your pass, XP and history stay unchanged.</p>
                   <select id="profile-page-edit-level" required class="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl font-bold text-slate-800 bg-white focus:ring-2 focus:ring-blue-500">
-                    <option value="CA FOUNDATION">CA FOUNDATION</option>
-                    <option value="CA INTERMEDIATE">CA INTERMEDIATE</option>
-                    <option value="CA FINAL">CA FINAL</option>
+                    <option value="" disabled>-- Select your Exam Level --</option>
+                    <option value="foundation">CA Foundation</option>
+                    <option value="intermediate">CA Intermediate</option>
+                    <option value="final">CA Final</option>
                   </select>
                 </div>
               </div>
@@ -1617,9 +1619,10 @@
             <div>
               <label class="block font-bold text-slate-700 mb-1">CA Exam Level</label>
               <select id="profile-edit-level" required class="w-full px-3 py-2 border border-slate-300 rounded-xl font-bold text-slate-800 bg-white">
-                <option value="CA FOUNDATION">CA FOUNDATION</option>
-                <option value="CA INTERMEDIATE">CA INTERMEDIATE</option>
-                <option value="CA FINAL">CA FINAL</option>
+                <option value="" disabled>-- Select your Exam Level --</option>
+                <option value="foundation">CA Foundation</option>
+                <option value="intermediate">CA Intermediate</option>
+                <option value="final">CA Final</option>
               </select>
             </div>
           </div>
@@ -1779,21 +1782,22 @@
 
   <!-- JAVASCRIPT MODULES -->
   <script src="js/store.js?v=20260926_mongo"></script>
-  <script src="js/auth.js?v=20260926_mongo"></script>
+  <script src="js/exam-levels.js?v=20260927_levels"></script>
+  <script src="js/auth.js?v=20260927_levels"></script>
   <script src="js/secure-backend.js?v=20260926_mongo"></script>
   <script src="js/subscription.js?v=20260926_mongo"></script>
   <script src="js/server-sync.js?v=20260926_mongo"></script>
   <script src="js/student-dashboard.js?v=20260926_mongo"></script>
   <script src="js/lecture-player.js?v=20260926_mongo"></script>
-  <script src="js/test-engine.js?v=20260926_mongo"></script>
-  <script src="js/leaderboard.js?v=20260926_mongo"></script>
-  <script src="js/assignment-portal.js?v=20260926_mongo"></script>
+  <script src="js/test-engine.js?v=20260927_levels"></script>
+  <script src="js/leaderboard.js?v=20260927_levels"></script>
+  <script src="js/assignment-portal.js?v=20260927_levels"></script>
   <script src="js/teacher-portal.js?v=20260926_mongo"></script>
-  <script src="js/admin-dashboard.js?v=20260926_mongo"></script>
+  <script src="js/admin-dashboard.js?v=20260927_levels"></script>
   <script src="js/admin-subscriptions.js?v=20260926_mongo"></script>
   <script src="js/banner-manager.js?v=20260926_mongo"></script>
   <script src="js/password-reset.js?v=20260927_pwreset"></script>
-  <script src="js/app.js?v=20260927_pwreset"></script>
+  <script src="js/app.js?v=20260927_levels"></script>
 
 </body>
 </html>

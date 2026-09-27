@@ -392,11 +392,10 @@ class AuthManager {
       return { success: false, error: 'Please enter a valid mobile number (e.g. +91 98765 43210 or 10-digit number).' };
     }
 
-    // 3. Exam Level validation
-    const validLevels = ['CA FOUNDATION', 'CA INTER', 'CA INTERMEDIATE', 'CA FINAL'];
-    const normLevel = caLevel ? caLevel.toUpperCase().trim() : '';
-    if (!validLevels.includes(normLevel)) {
-      return { success: false, error: 'Please select your CA Exam Level (CA FOUNDATION, CA INTERMEDIATE, or CA FINAL).' };
+    // 3. Exam Level validation (mandatory: CA Foundation, CA Intermediate or CA Final; canonical id sent)
+    const examLevelId = window.ExamLevels ? window.ExamLevels.canonicalId(caLevel) : null;
+    if (!window.ExamLevels || !window.ExamLevels.isStudentSelectable(examLevelId)) {
+      return { success: false, error: 'Please select your Exam Level: CA Foundation, CA Intermediate or CA Final.' };
     }
 
     // 4. Password security validation
@@ -420,7 +419,8 @@ class AuthManager {
           name: fullName.trim(),
           email: email.toLowerCase().trim(),
           phone: cleanPhone,
-          caLevel: normLevel.includes('INTER') ? 'CA INTER' : normLevel,
+          examLevelId: examLevelId,
+          caLevel: window.ExamLevels.legacyLabel(examLevelId),
           password: password,
           role: 'student',
           state: state || 'Uttar Pradesh',
