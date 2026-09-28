@@ -7,6 +7,7 @@ import job_repository
 import syllabus_hierarchy
 import password_reset
 import image_store
+import copy
 import exam_levels
 import leaderboard_service
 import sample_accounts
@@ -1374,7 +1375,7 @@ def refresh_collections_from_mongo(data, collections=None, min_interval=1.0):
                 key_field = mongodb_manager.list_key_field(key)
                 data[key] = _merge_documents(data.get(key, []), _as_items(cloud_data), key_field)
 
-            _collection_last_synced[key] = now
+            _collection_last_synced[key] = time.time()
             updated = True
         except Exception as e:
             print(f"[MONGODB_REFRESH_WARN] {key}: {e}", flush=True)
@@ -2276,10 +2277,150 @@ def run_due_scheduler_tasks(force=False):
             'serverTimeIst': now_utc.astimezone(ai_scheduler.IST_TZ).strftime('%Y-%m-%d %H:%M:%S IST')
         }
     with job_repository.STORE_LOCK:
-        data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests', 'ai_generation_jobs', 'ai_worker_status'])
+        data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests', 'ai_worker_status'])
+        refresh_relevant_jobs(data)
         return ai_scheduler.process_due_tasks(data, save_backend_data, sync_to_firebase,
                                               claim_fn=claim_scheduled_task_occurrence,
                                               transition_fn=transition_scheduled_task_state)
+
+def refresh_relevant_jobs(data):
+    """Merge from MongoDB only the generation jobs that can matter right now: active ones, the ones this
+    instance still believes active, and the jobs its scheduled tasks are waiting for (targeted query)."""
+    if not mongodb_manager.is_database_connected():
+        return
+    jobs = data.get('ai_generation_jobs')
+    if not isinstance(jobs, list):
+        jobs = data['ai_generation_jobs'] = list(jobs.values()) if isinstance(jobs, dict) else []
+    ids = {j.get('id') for j in jobs if isinstance(j, dict) and j.get('status') in ai_job_manager.ACTIVE_STATUSES}
+    ids |= {t.get('activeJobId') for t in data.get('ai_scheduled_tasks') or [] if isinstance(t, dict) and t.get('activeJobId')}
+    ids.discard(None)
+    remote = mongodb_manager.find_documents('ai_generation_jobs', {'$or': [
+        {'status': {'$in': list(ai_job_manager.ACTIVE_STATUSES)}}, {'_id': {'$in': sorted(ids)}}]})
+    if remote:
+        data['ai_generation_jobs'] = _merge_documents(jobs, remote)
+
+
+class StaleWorkerWrite(Exception):
+    """A conditional (compare-and-swap) write lost: the document changed since this request read it."""
+
+
+class _WorkerScope:
+    """
+    Job-scoped data for Local Qwen Worker requests when MongoDB is the shared store (production).
+    Holds only the documents a request needs, read with targeted queries, and writes back only the
+    fields that changed:
+      * an existing job is updated with $set, conditional on the status/workerId this request read
+        (compare-and-swap) - an atomic QUEUED -> CLAIMED claim, and progress/complete/fail can never
+        overwrite a job that was cancelled or re-assigned meanwhile; a heartbeat only sets lease fields;
+      * new documents (hosted test, questions, generation log) are upserted;
+      * the worker status singleton is written as before.
+    It never loads the instance's full data store, so worker calls cost a few small queries - also on
+    a freshly started serverless instance.
+    """
+    # save order: hosted content first, the job's own status last (COMPLETED only once its test exists)
+    TRACKED = ('questions', 'tests', 'ai_generation_logs', 'ai_scheduled_tasks', 'ai_generation_jobs')
+
+    def __init__(self, worker_id=''):
+        self.worker_id = worker_id
+        self.data = {name: [] for name in self.TRACKED}
+        self.data['ai_worker_status'] = None
+        self._before = {}
+        self._status_before = None
+
+    def _track(self, name, docs):
+        for d in docs or []:
+            if isinstance(d, dict) and d.get('id'):
+                existing = next((i for i, x in enumerate(self.data[name]) if x.get('id') == d['id']), None)
+                if existing is None:
+                    self.data[name].append(d)
+                else:
+                    self.data[name][existing] = d
+                self._before[(name, d['id'])] = copy.deepcopy(d)
+
+    def load_jobs(self, ids=(), active=False):
+        clauses = []
+        ids = [i for i in ids if i]
+        if ids:
+            clauses.append({'_id': {'$in': ids}})
+        if active:
+            clauses.append({'status': {'$in': list(ai_job_manager.ACTIVE_STATUSES)}})
+        if not clauses:
+            return
+        docs = mongodb_manager.find_documents('ai_generation_jobs', {'$or': clauses})
+        if docs is None:
+            raise RuntimeError('MongoDB unavailable')
+        self._track('ai_generation_jobs', docs)
+        task_ids = sorted({j.get('scheduledTaskId') for j in docs if j.get('scheduledTaskId')})
+        if task_ids:
+            self._track('ai_scheduled_tasks', mongodb_manager.find_documents('ai_scheduled_tasks', {'_id': {'$in': task_ids}}) or [])
+
+    def load_worker_status(self):
+        status = mongodb_manager.load_collection_from_mongo('ai_worker_status')
+        self.data['ai_worker_status'] = status if isinstance(status, dict) else None
+        self._status_before = copy.deepcopy(self.data['ai_worker_status'])
+
+    def save(self, data=None):
+        """save_callback for ai_job_manager: persist exactly what changed since it was read."""
+        for name in self.TRACKED:
+            for doc in list(self.data.get(name) or []):
+                if not isinstance(doc, dict) or not doc.get('id'):
+                    continue
+                key = (name, doc['id'])
+                before = self._before.get(key)
+                if before == doc:
+                    continue
+                if before is None:
+                    if not mongodb_manager.upsert_documents(name, [doc], 'id'):
+                        raise RuntimeError(f'Could not save {name}/{doc["id"]}')
+                else:
+                    fields = {k: v for k, v in doc.items() if before.get(k) != v}
+                    fields.update({k: None for k in before if k not in doc})
+                    expected = {}
+                    if name == 'ai_generation_jobs':
+                        expected = {'status': before.get('status'), 'workerId': before.get('workerId')}
+                        # taking a job away from another worker (expired lease): only if its lease was not renewed meanwhile
+                        if (before.get('status') in ai_job_manager.LEASED_STATUSES and before.get('workerId') != self.worker_id
+                                and doc.get('status') not in ai_job_manager.LEASED_STATUSES):
+                            expected['leaseExpiresTs'] = before.get('leaseExpiresTs')
+                    ok = mongodb_manager.update_document_fields(name, doc['id'], fields, expected)
+                    if ok is None:
+                        raise RuntimeError('MongoDB unavailable')
+                    if ok is False:
+                        raise StaleWorkerWrite(f"{name}/{doc['id']}")
+                self._before[key] = copy.deepcopy(doc)
+        status = self.data.get('ai_worker_status')
+        if isinstance(status, dict) and status != self._status_before:
+            if not mongodb_manager.sync_document_to_mongo('ai_worker_status', status, sync=True):
+                raise RuntimeError('Could not save worker status')
+            self._status_before = copy.deepcopy(status)
+
+
+class _StepTimer:
+    """Elapsed milliseconds per step of a request, logged as one line (no payloads, no secrets)."""
+
+    def __init__(self, route, worker_id=''):
+        self.route, self.worker_id = route, str(worker_id or '')[:60]
+        self.t0 = self.t = time.perf_counter()
+        self.steps = []
+
+    def step(self, name):
+        now = time.perf_counter()
+        self.steps.append(f"{name}:{int((now - self.t) * 1000)}")
+        self.t = now
+
+    def log(self, status, extra=''):
+        total = int((time.perf_counter() - self.t0) * 1000)
+        print(f"[WORKER_API] route={self.route} worker={self.worker_id or '-'} status={status} total_ms={total} "
+              f"steps={','.join(self.steps) or '-'}{(' ' + extra) if extra else ''}", flush=True)
+
+
+# Requests that must answer quickly never run the opportunistic scheduler check first
+_FAST_PATH_PREFIXES = ('/api/admin/ai/worker/', '/api/health', '/api/admin/ai/scheduler/tick', '/api/time')
+
+
+def _is_fast_path(path):
+    return str(path or '').startswith(_FAST_PATH_PREFIXES)
+
 
 class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -2327,6 +2468,97 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.flush()
         except Exception:
             pass
+
+    def _worker_route_local(self, route, req_data, worker_id, job_id):
+        """Local development (no MongoDB): the JSON data store under the process lock."""
+        with job_repository.STORE_LOCK:
+            if route == 'heartbeat':
+                data = load_backend_data(refresh_collections=['ai_worker_status'])
+                res = ai_job_manager.update_worker_heartbeat(req_data, data, save_backend_data, sync_to_firebase)
+                return 200, dict(res, success=True), f"leaseValid={res.get('jobLeaseValid')}"
+            if route == 'claim':
+                data = load_backend_data()
+                job = ai_job_manager.claim_pending_job_for_worker(worker_id, data, save_backend_data, sync_to_firebase)
+                return 200, {'success': True, 'job': job}, f"job={(job or {}).get('id') or '-'}"
+            data = load_backend_data()
+            if route == 'progress':
+                ok, err, code = ai_job_manager.update_job_progress_from_worker(
+                    job_id, worker_id, req_data, data, save_backend_data, sync_to_firebase)
+                return code, {'success': ok, 'error': err, 'code': code}, f"job={job_id}"
+            if route == 'complete':
+                ok, err, res, code = ai_job_manager.complete_job_from_worker(
+                    job_id, worker_id, req_data.get('questions', []), req_data.get('metrics', {}),
+                    data, save_backend_data, sync_to_firebase)
+                return code, {'success': ok, 'error': err, 'result': res, 'code': code}, f"job={job_id}"
+            ok, err, code = ai_job_manager.fail_job_from_worker(
+                job_id, worker_id, str(req_data.get('error') or 'Job failed on worker'), data, save_backend_data, sync_to_firebase)
+            return code, {'success': ok, 'error': err, 'code': code}, f"job={job_id}"
+
+    def _worker_route_mongo(self, route, req_data, worker_id, job_id, timer):
+        """Production (MongoDB): only the documents this call needs, conditional field writes."""
+        if route == 'heartbeat':
+            scope = _WorkerScope(worker_id)
+            current = req_data.get('currentJobId') or job_id
+            if current:
+                scope.load_jobs(ids=[current])
+                timer.step('load_job')
+            try:
+                res = ai_job_manager.update_worker_heartbeat(req_data, scope.data, scope.save, None)
+            except StaleWorkerWrite:
+                # the job was cancelled / re-assigned between read and write: tell the worker to stop it
+                scope.data['ai_generation_jobs'] = []
+                res = ai_job_manager.update_worker_heartbeat(dict(req_data, currentJobId=current), scope.data, scope.save, None)
+                res['jobLeaseValid'] = False
+            timer.step('write')
+            return 200, dict(res, success=True), f"leaseValid={res.get('jobLeaseValid')}"
+
+        if route == 'claim':
+            if not worker_id:
+                return 400, {'success': False, 'error': 'workerId is required.', 'code': 400}, ''
+            job = None
+            for attempt in range(1, 4):
+                scope = _WorkerScope(worker_id)
+                scope.load_jobs(active=True)
+                timer.step(f'load_active_jobs#{attempt}')
+                try:
+                    job = ai_job_manager.claim_pending_job_for_worker(worker_id, scope.data, scope.save, None)
+                    timer.step('claim')
+                    break
+                except StaleWorkerWrite:
+                    timer.step('claim_lost')   # another worker/instance changed that job first: re-read and retry
+                    job = None
+            else:
+                return 409, {'success': False, 'error': 'Could not claim a job (concurrent claims); retry.', 'code': 409}, ''
+            if job:
+                texts = mongodb_manager.question_texts_for_chapter(job.get('subject'), job.get('chapterId'), job.get('chapter'))
+                job['existingQuestions'] = [{'text': t} for t in (texts or [])]
+                timer.step('chapter_questions')
+            return 200, {'success': True, 'job': job}, f"job={(job or {}).get('id') or '-'}"
+
+        if not job_id:
+            return 400, {'success': False, 'error': 'jobId is required.', 'code': 400}, ''
+        scope = _WorkerScope(worker_id)
+        scope.load_jobs(ids=[job_id])
+        timer.step('load_job')
+        try:
+            if route == 'progress':
+                ok, err, code = ai_job_manager.update_job_progress_from_worker(job_id, worker_id, req_data, scope.data, scope.save, None)
+                timer.step('write')
+                return code, {'success': ok, 'error': err, 'code': code}, f"job={job_id}"
+            if route == 'complete':
+                ok, err, res, code = ai_job_manager.complete_job_from_worker(
+                    job_id, worker_id, req_data.get('questions', []), req_data.get('metrics', {}), scope.data, scope.save, None)
+                scope.save()
+                timer.step('host')
+                return code, {'success': ok, 'error': err, 'result': res, 'code': code}, f"job={job_id}"
+            ok, err, code = ai_job_manager.fail_job_from_worker(
+                job_id, worker_id, str(req_data.get('error') or 'Job failed on worker'), scope.data, scope.save, None)
+            scope.save()
+            timer.step('write')
+            return code, {'success': ok, 'error': err, 'code': code}, f"job={job_id}"
+        except StaleWorkerWrite:
+            timer.step('lease_lost')
+            return 409, {'success': False, 'error': 'Job lease no longer valid (cancelled or re-assigned).', 'code': 409}, f"job={job_id}"
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -2377,10 +2609,23 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         if 'token' in urllib.parse.parse_qs(urllib.parse.urlparse(effective).query):
             self.send_json(401, {'error': 'Query-string tokens are not accepted. Send the secret in the Authorization: Bearer header.', 'code': 401})
             return
+        timer = _StepTimer('scheduler_tick')
         if not is_authorized_scheduler_tick(self.get_header_auth_token()):
+            timer.step('auth')
+            timer.log(403)
             self.send_json(403, {'error': 'Forbidden: administrator, worker or cron authentication required.', 'code': 403})
             return
-        self.send_json(200, run_due_scheduler_tasks())
+        timer.step('auth')
+        try:
+            result = run_due_scheduler_tasks()
+        except Exception as e:
+            timer.step('run')
+            timer.log(500, f"error={type(e).__name__}")
+            self.send_json(500, {'success': False, 'error': f'Scheduler tick failed: {e}', 'code': 500})
+            return
+        timer.step('run')
+        timer.log(200, f"executed={result.get('executedCount', 0)} skipped={result.get('skipped') or '-'}")
+        self.send_json(200, result)
 
     def log_message(self, format, *args):
         # request lines may carry ?token=... (password reset links); never write it to the log
@@ -2401,10 +2646,11 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         return None
 
     def do_GET(self):
-        check_opportunistic_scheduler_tick()
-        print(f"[SERVER] Incoming GET: {redact_url_tokens(self.path)}", flush=True)
         raw_path = self._get_request_path()
         path = raw_path.rstrip('/') if raw_path != '/' else '/'
+        if not _is_fast_path(path):
+            check_opportunistic_scheduler_tick()
+        print(f"[SERVER] Incoming GET: {redact_url_tokens(self.path)}", flush=True)
 
         # Password pages are routes of the single-page app (vercel.json rewrites them in production)
         if path in ('/forgot-password', '/reset-password'):
@@ -3469,6 +3715,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 return
             with job_repository.STORE_LOCK:
                 data = load_backend_data()
+                refresh_relevant_jobs(data)   # this instance's cached active jobs may be stale (worker updates go to MongoDB)
                 local_job = job_repository.JobRepository(data).get(job_id)
                 # Scoped job poll: fetch ONLY this single job from MongoDB Atlas if active or not cached locally
                 if not local_job or local_job.get('status') in ai_job_manager.ACTIVE_STATUSES:
@@ -3502,7 +3749,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(403, {'error': 'Forbidden: Administrator authentication required.', 'code': 403})
                 return
             with job_repository.STORE_LOCK:
-                data = load_backend_data(refresh_collections=['ai_generation_jobs'], min_interval=15.0)
+                data = load_backend_data()
+                refresh_relevant_jobs(data)   # active jobs only (targeted), never the whole job history
                 active_job = ai_job_manager.get_active_generation_job(data, save_backend_data, sync_to_firebase)
             self.send_json(200, {'success': True, 'job': active_job, 'hasActiveJob': bool(active_job)})
             return
@@ -3567,7 +3815,12 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             if not (is_authorized_ai_worker(token) or (user and user.get('role') == 'admin')):
                 self.send_json(403, {'error': 'Forbidden: Administrator or Worker authentication required.', 'code': 403})
                 return
-            data = load_backend_data(refresh_collections=['ai_worker_status', 'ai_generation_jobs'])
+            if mongodb_manager.is_database_connected():
+                scope = _WorkerScope()
+                scope.load_worker_status()
+                data = scope.data
+            else:
+                data = load_backend_data(refresh_collections=['ai_worker_status'])
             worker_status = ai_job_manager.get_worker_status(data)
             self.send_json(200, {
                 'success': True,
@@ -3579,9 +3832,10 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self):
-        check_opportunistic_scheduler_tick()
         raw_path = self._get_request_path()
         path = raw_path.rstrip('/') if raw_path != '/' else '/'
+        if not _is_fast_path(path):
+            check_opportunistic_scheduler_tick()
         effective_full = self.headers.get('x-matched-path') or self.headers.get('x-forwarded-uri') or self.path
         query = urllib.parse.parse_qs(urllib.parse.urlparse(effective_full).query)
 
@@ -4084,57 +4338,40 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         # ================================================================
         if path in ('/api/admin/ai/worker/heartbeat', '/api/admin/ai/worker/claim', '/api/admin/ai/worker/progress',
                     '/api/admin/ai/worker/complete', '/api/admin/ai/worker/fail'):
+            route = path.rsplit('/', 1)[-1]
+            timer = _StepTimer(route)
             if not is_authorized_ai_worker(self.get_auth_token()):
+                timer.step('auth')
+                timer.log(403)
                 self.send_json(403, {'error': 'Forbidden: Local Qwen Worker authentication (AI_WORKER_SECRET) required.', 'code': 403})
                 return
             try:
                 content_length = int(self.headers.get('Content-Length', 0))
                 body = self.rfile.read(content_length) if content_length > 0 else b'{}'
                 req_data = json.loads(body.decode('utf-8')) if body else {}
-                worker_id = str(req_data.get('workerId') or '').strip()
-                job_id = req_data.get('jobId')
-
-                with job_repository.STORE_LOCK:
-                    if path == '/api/admin/ai/worker/heartbeat':
-                        data = load_backend_data(refresh_collections=['ai_worker_status', 'ai_generation_jobs'])
-                        refresh_job_document(data, req_data.get('currentJobId') or job_id)
-                        res = ai_job_manager.update_worker_heartbeat(req_data, data, save_backend_data, sync_to_firebase)
-                        self.send_json(200, dict(res, success=True))
-                        return
-
-                    if path == '/api/admin/ai/worker/claim':
-                        data = load_backend_data(refresh_collections=['ai_generation_jobs', 'questions'])
-                        job = ai_job_manager.claim_pending_job_for_worker(worker_id, data, save_backend_data, sync_to_firebase)
-                        self.send_json(200, {'success': True, 'job': job})
-                        return
-
-                    if path == '/api/admin/ai/worker/progress':
-                        data = load_backend_data(refresh_collections=['ai_generation_jobs'])
-                        refresh_job_document(data, job_id)
-                        ok, err, code = ai_job_manager.update_job_progress_from_worker(
-                            job_id, worker_id, req_data, data, save_backend_data, sync_to_firebase)
-                        self.send_json(code, {'success': ok, 'error': err, 'code': code})
-                        return
-
-                    if path == '/api/admin/ai/worker/complete':
-                        data = load_backend_data(refresh_collections=['ai_generation_jobs', 'tests', 'questions', 'ai_generation_logs', 'ai_scheduled_tasks'])
-                        refresh_job_document(data, job_id)
-                        ok, err, res, code = ai_job_manager.complete_job_from_worker(
-                            job_id, worker_id, req_data.get('questions', []), req_data.get('metrics', {}),
-                            data, save_backend_data, sync_to_firebase)
-                        self.send_json(code, {'success': ok, 'error': err, 'result': res, 'code': code})
-                        return
-
-                    data = load_backend_data(refresh_collections=['ai_generation_jobs', 'tests', 'questions', 'ai_generation_logs', 'ai_scheduled_tasks'])
-                    refresh_job_document(data, job_id)
-                    ok, err, code = ai_job_manager.fail_job_from_worker(
-                        job_id, worker_id, str(req_data.get('error') or 'Job failed on worker'),
-                        data, save_backend_data, sync_to_firebase)
-                    self.send_json(code, {'success': ok, 'error': err, 'code': code})
-                    return
-            except Exception as e:
-                self.send_json(500, {'error': f'Worker request failed: {str(e)}', 'code': 500})
+                if not isinstance(req_data, dict):
+                    raise ValueError('JSON object expected')
+            except (ValueError, UnicodeDecodeError) as e:
+                timer.log(400)
+                self.send_json(400, {'success': False, 'error': f'Invalid JSON body: {e}', 'code': 400})
                 return
+            worker_id = str(req_data.get('workerId') or '').strip()[:120]
+            job_id = req_data.get('jobId')
+            timer.worker_id = worker_id
+            timer.step('auth+body')
+            try:
+                if mongodb_manager.is_database_connected():
+                    code, payload, extra = self._worker_route_mongo(route, req_data, worker_id, job_id, timer)
+                else:
+                    code, payload, extra = self._worker_route_local(route, req_data, worker_id, job_id)
+                    timer.step('local_store')
+            except Exception as e:
+                timer.log(500, f"error={type(e).__name__}")
+                self.send_json(500, {'success': False, 'error': f'Worker request failed: {e}', 'code': 500})
+                return
+            timer.log(code, extra)
+            self.send_json(code, payload)
+            return
 
         # ================================================================
         # SUBSCRIPTION & PAYMENT POST ENDPOINTS

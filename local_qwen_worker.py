@@ -90,6 +90,7 @@ class LocalQwenWorker:
         }
         data_bytes = json.dumps(payload).encode('utf-8') if payload is not None else None
         req = urllib.request.Request(url, data=data_bytes, headers=headers, method='POST' if payload is not None else 'GET')
+        started = time.time()
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 body = resp.read().decode('utf-8')
@@ -99,9 +100,10 @@ class LocalQwenWorker:
                 err_body = e.read().decode('utf-8')[:300]
             except Exception:
                 err_body = ''
-            return False, None, f"HTTP {e.code}: {e.reason} {err_body}".strip(), e.code
+            return False, None, f"HTTP {e.code}: {e.reason} {err_body} ({endpoint}, {int((time.time() - started) * 1000)} ms)".strip(), e.code
         except Exception as e:
-            return False, None, str(e), 0
+            # e.g. "The read operation timed out (/api/admin/ai/worker/claim, 15003 ms, timeout 15s)"
+            return False, None, f"{e} ({endpoint}, {int((time.time() - started) * 1000)} ms, timeout {timeout:g}s)", 0
 
     # ------------------------------------------------------------- heartbeat
     def check_local_ollama(self) -> Tuple[bool, str, Optional[float]]:

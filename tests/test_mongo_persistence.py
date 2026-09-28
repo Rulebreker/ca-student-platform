@@ -23,12 +23,23 @@ class FakeReplaceOne:
         self._filter, self._doc, self._upsert = flt, doc, upsert
 
 
+class FakeCursor(list):
+    def sort(self, key, direction=1):
+        return FakeCursor(sorted(self, key=lambda d: d.get(key) or 0, reverse=direction == -1))
+
+    def limit(self, n):
+        return FakeCursor(self[:n] if n else self)
+
+
 class FakeCollection:
     def __init__(self):
         self.docs = {}
 
-    def find(self, _flt=None):
-        return [copy.deepcopy(d) for d in self.docs.values()]
+    def find(self, flt=None, projection=None):
+        def ok(d):   # equality and {'$in': [...]} filters are enough for these tests
+            return all(d.get(k) in v['$in'] if isinstance(v, dict) and '$in' in v else d.get(k) == v
+                       for k, v in (flt or {}).items())
+        return FakeCursor(copy.deepcopy(d) for d in self.docs.values() if ok(d))
 
     def find_one(self, flt, projection=None):
         d = self.docs.get(flt.get('_id'))

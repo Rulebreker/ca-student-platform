@@ -9989,18 +9989,43 @@ class AdminDashboard {
 
     if (window.lucide) window.lucide.createIcons();
 
+    await this.loadLocalQwenWorkerStatus();
+  }
+
+  /** Worker status card: bounded request (never stuck on "Checking..."), clear offline/error state with Retry. */
+  async loadLocalQwenWorkerStatus() {
     const grid = document.getElementById('ai-providers-grid');
+    const currentUser = window.auth ? window.auth.getCurrentUser() : null;
+    const token = currentUser ? (currentUser.token || '') : '';
+    const TIMEOUT_MS = 12000;
+    if (grid) grid.innerHTML = '<div class="py-8 text-center text-slate-400 text-xs">Checking Local Qwen Worker status...</div>';
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), TIMEOUT_MS) : null;
+    let w;
     try {
       const resp = await fetch(`/api/admin/ai/providers?_t=${Date.now()}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Authorization': `Bearer ${token}` },
+        signal: ctrl ? ctrl.signal : undefined
       });
-      const data = await resp.json();
-      const card = (data.providers || []).find(p => p.id === 'local_qwen') || {};
-      const w = (card.details && card.details.worker_status) || {};
-      if (grid) grid.innerHTML = this._renderLocalQwenWorkerCard(w);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.success === false) {
+        w = { status: 'unknown', error: `Could not load worker status (HTTP ${resp.status}${data.error ? ': ' + data.error : ''}).` };
+      } else {
+        const card = (data.providers || []).find(p => p.id === 'local_qwen') || {};
+        w = (card.details && card.details.worker_status) || { status: 'offline', error: 'Local Qwen Worker Offline' };
+      }
     } catch (err) {
-      console.error('[AI_WORKER_STATUS_ERROR]', err);
-      if (grid) grid.innerHTML = this._renderLocalQwenWorkerCard({ status: 'unknown', error: `Could not load worker status: ${err.message}` });
+      const timedOut = err && err.name === 'AbortError';
+      console.error('[AI_WORKER_STATUS_ERROR]', timedOut ? 'timeout' : err);
+      w = { status: 'unknown', error: timedOut
+        ? `The server did not answer within ${TIMEOUT_MS / 1000} s. Worker status unknown - try again.`
+        : `Could not load worker status: ${err && err.message ? err.message : 'network error'}` };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    if (grid) {
+      grid.innerHTML = this._renderLocalQwenWorkerCard(w) + (w.status === 'unknown' ? `
+        <button type="button" onclick="window.adminDashboard.loadLocalQwenWorkerStatus()" class="mt-2 px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700">Retry</button>` : '');
     }
     if (window.lucide) window.lucide.createIcons();
   }
@@ -10011,6 +10036,8 @@ class AdminDashboard {
     const connected = w.workerOnline === true;
     const badge = online
       ? { text: 'Worker Online', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' }
+      : w.status === 'unknown'
+        ? { text: 'Status Unknown', cls: 'bg-slate-100 text-slate-700 border-slate-300' }
       : connected
         ? { text: 'Ollama Offline', cls: 'bg-amber-100 text-amber-800 border-amber-200' }
         : { text: 'Worker Offline', cls: 'bg-rose-100 text-rose-800 border-rose-200' };

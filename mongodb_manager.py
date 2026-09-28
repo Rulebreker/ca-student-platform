@@ -282,6 +282,62 @@ def scheduler_has_due_work(now_iso: str, lease_cutoff_iso: str, processing_check
         return None
 
 
+def find_documents(collection_name: str, query: Dict[str, Any], projection: Optional[Dict[str, Any]] = None,
+                   sort: Optional[List[Tuple[str, int]]] = None, limit: int = 0) -> Optional[List[Dict[str, Any]]]:
+    """Targeted read (filter / projection / sort / limit) without _id; None when the database is unavailable."""
+    db = get_database()
+    if db is None:
+        return None
+    try:
+        cursor = db[collection_name].find(query, projection)
+        if sort:
+            cursor = cursor.sort(sort)
+        if limit:
+            cursor = cursor.limit(int(limit))
+        out = []
+        for d in cursor:
+            d.pop('_id', None)
+            out.append(d)
+        return out
+    except Exception as e:
+        print(f"[MONGODB_SYNC_WARN] find {collection_name} failed: {e}", flush=True)
+        return None
+
+
+def update_document_fields(collection_name: str, doc_id: Any, fields: Dict[str, Any],
+                           expected: Optional[Dict[str, Any]] = None) -> Optional[bool]:
+    """Atomic conditional field update ($set): applied only while the stored document still matches
+    `expected` (compare-and-swap). True = applied, False = the document changed / is gone,
+    None = database unavailable."""
+    db = get_database()
+    if db is None:
+        return None
+    try:
+        flt = {'_id': str(doc_id)}
+        flt.update(expected or {})
+        res = db[collection_name].update_one(flt, {'$set': {k: v for k, v in fields.items() if k != '_id'}})
+        return res.matched_count == 1
+    except Exception as e:
+        print(f"[MONGODB_SYNC_ERROR] conditional update {collection_name}/{doc_id} failed: {e}", flush=True)
+        return None
+
+
+def question_texts_for_chapter(subject: str, chapter_id: str, chapter: str, limit: int = 300) -> Optional[List[str]]:
+    """Stems of the bank questions of one subject/chapter (duplicate detection) - stems only."""
+    ors = [c for c in ({'chapterId': chapter_id} if chapter_id else None, {'chapter': chapter} if chapter else None) if c]
+    if not ors:
+        return []
+    docs = find_documents('questions', {'subject': subject, '$or': ors}, {'text': 1, 'question': 1})
+    if docs is None:
+        return None
+    texts = [d.get('text') or d.get('question') for d in docs if d.get('text') or d.get('question')]
+    return texts[-limit:]
+
+
+RECENT_JOBS_LOADED = 50
+ACTIVE_JOB_STATUSES = ('QUEUED', 'CLAIMED', 'GENERATING', 'VALIDATING', 'PUBLISHING')
+
+
 def load_document(collection_name: str, doc_id: Any) -> Optional[Dict[str, Any]]:
     """One document by _id (without _id), or None when missing / database unavailable."""
     db = get_database()
@@ -352,7 +408,15 @@ def load_collection_from_mongo(collection_name: str) -> Optional[Union[List[Any]
         return None
 
     try:
-        docs = list(db[collection_name].find({}))
+        if collection_name == 'ai_generation_jobs':
+            # every finished job embeds its questions; instances keep only the newest jobs plus the
+            # active ones, so never download the whole (ever-growing) history
+            coll = db[collection_name]
+            docs = list(coll.find({}).sort('createdTs', -1).limit(RECENT_JOBS_LOADED))
+            seen = {d.get('_id') for d in docs}
+            docs += [d for d in coll.find({'status': {'$in': list(ACTIVE_JOB_STATUSES)}}) if d.get('_id') not in seen]
+        else:
+            docs = list(db[collection_name].find({}))
         if not docs:
             return None
 
