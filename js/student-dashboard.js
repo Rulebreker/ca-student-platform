@@ -191,9 +191,11 @@ class StudentDashboard {
 
     const user = window.auth.getCurrentUser();
 
-    // Sync papers from backend (non-blocking, with in-flight lock)
-    if (!this._isSyncingPapers && typeof fetch !== 'undefined') {
+    // Sync papers from backend (non-blocking, with in-flight lock). At most once per 2 minutes: serverSync
+    // keeps the papers list fresh; this fetch only adds missing papers in the dashboard's own shape.
+    if (!this._isSyncingPapers && typeof fetch !== 'undefined' && Date.now() - (this._lastPapersFetchAt || 0) >= 120000) {
       this._isSyncingPapers = true;
+      this._lastPapersFetchAt = Date.now();
       const token = user ? (user.token || '') : '';
       fetch('/api/papers', {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {}

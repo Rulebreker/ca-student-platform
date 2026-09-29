@@ -102,12 +102,15 @@
       return;
     }
     this._activePollingTab = tabName;
-    this._pollingIntervalId = setInterval(async () => {
+    this._tabPollLastRunAt = Date.now();
+    const tick = async () => {
       if (document.hidden) return;
       if (this.currentTab !== tabName) {
         this.stopTabPolling();
         return;
       }
+      // Admin view not open (tab still selected in the background): no admin requests
+      if (window.app && window.app.currentView !== 'admin') return;
       // If modal is open or user is actively typing, skip background re-renders
       const modal = document.getElementById('admin-generic-modal');
       if (modal && !modal.classList.contains('hidden')) return;
@@ -115,12 +118,23 @@
       if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
         return;
       }
+      this._tabPollLastRunAt = Date.now();
       try {
         await callback();
       } catch (err) {
         console.warn(`[AdminPolling] Tab ${tabName} poll error:`, err);
       }
-    }, intervalMs);
+    };
+    this._tabPollTick = tick;
+    this._pollingIntervalId = setInterval(tick, intervalMs);
+  };
+
+  /** Tab became visible again (called from serverSync's shared visibility refresh): one immediate
+   * refresh of the polled admin tab, at most once per minute. */
+  AdminDashboard.prototype.onBrowserTabVisible = function() {
+    if (!this._pollingIntervalId || !this._tabPollTick) return;
+    if (Date.now() - (this._tabPollLastRunAt || 0) < 60000) return;
+    this._tabPollTick();
   };
 
   AdminDashboard.prototype.stopTabPolling = function() {
@@ -129,6 +143,7 @@
       this._pollingIntervalId = null;
     }
     this._activePollingTab = null;
+    this._tabPollTick = null;
   };
 
   // --- TAB 1: SUBSCRIPTIONS & MANUAL GRANTS ---

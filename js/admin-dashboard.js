@@ -8100,6 +8100,8 @@ class AdminDashboard {
     };
 
     this.aiJobPollInterval = setInterval(async () => {
+      // hidden tab: skip (UI-only status updates); the first tick after returning catches up
+      if (document.hidden) return;
       try {
         const resp = await fetch(`/api/admin/ai/jobs/status?jobId=${jobId}&_t=${Date.now()}`, {
           headers: { 'Authorization': `Bearer ${token}` }

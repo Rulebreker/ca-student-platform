@@ -25,14 +25,8 @@ class SubscriptionManager {
     this._initialized = true;
     this.fetchPlans();
     this.checkAndRecoverActiveSession();
-
-    // Re-validate session if window gains focus or app is resumed
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        this.syncMySubscription();
-        this.checkAndRecoverActiveSession();
-      }
-    });
+    // Returning to the tab re-syncs the subscription and recovers an open payment session through
+    // serverSync's shared visibility refresh (one path, with a cooldown).
   }
 
   async checkAndRecoverActiveSession() {
@@ -148,6 +142,9 @@ class SubscriptionManager {
         headers: { 'Authorization': `Bearer ${token}` },
         cache: 'no-store'
       });
+      if (resp.status === 401 && window.auth && typeof window.auth.verifySessionNow === 'function') {
+        window.auth.verifySessionNow();   // session may have been revoked: confirm and sign out if so
+      }
       if (resp.ok) {
         const data = await resp.json();
         if (data.success) {

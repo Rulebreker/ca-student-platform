@@ -10,6 +10,8 @@
  * - Safe logout redirecting to Homepage
  */
 
+const SESSION_WATCHDOG_INTERVAL_MS = 5 * 60 * 1000;
+
 /**
  * Synchronous SHA-256 implementation compatible with RFC 6234 and Python hashlib.sha256
  */
@@ -608,7 +610,8 @@ class AuthManager {
     this._watchdogFailCount = 0;
 
     const checkSession = async () => {
-      if (!this.currentUser) return;
+      if (!this.currentUser || this._sessionCheckInFlight) return;
+      this._sessionCheckInFlight = true;
       try {
         const token = this.currentUser.token || '';
         const res = await fetch('/api/auth/verify', {
@@ -649,21 +652,25 @@ class AuthManager {
         }
       } catch (err) {
         // Network offline — don't count as failure, skip silently
+      } finally {
+        this._sessionCheckInFlight = false;
       }
     };
+    this._checkSession = checkSession;
 
     // Immediately verify on startup / watchdog start
     setTimeout(checkSession, 100);
 
-    // Periodic heartbeat verification every 30s
-    this._sessionWatchdogTimer = setInterval(checkSession, 30000);
+    // Periodic verification every 5 minutes while the tab is visible. Returning to the tab is handled by
+    // serverSync's shared visibility refresh, and a 401/403 from a sync request calls verifySessionNow().
+    this._sessionWatchdogTimer = setInterval(() => {
+      if (!document.hidden) checkSession();
+    }, SESSION_WATCHDOG_INTERVAL_MS);
+  }
 
-    this._visibilityHandler = () => {
-      if (document.visibilityState === 'visible') {
-        checkSession();
-      }
-    };
-    document.addEventListener('visibilitychange', this._visibilityHandler);
+  /** Verify the session now (tab became visible, or an API request returned 401/403). */
+  verifySessionNow() {
+    if (this._checkSession) this._checkSession();
   }
 
   stopSessionWatchdog() {
@@ -672,10 +679,7 @@ class AuthManager {
       clearInterval(this._sessionWatchdogTimer);
       this._sessionWatchdogTimer = null;
     }
-    if (this._visibilityHandler) {
-      document.removeEventListener('visibilitychange', this._visibilityHandler);
-      this._visibilityHandler = null;
-    }
+    this._checkSession = null;
   }
 
   switchRole(targetRole) {

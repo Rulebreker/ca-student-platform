@@ -322,6 +322,8 @@ class App {
       window.leaderboardManager.render();
     } else if (viewName === 'admin') {
       window.adminDashboard.render();
+      // admin-only data is synced only while this view is open: refresh it on entry
+      if (window.serverSync && typeof window.serverSync.onAdminViewOpened === 'function') window.serverSync.onAdminViewOpened();
     } else if (viewName === 'teacher') {
       window.teacherPortal.render();
     } else if (viewName === 'forgot-password') {

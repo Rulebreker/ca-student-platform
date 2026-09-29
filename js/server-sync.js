@@ -3,13 +3,21 @@
  *
  * Replaces the Firebase Realtime Database listeners. All shared data now lives on the server
  * (MongoDB Atlas); the browser refreshes it by polling authenticated API endpoints every
- * POLL_INTERVAL_MS, when the tab becomes visible again, and on demand (serverSync.refreshNow()).
+ * POLL_INTERVAL_MS while the tab is visible (the timer is stopped while it is hidden), when the tab
+ * becomes visible again, and on demand (serverSync.refreshNow()).
  * The merge functions below are unchanged from the former Firebase listener implementation: they
  * merge a server list into the local store and re-render the affected views.
- * Session revocation is handled by the auth.js session watchdog (/api/auth/verify).
+ * Session revocation is handled by the auth.js session watchdog (/api/auth/verify); a 401/403 from a
+ * sync request triggers an immediate check.
+ *
+ * This is the single tab-visibility handler for background refreshes: on becoming visible (at most once
+ * per VISIBILITY_REFRESH_COOLDOWN_MS) it syncs, verifies the session and recovers an open payment session.
  */
 
-const SERVER_SYNC_POLL_INTERVAL_MS = 30000;
+const SERVER_SYNC_POLL_INTERVAL_MS = 120000;
+const VISIBILITY_REFRESH_COOLDOWN_MS = 60000;
+// Admin-only data is synced only while the admin view is open (audit logs only on their own tab)
+const ADMIN_AUDIT_LOG_TAB = 'audit-logs';
 
 class ServerSyncManager {
   constructor() {
@@ -28,27 +36,64 @@ class ServerSyncManager {
     this._isMergingReferrals = false;
     this._knownUserIds = new Set();
     this._profileRenderTimer = null;
+    this._running = false;
+    this._lastRefreshAt = 0;
+    this._lastVisibilityRefreshAt = 0;
+    this._lastAdminRefreshAt = 0;
   }
 
   init() {
     if (this.isInitialized) return;
     this.isInitialized = true;
     this._visibilityHandler = () => {
-      if (document.visibilityState === 'visible') this.refreshNow();
+      if (document.visibilityState === 'visible') this._onTabVisible();
+      else this._clearTimer();   // hidden tabs make no periodic requests
     };
     document.addEventListener('visibilitychange', this._visibilityHandler);
     this.start();
   }
 
   start() {
-    if (this._pollTimer) clearInterval(this._pollTimer);
+    this._running = true;
     this.refreshNow();
-    this._pollTimer = setInterval(() => this.refreshNow(), SERVER_SYNC_POLL_INTERVAL_MS);
+    this._scheduleTimer();
   }
 
   stop() {
+    this._running = false;
+    this._clearTimer();
+  }
+
+  _scheduleTimer() {
+    this._clearTimer();
+    if (!this._running || document.hidden) return;
+    this._pollTimer = setInterval(() => {
+      if (document.hidden) { this._clearTimer(); return; }
+      this.refreshNow();
+    }, SERVER_SYNC_POLL_INTERVAL_MS);
+  }
+
+  _clearTimer() {
     if (this._pollTimer) clearInterval(this._pollTimer);
     this._pollTimer = null;
+  }
+
+  /** The one visibility refresh path: sync, session check and payment-session recovery, with a cooldown. */
+  _onTabVisible() {
+    if (!this._running) return;
+    this._scheduleTimer();
+    // polled admin tab (subscriptions / payments): one immediate refresh, own 60 s cooldown
+    if (window.adminDashboard && typeof window.adminDashboard.onBrowserTabVisible === 'function') {
+      window.adminDashboard.onBrowserTabVisible();
+    }
+    const now = Date.now();
+    if (now - Math.max(this._lastRefreshAt, this._lastVisibilityRefreshAt) < VISIBILITY_REFRESH_COOLDOWN_MS) return;
+    this._lastVisibilityRefreshAt = now;
+    this.refreshNow();   // also refreshes the student's subscription (syncMySubscription)
+    if (window.auth && typeof window.auth.verifySessionNow === 'function') window.auth.verifySessionNow();
+    if (window.subscriptionManager && typeof window.subscriptionManager.checkAndRecoverActiveSession === 'function') {
+      window.subscriptionManager.checkAndRecoverActiveSession();
+    }
   }
 
   _authHeaders() {
@@ -60,11 +105,19 @@ class ServerSyncManager {
   async _get(path) {
     try {
       const resp = await fetch(`${path}${path.includes('?') ? '&' : '?'}_t=${Date.now()}`, { headers: this._authHeaders() });
+      if (resp.status === 401 || resp.status === 403) {
+        // the session may have been revoked: let the auth watchdog check (and sign out) right away
+        if (window.auth && typeof window.auth.verifySessionNow === 'function') window.auth.verifySessionNow();
+      }
       if (!resp.ok) return null;
       return await resp.json();
     } catch (e) {
       return null; // offline: keep the local copy
     }
+  }
+
+  _adminViewOpen() {
+    return !!(window.app && window.app.currentView === 'admin');
   }
 
   /** Pull shared data from the server and merge it into the local store. */
@@ -73,6 +126,7 @@ class ServerSyncManager {
     const user = window.store.getCurrentUser();
     if (!user || !user.id) return;
     this._inFlight = true;
+    this._lastRefreshAt = Date.now();
     try {
       const isAdmin = user.role === 'admin';
       const [tests, papers, subjects] = await Promise.all([
@@ -85,17 +139,21 @@ class ServerSyncManager {
       if (subjects && Array.isArray(subjects.subjects)) this.mergeRemoteSubjects(subjects.subjects);
 
       if (isAdmin) {
-        const [users, submissions, audit, xpReset] = await Promise.all([
-          this._get('/api/admin/users'),
-          this._get('/api/papers/submissions'),
-          this._get('/api/admin/audit-logs'),
-          this._get('/api/admin/xp-reset/settings'),
-        ]);
-        if (users && Array.isArray(users.users)) this.mergeRemoteUsers(users.users);
-        if (submissions && Array.isArray(submissions.submissions)) this.mergeRemoteSubmissions(submissions.submissions);
-        if (audit && Array.isArray(audit.logs)) window.store.saveAdminAuditLogs(audit.logs);
-        if (xpReset && xpReset.settings && typeof window.store.saveXpResetSettings === 'function') {
-          window.store.saveXpResetSettings(xpReset.settings);
+        if (this._adminViewOpen()) {
+          this._lastAdminRefreshAt = Date.now();
+          const onAuditTab = window.adminDashboard && window.adminDashboard.currentTab === ADMIN_AUDIT_LOG_TAB;
+          const [users, submissions, audit, xpReset] = await Promise.all([
+            this._get('/api/admin/users'),
+            this._get('/api/papers/submissions'),
+            onAuditTab ? this._get('/api/admin/audit-logs') : Promise.resolve(null),
+            this._get('/api/admin/xp-reset/settings'),
+          ]);
+          if (users && Array.isArray(users.users)) this.mergeRemoteUsers(users.users);
+          if (submissions && Array.isArray(submissions.submissions)) this.mergeRemoteSubmissions(submissions.submissions);
+          if (audit && Array.isArray(audit.logs)) window.store.saveAdminAuditLogs(audit.logs);
+          if (xpReset && xpReset.settings && typeof window.store.saveXpResetSettings === 'function') {
+            window.store.saveXpResetSettings(xpReset.settings);
+          }
         }
       } else if (window.subscriptionManager && typeof window.subscriptionManager.syncMySubscription === 'function') {
         window.subscriptionManager.syncMySubscription();
@@ -103,6 +161,12 @@ class ServerSyncManager {
     } finally {
       this._inFlight = false;
     }
+  }
+
+  /** Called when the admin view opens: refresh admin data now unless it was refreshed within the cooldown. */
+  onAdminViewOpened() {
+    if (!this._running || Date.now() - this._lastAdminRefreshAt < VISIBILITY_REFRESH_COOLDOWN_MS) return;
+    this.refreshNow();
   }
 
   // Debounced profile re-render: coalesces several merges into one 100ms render

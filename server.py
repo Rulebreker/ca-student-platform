@@ -1047,6 +1047,29 @@ SHARED_COLLECTIONS = [
     'ai_autopilot_config', 'ai_scheduled_tasks', 'deleted_scheduled_tasks', 'ai_generation_jobs', 'ai_worker_status'
 ]
 
+# Large AI collections kept out of the per-instance JSON store while MongoDB is reachable: they are read
+# from MongoDB only by the requests that need them (refresh_collections / targeted queries) and never
+# written to the file. Without MongoDB (local development) the JSON store keeps them as before.
+AI_MONGO_ONLY_COLLECTIONS = ('ai_generation_jobs', 'ai_source_documents')
+
+
+def _ai_collections_in_mongo():
+    return mongodb_manager.is_database_connected()
+
+
+def _baseline_documents(data, name, docs):
+    """Record documents just read from MongoDB into data's load snapshot, so write-through only upserts
+    them if this request actually changes them (never a re-upload of an unchanged, possibly stale copy)."""
+    with _snapshot_lock:
+        entry = _load_snapshots.get(id(data))
+        if not entry or entry[0] is not data:
+            return
+        fps = entry[1].setdefault(name, {})
+        key_field = mongodb_manager.list_key_field(name)
+        for d in docs or []:
+            if isinstance(d, dict) and d.get(key_field):
+                fps[str(d.get(key_field))] = _fingerprint(d)
+
 
 # Deletion tombstones ("<collection>:<id>" in the deleted_documents collection). Deletions are
 # recorded in MongoDB so that no instance - including a fresh one seeded from backend_data.json -
@@ -1255,7 +1278,10 @@ def refresh_collections_from_mongo(data, collections=None, min_interval=1.0):
 
     now = time.time()
     target_keys = [k for k in (collections or SHARED_COLLECTIONS) if k != 'ai_providers']
-    keys_to_fetch = [k for k in target_keys if (now - _collection_last_synced.get(k, 0)) >= min_interval]
+    ai_in_mongo = _ai_collections_in_mongo()
+    # AI collections are not kept in the file between requests: when requested, always read them
+    keys_to_fetch = [k for k in target_keys if (now - _collection_last_synced.get(k, 0)) >= min_interval
+                     or (ai_in_mongo and k in AI_MONGO_ONLY_COLLECTIONS)]
     if not keys_to_fetch:
         return data
     # tombstones first, so the merge below can never bring a deleted record back
@@ -1374,6 +1400,9 @@ def refresh_collections_from_mongo(data, collections=None, min_interval=1.0):
                 # ai_source_documents, ai_generation_logs
                 key_field = mongodb_manager.list_key_field(key)
                 data[key] = _merge_documents(data.get(key, []), _as_items(cloud_data), key_field)
+                if key == 'ai_source_documents' and ai_in_mongo:
+                    # newest first, as when documents were inserted at the front of the local list
+                    data[key].sort(key=lambda d: str(d.get('uploadedAt') or ''), reverse=True)
 
             _collection_last_synced[key] = time.time()
             updated = True
@@ -1391,8 +1420,7 @@ def refresh_collections_from_mongo(data, collections=None, min_interval=1.0):
                     sync_to_firebase('payment_sessions', data.get('payment_sessions', []))
                 except Exception:
                     pass
-            with open(DATA_STORE_FILE, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2)
+            _write_data_store(data)   # no-op when the refresh changed nothing
         except Exception:
             pass
 
@@ -1581,12 +1609,19 @@ def load_backend_data(refresh_collections=None, min_interval=10.0):
                 if os.path.exists(DATA_STORE_FILE):
                     with open(DATA_STORE_FILE, 'r', encoding='utf-8') as f:
                         cur_data = json.load(f)
-                    
-                    # Cold start: merge every shared collection from MongoDB Atlas into the seed
-                    refresh_collections_from_mongo(cur_data, collections=SHARED_COLLECTIONS, min_interval=0.0)
 
-                    with open(DATA_STORE_FILE, 'w', encoding='utf-8') as f:
-                        json.dump(cur_data, f, indent=2)
+                    # Cold start: merge every shared collection from MongoDB Atlas into the seed. The AI
+                    # collections stay in MongoDB: neither downloaded nor kept from the bundled seed.
+                    seed_collections = SHARED_COLLECTIONS
+                    ai_in_mongo = _ai_collections_in_mongo()
+                    if ai_in_mongo:
+                        for key in AI_MONGO_ONLY_COLLECTIONS:
+                            cur_data.pop(key, None)
+                        seed_collections = [c for c in SHARED_COLLECTIONS if c not in AI_MONGO_ONLY_COLLECTIONS]
+                    refresh_collections_from_mongo(cur_data, collections=seed_collections, min_interval=0.0)
+
+                    # a new instance file: the seed copy's AI collections are not carried into it
+                    _write_data_store(cur_data, carry_ai=not ai_in_mongo)
             except Exception as _cloud_seed_err:
                 print(f"[COLD_START] Cloud seed overall error: {_cloud_seed_err}", flush=True)
 
@@ -1603,6 +1638,12 @@ def load_backend_data(refresh_collections=None, min_interval=10.0):
 
             if d is not None:
                 list_keys = ['tests', 'questions', 'test_attempts', 'submissions', 'papers', 'xp_transactions', 'notifications', 'bookmarks', 'subjects', 'referrals', 'payment_sessions', 'payment_channels', 'admin_audit_logs', 'xp_reset_history', 'ai_source_documents', 'ai_generation_logs', 'ai_scheduled_tasks', 'ai_generation_jobs']
+                if _ai_collections_in_mongo():
+                    # MongoDB is authoritative for these: ignore any (old) copy in the file; requests that
+                    # need them read them from MongoDB (refresh_collections or targeted queries). They still
+                    # default to [] below, as callers (e.g. JobRepository) expect the key.
+                    for key in AI_MONGO_ONLY_COLLECTIONS:
+                        d.pop(key, None)
                 for lk in list_keys:
                     if lk not in d:
                         d[lk] = []
@@ -1768,17 +1809,53 @@ def _merged_for_disk(data):
     return merged
 
 
+def _write_data_store(obj, carry_ai=True):
+    """Write the JSON data store as compact JSON (atomic temp file + replace). Skips the write when the
+    file already holds exactly this content. Returns True when the file was written.
+
+    AI_MONGO_ONLY_COLLECTIONS: while MongoDB is reachable the in-memory copies (read from MongoDB) are
+    never written. An existing file that still holds these collections keeps them untouched (carry_ai),
+    so nothing is removed automatically - see scripts/migrate_ai_out_of_datastore.py."""
+    try:
+        with open(DATA_STORE_FILE, 'r', encoding='utf-8') as f:
+            current = f.read()
+    except OSError:
+        current = None
+    ai_in_mongo = _ai_collections_in_mongo()
+    to_write = obj
+    if isinstance(obj, dict):
+        if ai_in_mongo:
+            to_write = {k: v for k, v in obj.items() if k not in AI_MONGO_ONLY_COLLECTIONS}
+        carry = [k for k in AI_MONGO_ONLY_COLLECTIONS if k not in to_write]
+        if carry_ai and current and carry and any(f'"{k}"' in current for k in carry):
+            try:
+                on_disk = json.loads(current)
+            except ValueError:
+                on_disk = None
+            if isinstance(on_disk, dict):
+                if to_write is obj:
+                    to_write = dict(obj)
+                for k in carry:
+                    if k in on_disk:
+                        to_write[k] = on_disk[k]
+    payload = json.dumps(to_write, separators=(',', ':'))
+    if current == payload:
+        return False
+    tmp_file = DATA_STORE_FILE + f".tmp.{os.getpid()}.{threading.get_ident()}"
+    with open(tmp_file, 'w', encoding='utf-8') as f:
+        f.write(payload)
+    try:
+        os.replace(tmp_file, DATA_STORE_FILE)
+    except OSError:
+        time.sleep(0.05)
+        os.replace(tmp_file, DATA_STORE_FILE)
+    return True
+
+
 def save_backend_data(data):
     with _backend_data_lock:
         to_write = _merged_for_disk(data)
-        tmp_file = DATA_STORE_FILE + f".tmp.{os.getpid()}.{threading.get_ident()}"
-        with open(tmp_file, 'w', encoding='utf-8') as f:
-            json.dump(to_write, f, indent=2)
-        try:
-            os.replace(tmp_file, DATA_STORE_FILE)
-        except OSError:
-            time.sleep(0.05)
-            os.replace(tmp_file, DATA_STORE_FILE)
+        _write_data_store(to_write)
     try:
         _write_through_to_mongo(data)
     except Exception as wt_err:
@@ -2220,6 +2297,7 @@ def refresh_job_document(data, job_id):
         jobs.insert(0, remote)
     elif float(remote.get('updatedTs') or 0) >= float(jobs[idx].get('updatedTs') or 0):
         jobs[idx] = remote
+    _baseline_documents(data, 'ai_generation_jobs', [remote])
     # the scheduled task waiting for this job may also have been updated elsewhere (e.g. dispatched there)
     task_id = remote.get('scheduledTaskId')
     if task_id and tombstone_key('ai_scheduled_tasks', task_id) not in all_tombstones(data):
@@ -2298,6 +2376,7 @@ def refresh_relevant_jobs(data):
         {'status': {'$in': list(ai_job_manager.ACTIVE_STATUSES)}}, {'_id': {'$in': sorted(ids)}}]})
     if remote:
         data['ai_generation_jobs'] = _merge_documents(jobs, remote)
+        _baseline_documents(data, 'ai_generation_jobs', remote)
 
 
 class StaleWorkerWrite(Exception):
@@ -3733,6 +3812,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                                         jobs_list[idx] = remote_job
                                     else:
                                         jobs_list.insert(0, remote_job)
+                                    _baseline_documents(data, 'ai_generation_jobs', [remote_job])
                     except Exception:
                         pass
                 job = ai_job_manager.get_job_status(job_id, data, save_backend_data, sync_to_firebase)
