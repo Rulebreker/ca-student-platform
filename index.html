@@ -334,13 +334,13 @@
         <div class="relative z-10 max-w-3xl">
           <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-400/30 mb-6 backdrop-blur-md">
             <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400"></i>
-            India's Premier CA Mentorship & Examination Platform
+            Online Practice Platform for CA Foundation, Inter & Final
           </div>
           <h1 class="text-3xl sm:text-5xl font-black tracking-tight leading-tight">
             Master Chartered Accountancy with <span class="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-300 to-amber-300">Precision & Mentorship</span>
           </h1>
           <p class="text-sm sm:text-base text-slate-300 mt-4 leading-relaxed max-w-2xl font-normal">
-            Take timed MCQ mock tests with authentic negative marking, download official case question papers, receive individual red-ink evaluated PDF copies, and rise on the state-wide gamified leaderboard.
+            Take timed MCQ mock tests with authentic negative marking, download subject-wise question papers, receive individual red-ink evaluated PDF copies, and rise on the state-wide gamified leaderboard.
           </p>
 
           <!-- PROMINENT CALL TO ACTIONS: Conditional Auth Buttons (Sign In / Register vs Go to Dashboard) -->
@@ -385,7 +385,7 @@
       <!-- Core Platform Pillars (4 Cards) -->
       <div>
         <div class="text-center max-w-2xl mx-auto mb-8">
-          <h2 class="text-2xl font-black text-slate-900 tracking-tight">Everything You Need for Single-Attempt Success</h2>
+          <h2 class="text-2xl font-black text-slate-900 tracking-tight">Everything You Need for Focused CA Practice</h2>
           <p class="text-xs text-slate-500 mt-1.5">Comprehensive examination toolkit built specifically for CA Foundation, CA Intermediate, and CA Final aspirants.</p>
         </div>
 
@@ -406,7 +406,7 @@
             </div>
             <h3 class="text-base font-bold text-slate-900 mb-2">Evaluated Answer Copies</h3>
             <p class="text-xs text-slate-500 leading-relaxed">
-              Upload handwritten solutions. Verified faculty grade your copies with red-ink annotations, step-by-step marks, and actionable feedback.
+              Upload handwritten solutions. Faculty evaluate your copies and return marks, annotations, and feedback.
             </p>
           </div>
 
@@ -416,7 +416,7 @@
             </div>
             <h3 class="text-base font-bold text-slate-900 mb-2">Gamified Leaderboard</h3>
             <p class="text-xs text-slate-500 leading-relaxed">
-              Earn XP for every test taken and copy submitted. Advance through tiers from Bronze Novice to Sovereign Vanguard with state and district filters.
+              Earn XP for every test taken and copy submitted. Advance through rank tiers from Rookie to Sovereign, with state and district filters.
             </p>
           </div>
 
@@ -426,7 +426,7 @@
             </div>
             <h3 class="text-base font-bold text-slate-900 mb-2">Student Referral Program</h3>
             <p class="text-xs text-slate-500 leading-relaxed">
-              Share your personal referral URL with peers. Earn 100 points for every registered student to unlock premium test series and rank badges.
+              Share your personal referral link with peers. Earn bonus XP when a student registers using your link.
             </p>
           </div>
         </div>
@@ -450,7 +450,7 @@
             <h3 class="text-lg font-black text-slate-900 mt-3">CA Foundation</h3>
             <p class="text-xs text-slate-500 mt-1">Accounting, Business Law, Quantitative Aptitude & Business Economics.</p>
             <div class="mt-4 pt-4 border-t border-slate-200/80 flex items-center justify-between">
-              <span class="text-[11px] font-bold text-slate-700">4 Subjects • 24 Papers</span>
+              <span class="text-[11px] font-bold text-slate-700">4 Subjects • MCQs & Papers</span>
               <button onclick="window.app.navigate('tests')" class="text-xs font-bold text-blue-600 hover:underline">View Tests →</button>
             </div>
           </div>
@@ -491,7 +491,7 @@
           </h1>
           <p id="dashboard-welcome-level" class="text-xs text-blue-200 mt-1.5 font-medium">CA Inter</p>
           <p class="text-xs text-slate-300 mt-3 leading-relaxed">
-            Stay consistent with your daily revision schedules. Take timed MCQ tests to build exam speed, download official question papers, and submit practical case computations for faculty review.
+            Stay consistent with your daily revision schedules. Take timed MCQ tests to build exam speed, download question papers, and submit practical case computations for faculty review.
           </p>
           <div class="flex flex-wrap gap-3 mt-6">
             <button onclick="window.app.navigate('tests')" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-sm transition-colors flex items-center gap-1.5">
@@ -1103,7 +1103,7 @@
               <span id="profile-page-username" class="text-xs text-blue-300 font-mono font-bold">@username</span>
             </div>
             <p class="text-xs text-slate-300 mt-2 max-w-xl">
-              Account actively enrolled in ICAI curriculum mock series. All evaluated submissions and private rankings are strictly confidential.
+              Your answer sheets and evaluated copies are visible only to you and authorised faculty and administrators.
             </p>
           </div>
         </div>
@@ -1454,46 +1454,62 @@
       </div>
     </section>
 
+    <!-- VIEW: ABOUT, CONTACT & LEGAL PAGES (#about, #contact, #privacy-policy, #terms, #disclaimer, #cookie-policy, #refund-policy) -->
+    <section id="view-legal" class="hidden py-2 sm:py-4">
+      <div id="legal-page-container">
+        <!-- Rendered by js/legal-pages.js -->
+      </div>
+    </section>
+
   </main>
 
   <!-- COMMON GLOBAL FOOTER -->
-  <footer class="bg-white border-t border-slate-200 mt-12 py-6 text-xs text-slate-500">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-5">
-      <!-- Brand & Dynamic Copyright -->
-      <div class="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 text-center sm:text-left">
-        <div class="flex items-center gap-2">
-          <img src="assets/brandlogo.png" alt="ExcellenceCA" class="h-8 w-auto object-contain">
+  <footer class="bg-white border-t border-slate-200 mt-12 text-xs text-slate-500">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-6">
+      <div class="grid grid-cols-2 md:grid-cols-12 gap-x-6 gap-y-8">
+        <!-- Brand -->
+        <div class="col-span-2 md:col-span-5 space-y-3">
+          <img src="assets/brandlogo.png" alt="ExcellenceCA" class="h-9 w-auto object-contain">
+          <p class="text-xs text-slate-500 leading-relaxed max-w-sm">
+            Online MCQ tests, mock tests and test papers for CA Foundation, Intermediate and Final students.
+          </p>
         </div>
-        <span class="hidden sm:inline text-slate-300">•</span>
+
+        <!-- ExcellenceCA -->
+        <nav aria-label="ExcellenceCA" class="md:col-span-2">
+          <h2 class="text-[11px] font-black uppercase tracking-wider text-slate-900 mb-3">ExcellenceCA</h2>
+          <ul class="space-y-2 font-medium text-slate-600">
+            <li><a href="#about" class="hover:text-blue-600 transition-colors">About Us</a></li>
+            <li><a href="#contact" class="hover:text-blue-600 transition-colors">Contact Us</a></li>
+            <li><button type="button" onclick="window.app.showFooterModal('partnership')" class="text-left hover:text-blue-600 transition-colors cursor-pointer">Partnership / Sponsor</button></li>
+          </ul>
+        </nav>
+
+        <!-- Legal -->
+        <nav aria-label="Legal" class="md:col-span-3">
+          <h2 class="text-[11px] font-black uppercase tracking-wider text-slate-900 mb-3">Legal</h2>
+          <ul class="space-y-2 font-medium text-slate-600">
+            <li><a href="#privacy-policy" class="hover:text-blue-600 transition-colors">Privacy Policy</a></li>
+            <li><a href="#terms" class="hover:text-blue-600 transition-colors">Terms &amp; Conditions</a></li>
+            <li><a href="#disclaimer" class="hover:text-blue-600 transition-colors">Disclaimer</a></li>
+            <li><a href="#cookie-policy" class="hover:text-blue-600 transition-colors">Cookie Policy</a></li>
+            <li><a href="#refund-policy" class="hover:text-blue-600 transition-colors">Refund &amp; Cancellation Policy</a></li>
+          </ul>
+        </nav>
+
+        <!-- Support -->
+        <div class="col-span-2 md:col-span-2">
+          <h2 class="text-[11px] font-black uppercase tracking-wider text-slate-900 mb-3">Support</h2>
+          <a href="mailto:snapdoubt0@gmail.com" class="inline-flex items-center gap-1.5 font-semibold text-blue-600 hover:underline break-anywhere">
+            <i data-lucide="mail" class="w-3.5 h-3.5 flex-shrink-0"></i> snapdoubt0@gmail.com
+          </a>
+        </div>
+      </div>
+
+      <!-- Copyright -->
+      <div class="mt-8 pt-5 border-t border-slate-100 flex flex-col md:flex-row md:items-center md:justify-between gap-2 text-center md:text-left">
         <span class="text-slate-500 font-medium">© <span id="footer-current-year">2026</span> ExcellenceCA. All rights reserved.</span>
-      </div>
-
-      <!-- Functional Links (Modals) -->
-      <div class="flex flex-wrap items-center justify-center gap-5 sm:gap-6 font-semibold text-slate-600">
-        <button type="button" onclick="window.app.showFooterModal('partnership')" class="hover:text-blue-600 transition-colors cursor-pointer">Partnership / Sponsor</button>
-        <button type="button" onclick="window.app.showFooterModal('privacy')" class="hover:text-blue-600 transition-colors cursor-pointer">Privacy Policy</button>
-        <button type="button" onclick="window.app.showFooterModal('support')" class="hover:text-blue-600 transition-colors cursor-pointer">Support</button>
-      </div>
-
-      <!-- Social Media Icons (Clickable) -->
-      <div class="flex items-center gap-3 text-slate-500">
-        <a href="https://youtube.com" target="_blank" rel="noopener noreferrer" class="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:text-red-600 hover:border-red-200 hover:bg-red-50/50 transition-colors" title="YouTube" aria-label="YouTube">
-          <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-          </svg>
-        </a>
-        <a href="https://instagram.com" target="_blank" rel="noopener noreferrer" class="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:text-pink-600 hover:border-pink-200 hover:bg-pink-50/50 transition-colors" title="Instagram" aria-label="Instagram">
-          <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect width="20" height="20" x="2" y="2" rx="5" ry="5"/>
-            <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
-            <line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/>
-          </svg>
-        </a>
-        <a href="https://x.com" target="_blank" rel="noopener noreferrer" class="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:text-slate-900 hover:border-slate-400 hover:bg-slate-100 transition-colors" title="X (Twitter)" aria-label="X (Twitter)">
-          <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-          </svg>
-        </a>
+        <span class="text-[11px] text-slate-400">ExcellenceCA is an independent practice platform and is not affiliated with ICAI.</span>
       </div>
     </div>
   </footer>
@@ -1743,7 +1759,7 @@
     </div>
   </div>
 
-  <!-- Modal 6: Footer Info Modal (Partnership, Privacy Policy, Support) -->
+  <!-- Modal 6: Footer Info Modal (Partnership) -->
   <div id="footer-info-modal" class="modal-backdrop fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-3 sm:p-4">
     <div id="footer-info-modal-content" class="bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150 relative">
       <!-- Populated by app.js showFooterModal() -->
@@ -1785,11 +1801,11 @@
   <script src="js/exam-levels.js?v=20260927_levels"></script>
   <script src="js/auth.js?v=20260927_levels"></script>
   <script src="js/secure-backend.js?v=20260926_mongo"></script>
-  <script src="js/subscription.js?v=20260926_mongo"></script>
+  <script src="js/subscription.js?v=20260929_claims"></script>
   <script src="js/server-sync.js?v=20260926_mongo"></script>
   <script src="js/student-dashboard.js?v=20260926_mongo"></script>
   <script src="js/lecture-player.js?v=20260926_mongo"></script>
-  <script src="js/test-engine.js?v=20260927_levels"></script>
+  <script src="js/test-engine.js?v=20260929_claims"></script>
   <script src="js/leaderboard.js?v=20260927_levels"></script>
   <script src="js/assignment-portal.js?v=20260927_levels"></script>
   <script src="js/teacher-portal.js?v=20260926_mongo"></script>
@@ -1797,7 +1813,8 @@
   <script src="js/admin-subscriptions.js?v=20260926_mongo"></script>
   <script src="js/banner-manager.js?v=20260926_mongo"></script>
   <script src="js/password-reset.js?v=20260927_pwreset"></script>
-  <script src="js/app.js?v=20260927_levels"></script>
+  <script src="js/legal-pages.js?v=20260929_legal"></script>
+  <script src="js/app.js?v=20260929_claims"></script>
 
 </body>
 </html>

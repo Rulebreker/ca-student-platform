@@ -380,7 +380,7 @@ class SubscriptionManager {
         <!-- 2. PLUS PASS (Popular) -->
         <div class="relative rounded-2xl border-2 border-indigo-600 bg-indigo-50/10 p-6 flex flex-col justify-between shadow-md hover:shadow-lg transition-shadow">
           <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full bg-indigo-600 text-white text-[11px] font-extrabold uppercase tracking-wide shadow-xs">
-            Most Popular
+            Recommended
           </div>
           <div>
             <div class="flex items-center justify-between mb-3">
@@ -1329,7 +1329,7 @@ class SubscriptionManager {
         ? 'bg-purple-600 hover:bg-purple-700 text-white' 
         : (planTier === 'plus' ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white');
       return {
-        badge: planTier === 'elite' ? '<span class="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded-full bg-purple-600 text-white">VIP Tier</span>' : (planTier === 'plus' ? '<span class="px-2 py-0.5 text-[10px] font-extrabold rounded-full bg-indigo-100 text-indigo-700">Most Popular</span>' : ''),
+        badge: planTier === 'elite' ? '<span class="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded-full bg-purple-600 text-white">VIP Tier</span>' : (planTier === 'plus' ? '<span class="px-2 py-0.5 text-[10px] font-extrabold rounded-full bg-indigo-100 text-indigo-700">Recommended</span>' : ''),
         btn: `
           <button onclick="window.subscriptionManager.startCheckout('${plan.id}')" class="w-full py-2.5 ${defaultBtnColor} font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
             <span>Buy ${planNameCap} Pass</span>
@@ -1383,7 +1383,7 @@ class SubscriptionManager {
             ExcellenceCA Examination Passes
           </h1>
           <p class="text-xs sm:text-sm text-slate-600 leading-relaxed max-w-2xl mx-auto">
-            Get your descriptive mock answer copies checked under authoritative ICAI marking standards, unlock tier-protected MCQ questions, and earn instant bonus XP.
+            Get your descriptive mock answer copies evaluated by faculty, unlock premium MCQ questions, and earn instant bonus XP.
           </p>
 
           <!-- Dynamic Billing Cycle Switcher Tabs -->
@@ -1434,7 +1434,7 @@ class SubscriptionManager {
                   <span class="text-3xl font-black text-slate-900">₹${corePlan ? corePlan.price : 0}</span>
                   <span class="text-xs font-semibold text-slate-500">${getDurationText(corePlan)}</span>
                 </div>
-                <p class="text-xs text-slate-500 mt-1">Foundation revision with certified copy grading</p>
+                <p class="text-xs text-slate-500 mt-1">Foundation revision with faculty copy evaluation</p>
               </div>
 
               <div class="pt-3 border-t border-slate-100 space-y-2.5">

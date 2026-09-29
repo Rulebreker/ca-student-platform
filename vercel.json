@@ -12,6 +12,10 @@
     {
       "source": "/reset-password",
       "destination": "/index.html"
+    },
+    {
+      "source": "/(about|contact|privacy-policy|terms|disclaimer|cookie-policy|refund-policy)",
+      "destination": "/index.html"
     }
   ],
   "crons": [

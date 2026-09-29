@@ -2652,8 +2652,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             check_opportunistic_scheduler_tick()
         print(f"[SERVER] Incoming GET: {redact_url_tokens(self.path)}", flush=True)
 
-        # Password pages are routes of the single-page app (vercel.json rewrites them in production)
-        if path in ('/forgot-password', '/reset-password'):
+        # Password, about/contact and policy pages are routes of the single-page app (vercel.json rewrites them in production)
+        if path in ('/forgot-password', '/reset-password', '/about', '/contact', '/privacy-policy',
+                    '/terms', '/disclaimer', '/cookie-policy', '/refund-policy'):
             self.path = '/index.html'
             super().do_GET()
             return

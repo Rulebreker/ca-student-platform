@@ -77,6 +77,8 @@ class App {
           rawHash = 'tests';
         } else if (lastPart === 'forgot-password' || lastPart === 'reset-password') {
           rawHash = lastPart;
+        } else if (window.legalPages && window.legalPages.isLegalRoute(lastPart)) {
+          rawHash = lastPart;
         } else {
           // Unauthenticated visitors or default landing opens Homepage
           rawHash = 'home';
@@ -88,6 +90,11 @@ class App {
     if (!hash || hash === '/' || hash === 'home') hash = 'home';
     if (hash === 'test' || hash === 'tests' || hash === '/test' || hash === '/tests') hash = 'tests';
     if (hash === 'passes' || hash === 'pricing' || hash === '/passes' || hash === '/pricing') hash = 'passes';
+    if (hash === 'about-us') hash = 'about';
+    if (hash === 'contact-us' || hash === 'support') hash = 'contact';
+    if (hash === 'privacy') hash = 'privacy-policy';
+    if (hash === 'terms-and-conditions') hash = 'terms';
+    if (hash === 'refund' || hash === 'cancellation-policy') hash = 'refund-policy';
 
     // 403 Forbidden check for lectures: restricted for students and teachers (only admin allowed)
     if (hash === 'lectures') {
@@ -213,6 +220,10 @@ class App {
 
     this.currentView = viewName;
 
+    // About, Contact and policy pages share a single container
+    const isLegalView = !!(window.legalPages && window.legalPages.isLegalRoute(viewName));
+    const sectionName = isLegalView ? 'legal' : viewName;
+
     // View containers
     const views = [
       'view-home',
@@ -229,13 +240,14 @@ class App {
       'view-passes',
       'view-forgot-password',
       'view-reset-password',
+      'view-legal',
       'view-403'
     ];
 
     views.forEach(v => {
       const el = document.getElementById(v);
       if (el) {
-        if (v === `view-${viewName}`) {
+        if (v === `view-${sectionName}`) {
           el.classList.remove('hidden');
         } else {
           el.classList.add('hidden');
@@ -276,7 +288,12 @@ class App {
     }
 
     // Trigger renderers
-    if (viewName === 'dashboard') {
+    if (window.legalPages && !isLegalView) {
+      window.legalPages.resetTitle();
+    }
+    if (isLegalView) {
+      window.legalPages.render(viewName);
+    } else if (viewName === 'dashboard') {
       window.studentDashboard.render();
     } else if (viewName === 'profile') {
       this.renderProfilePage();
@@ -389,7 +406,7 @@ class App {
 
           <div class="text-center mb-5">
             <h3 class="text-xl font-black text-slate-900">Create ExcellenceCA Account</h3>
-            <p class="text-xs text-slate-500 mt-1">Join India's premier Chartered Accountancy test platform</p>
+            <p class="text-xs text-slate-500 mt-1">Create your free ExcellenceCA student account</p>
           </div>
 
           <form onsubmit="window.app.handleSignupSubmit(event)" class="space-y-3 text-xs">
@@ -1196,6 +1213,12 @@ class App {
   // FOOTER & GLOBAL MODALS
   // ==========================================
   showFooterModal(type) {
+    // Privacy Policy and Support are full pages now (js/legal-pages.js)
+    if (type === 'privacy' || type === 'support') {
+      window.location.hash = type === 'privacy' ? 'privacy-policy' : 'contact';
+      return;
+    }
+
     const modal = document.getElementById('footer-info-modal');
     const container = document.getElementById('footer-info-modal-content');
     if (!modal || !container) return;
@@ -1212,16 +1235,16 @@ class App {
       body = `
         <div class="space-y-4 text-xs text-slate-600 leading-relaxed">
           <p>
-            ExcellenceCA collaborates with renowned Chartered Accountancy faculties, authors, test series mentors, and educational publishers across India.
+            ExcellenceCA welcomes enquiries from Chartered Accountancy faculty, authors, test series mentors and educational publishers who are interested in working with the platform.
           </p>
           <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 text-blue-900 space-y-2">
             <h5 class="font-bold text-xs flex items-center gap-1.5">
-              <i data-lucide="check-circle-2" class="w-4 h-4 text-blue-600"></i> Faculty & Institute Opportunities:
+              <i data-lucide="check-circle-2" class="w-4 h-4 text-blue-600"></i> Areas we are open to discussing:
             </h5>
             <ul class="list-disc list-inside space-y-1 text-[11px] text-blue-800">
-              <li>Host exclusive CA Foundation, Inter & Final Mock Test Series</li>
-              <li>Provide red-ink evaluative copy checking for subjective answer sheets</li>
-              <li>Publish verified revision notes and case-study question papers</li>
+              <li>Mock test series for CA Foundation, Inter & Final</li>
+              <li>Evaluation of subjective answer sheets</li>
+              <li>Revision notes and case-study question papers</li>
             </ul>
           </div>
           <div class="border-t border-slate-100 pt-3">
@@ -1229,82 +1252,7 @@ class App {
             <div class="flex items-center gap-2 text-slate-800 font-semibold">
               <i data-lucide="mail" class="w-4 h-4 text-blue-600"></i>
               <a href="mailto:snapdoubt0@gmail.com" class="hover:underline text-blue-600">snapdoubt0@gmail.com</a>
-            </div>
-            <div class="text-[11px] text-slate-400 mt-1">Direct inquiries answered within 24-48 business hours.</div>
-          </div>
-        </div>
-      `;
-    } else if (type === 'privacy') {
-      title = 'Privacy Policy';
-      icon = 'shield-check';
-      badge = 'Student Data Protection';
-      body = `
-        <div class="space-y-4 text-xs text-slate-600 leading-relaxed max-h-[60vh] overflow-y-auto pr-1">
-          <p>
-            At <strong>ExcellenceCA</strong>, we treat student privacy and academic record confidentiality with the utmost integrity.
-          </p>
-          <div class="space-y-3">
-            <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
-              <h6 class="font-bold text-slate-800 text-xs flex items-center gap-1.5 mb-1">
-                <i data-lucide="database" class="w-3.5 h-3.5 text-blue-600"></i> 1. Academic Data Storage
-              </h6>
-              <p class="text-[11px] text-slate-500">
-                Your submitted test responses, descriptive PDF answer sheets, and evaluated marks are stored securely and accessible only to authorized faculty and administrators.
-              </p>
-            </div>
-            <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
-              <h6 class="font-bold text-slate-800 text-xs flex items-center gap-1.5 mb-1">
-                <i data-lucide="lock" class="w-3.5 h-3.5 text-emerald-600"></i> 2. No Third-Party Commercial Sale
-              </h6>
-              <p class="text-[11px] text-slate-500">
-                We strictly do not sell, barter, or distribute student phone numbers, email addresses, or test scores to third-party telemarketers or external advertisers.
-              </p>
-            </div>
-            <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
-              <h6 class="font-bold text-slate-800 text-xs flex items-center gap-1.5 mb-1">
-                <i data-lucide="file-check" class="w-3.5 h-3.5 text-indigo-600"></i> 3. Evaluated Submissions
-              </h6>
-              <p class="text-[11px] text-slate-500">
-                Corrected PDF answer copies and teacher remarks are private to your student profile and never made public on search engines.
-              </p>
-            </div>
-          </div>
-          <p class="text-[11px] text-slate-400">
-            For privacy inquiries or account data removal requests, contact <a href="mailto:snapdoubt0@gmail.com" class="text-blue-600 font-semibold hover:underline">snapdoubt0@gmail.com</a>.
-          </p>
-        </div>
-      `;
-    } else if (type === 'support') {
-      title = 'Student & Faculty Support';
-      icon = 'life-buoy';
-      badge = 'Helpdesk & Assistance';
-      body = `
-        <div class="space-y-4 text-xs text-slate-600 leading-relaxed">
-          <p>
-            Encountering issues with test submissions, PDF question papers, or account login? Our dedicated support team is here to assist you.
-          </p>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
-              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Email Support</span>
-              <a href="mailto:snapdoubt0@gmail.com" class="font-bold text-blue-600 text-xs block mt-1 hover:underline">snapdoubt0@gmail.com</a>
-              <span class="text-[11px] text-slate-400 mt-0.5 block">Response time: &lt; 4 hours</span>
-            </div>
-            <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
-              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Helpline Hours</span>
-              <span class="font-bold text-slate-800 text-xs block mt-1">Mon - Sat: 9 AM - 7 PM</span>
-              <span class="text-[11px] text-slate-400 mt-0.5 block">IST (Academic Support Desk)</span>
-            </div>
-          </div>
-          <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 text-emerald-900">
-            <div class="font-bold text-xs flex items-center gap-1.5 mb-1">
-              <i data-lucide="help-circle" class="w-4 h-4 text-emerald-600"></i> Quick Resolution Checklist:
-            </div>
-            <ul class="list-disc list-inside text-[11px] text-emerald-800 space-y-0.5">
-              <li>Ensure PDF file size is within 15 MB before uploading solutions.</li>
-              <li>For login issues, verify your registered phone/email and password.</li>
-              <li>Evaluated copies are marked within 48-72 hours of submission.</li>
-            </ul>
-          </div>
+            </div>          </div>
         </div>
       `;
     }

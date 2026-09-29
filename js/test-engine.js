@@ -750,7 +750,7 @@ class TestEngine {
       planCards.push(`
         <div class="relative rounded-2xl border-2 border-amber-500/80 bg-gradient-to-b from-amber-50/50 to-white p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
           <div class="absolute -top-3 left-4 bg-amber-500 text-white font-bold text-[10px] px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow-xs">
-            Most Popular
+            Recommended
           </div>
           <div>
             <div class="flex items-baseline justify-between mt-1 mb-2">
@@ -1871,7 +1871,7 @@ class TestEngine {
         <div class="border-t border-slate-200 pt-6">
           <h4 class="text-base font-bold text-slate-900 mb-4 flex items-center justify-between">
             <span>Detailed Solutions & Conceptual Explanations</span>
-            <span class="text-xs text-slate-500 font-normal">ICAI Curriculum Standard</span>
+            <span class="text-xs text-slate-500 font-normal">For practice & self-assessment</span>
           </h4>
 
           <div class="space-y-4">
@@ -1939,13 +1939,13 @@ class TestEngine {
                   <div class="bg-amber-50/70 border border-amber-200 rounded-lg p-3.5 text-xs text-amber-950 mt-2">
                     <div class="font-bold flex items-center gap-1.5 text-amber-900 mb-1">
                       <i data-lucide="book-open" class="w-3.5 h-3.5"></i>
-                      ICAI Standard Explanation:
+                      Explanation:
                     </div>
                     <p class="leading-relaxed text-slate-800">${q.explanation || 'Refer to relevant Accounting Standard / Companies Act provisions.'}</p>
                     ${q.explanationImage ? `
                       <div class="mt-2 border-t border-amber-200 pt-2">
-                        <p class="text-[10px] font-semibold text-amber-700 uppercase tracking-wide mb-1">ICAI Reference Diagram:</p>
-                        <img src="${q.explanationImage}" alt="ICAI Explanation Diagram" class="max-h-48 rounded border border-amber-300 object-contain bg-white w-full" onerror="this.style.display='none'">
+                        <p class="text-[10px] font-semibold text-amber-700 uppercase tracking-wide mb-1">Reference Diagram:</p>
+                        <img src="${q.explanationImage}" alt="Explanation diagram" class="max-h-48 rounded border border-amber-300 object-contain bg-white w-full" onerror="this.style.display='none'">
                       </div>
                     ` : ''}
                   </div>
