@@ -43,7 +43,7 @@ import ai_mcq_engine
 
 DEFAULT_SERVER = os.environ.get('EXCELLENCECA_SERVER_URL', 'https://excellenceca.vercel.app')
 DEFAULT_MODEL = local_qwen_service.OLLAMA_MODEL
-DEFAULT_POLL_INTERVAL = 2.5
+DEFAULT_POLL_INTERVAL = 15.0   # idle wait between claim polls; after a job finishes the next claim is immediate
 DEFAULT_HEARTBEAT_INTERVAL = 15.0
 DEFAULT_TICK_INTERVAL = 60.0
 WORKER_VERSION = '2.0.0'
@@ -357,7 +357,8 @@ def parse_args():
     parser.add_argument('--server', default=DEFAULT_SERVER, help=f"Server URL (default: {DEFAULT_SERVER})")
     parser.add_argument('--token', default=None, help="Worker secret (default: AI_WORKER_SECRET environment variable)")
     parser.add_argument('--model', default=DEFAULT_MODEL, help=f"Ollama model name (default: {DEFAULT_MODEL})")
-    parser.add_argument('--poll-interval', type=float, default=DEFAULT_POLL_INTERVAL)
+    parser.add_argument('--poll-interval', type=float, default=DEFAULT_POLL_INTERVAL,
+                        help=f"Seconds to wait between job claim polls while idle (default: {DEFAULT_POLL_INTERVAL:g})")
     parser.add_argument('--heartbeat-interval', type=float, default=DEFAULT_HEARTBEAT_INTERVAL)
     parser.add_argument('--tick-interval', type=float, default=DEFAULT_TICK_INTERVAL, help="Auto-Pilot tick interval in seconds")
     parser.add_argument('--worker-id', default=None, help="Stable worker identifier (lets a restarted worker resume its job)")
