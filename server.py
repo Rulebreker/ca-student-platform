@@ -28,6 +28,8 @@ import hashlib
 import hmac
 import secrets
 import collections
+import collections.abc
+import marshal
 
 PORT = 8000
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1268,10 +1270,11 @@ def _as_items(cloud_data):
     return cloud_data if isinstance(cloud_data, list) else []
 
 
-def refresh_collections_from_mongo(data, collections=None, min_interval=1.0):
+def refresh_collections_from_mongo(data, collections=None, min_interval=1.0, fetched_out=None):
     """
     Merge the requested collections from MongoDB Atlas (the shared production store) into this
-    instance's data. Throttled per collection by min_interval seconds.
+    instance's data. Throttled per collection by min_interval seconds. fetched_out (a list), if given,
+    receives every collection this call read from MongoDB (i.e. that may have changed in `data`).
     """
     if not data or not isinstance(data, dict):
         return data
@@ -1291,6 +1294,8 @@ def refresh_collections_from_mongo(data, collections=None, min_interval=1.0):
     if 'ai_scheduled_tasks' in keys_to_fetch or 'deleted_scheduled_tasks' in keys_to_fetch:
         tomb_keys.append('deleted_scheduled_tasks')
     keys_to_fetch = tomb_keys + [k for k in keys_to_fetch if k not in tomb_keys]
+    if fetched_out is not None:
+        fetched_out.extend(keys_to_fetch)
 
     updated = False
     for key in keys_to_fetch:
@@ -1595,6 +1600,212 @@ def sanitize_rtdb_binary_payloads(data):
 
     return dirty
 
+# ---------------------------------------------------------------------------
+# Instance-local cache of the normalized datastore
+# ---------------------------------------------------------------------------
+# The JSON file is parsed, normalized (seed users, syllabus subjects, XP backfill, defaults, tombstones)
+# and fingerprinted once per datastore version. Every load_backend_data() call then gets a private copy
+# (marshal round-trip, ~2 ms) - callers mutate what they get, so the cached object is never handed out.
+# The entry is valid while the file's (mtime_ns, size, inode) and the normalization inputs are unchanged;
+# the application's own writes also drop it explicitly (_write_data_store).
+class _StoreCacheEntry:
+    __slots__ = ('key', 'blob', 'view', 'fps')
+
+    def __init__(self, key, blob, view, fps):
+        self.key = key      # file signature + normalization inputs
+        self.blob = blob    # marshal of the normalized datastore: private copies are made from it
+        self.view = view    # read-only normalized datastore (authentication lookups); never mutated
+        self.fps = fps      # {collection: {doc key: fingerprint}} of view (load snapshot base)
+
+
+_store_cache = {}   # DATA_STORE_FILE path -> _StoreCacheEntry
+_store_cache_stats = {'hits': 0, 'misses': 0}
+
+
+def _store_cache_key():
+    """Cheap validity key: file metadata (no read) plus everything normalization depends on."""
+    st = os.stat(DATA_STORE_FILE)
+    return (st.st_mtime_ns, st.st_size, st.st_ino, _ai_collections_in_mongo(),
+            os.environ.get('EXCELLENCECA_SAMPLE_DATA', ''), id(INITIAL_USERS), id(sync_historical_xp))
+
+
+def _invalidate_store_cache():
+    with _backend_data_lock:
+        _store_cache.pop(DATA_STORE_FILE, None)
+
+
+def _normalize_store(d):
+    """Normalization applied to the freshly parsed file (unchanged from the former per-load code)."""
+    list_keys = ['tests', 'questions', 'test_attempts', 'submissions', 'papers', 'xp_transactions', 'notifications', 'bookmarks', 'subjects', 'referrals', 'payment_sessions', 'payment_channels', 'admin_audit_logs', 'xp_reset_history', 'ai_source_documents', 'ai_generation_logs', 'ai_scheduled_tasks', 'ai_generation_jobs']
+    if _ai_collections_in_mongo():
+        # MongoDB is authoritative for these: ignore any (old) copy in the file; requests that
+        # need them read them from MongoDB (refresh_collections or targeted queries). They still
+        # default to [] below, as callers (e.g. JobRepository) expect the key.
+        for key in AI_MONGO_ONLY_COLLECTIONS:
+            d.pop(key, None)
+    for lk in list_keys:
+        if lk not in d:
+            d[lk] = []
+        elif isinstance(d[lk], dict):
+            d[lk] = list(d[lk].values())
+    if 'ai_autopilot_config' not in d or not isinstance(d['ai_autopilot_config'], dict):
+        d['ai_autopilot_config'] = dict(ai_scheduler.DEFAULT_AUTOPILOT_CONFIG)
+    if 'ai_providers' not in d or not isinstance(d['ai_providers'], list):
+        d['ai_providers'] = [dict(p) for p in ai_provider_manager.DEFAULT_PROVIDERS]
+    if not d.get('subjects'):
+        d['subjects'] = syllabus_hierarchy.get_all_subjects_flat()
+    else:
+        existing_sub_ids = {s.get('id') for s in d['subjects'] if isinstance(s, dict)}
+        for s in syllabus_hierarchy.get_all_subjects_flat():
+            if s['id'] not in existing_sub_ids:
+                d['subjects'].append(s)
+    if 'referral_settings' not in d: d['referral_settings'] = {'referrerReward': 100, 'newStudentReward': 100}
+    if 'xp_reset_settings' not in d: d['xp_reset_settings'] = {'enabled': False, 'nextReset': None, 'intervalDays': 90, 'customSeconds': None, 'lastReset': None}
+    # Sync seed users and hashed passwords (skipping any permanently revoked accounts)
+    revoked_set = set(str(x).lower().strip() for x in d.get('revoked_users', []))
+    # sample students are only (re)created when EXCELLENCECA_SAMPLE_DATA=1 (local development)
+    for email, init_u in sample_accounts.without_sample_students(INITIAL_USERS).items():
+        u_email = str(email or '').lower().strip()
+        u_id = str(init_u.get('id') or '').lower().strip()
+        u_uname = str(init_u.get('username') or '').lower().lstrip('@').strip()
+        if u_email in revoked_set or u_id in revoked_set or u_uname in revoked_set:
+            continue
+        if email not in d.get('users', {}):
+            d.setdefault('users', {})[email] = dict(init_u)
+        else:
+            u = d['users'][email]
+            if not u.get('password'):
+                u['password'] = init_u['password']
+            if not u.get('username') and init_u.get('username'):
+                u['username'] = init_u['username']
+            if not u.get('token') and init_u.get('token'):
+                u['token'] = init_u['token']
+    for u in d.get('users', {}).values():
+        if u.get('role') == 'student':
+            if 'referralPoints' not in u:
+                u['referralPoints'] = 0
+            if 'referralCount' not in u:
+                u['referralCount'] = 0
+    try:
+        sync_historical_xp(d)
+    except Exception as xp_err:
+        print(f"[SYNC_XP_WARNING] {xp_err}", flush=True)
+
+    try:
+        if sanitize_rtdb_binary_payloads(d):
+            save_backend_data(d)
+            sync_to_firebase('payment_channels', d.get('payment_channels', []))
+            sync_to_firebase('payment_sessions', d.get('payment_sessions', []))
+    except Exception as san_err:
+        print(f"[SANITIZE_PAYLOAD_WARNING] {san_err}", flush=True)
+    apply_tombstones(d)   # idempotent; also applied after each refresh
+
+
+def _load_normalized_store():
+    """(private normalized copy, cache entry) - from the cache when the file is unchanged, else parsed,
+    normalized and cached. (None, None) when the file cannot be read. Caller holds _backend_data_lock."""
+    try:
+        key = _store_cache_key()   # taken BEFORE reading: a write during the read makes this key stale
+    except OSError:
+        key = None
+    entry = _store_cache.get(DATA_STORE_FILE)
+    if key is not None and entry is not None and entry.key == key:
+        _store_cache_stats['hits'] += 1
+        return marshal.loads(entry.blob), entry
+
+    d = None
+    for attempt in range(5):
+        try:
+            with open(DATA_STORE_FILE, 'r', encoding='utf-8') as f:
+                d = json.load(f)
+            break
+        except Exception as read_err:
+            time.sleep(0.05)
+            d = None
+    if d is None:
+        return None, None
+    _normalize_store(d)
+    _store_cache_stats['misses'] += 1
+    if key is None:
+        return d, None
+    try:
+        blob = marshal.dumps(d)
+    except ValueError:
+        _store_cache.pop(DATA_STORE_FILE, None)   # a non-JSON value: not cacheable, fingerprint per load
+        return d, None
+    view = marshal.loads(blob)
+    fps = {name: _collection_fingerprints(name, view.get(name)) for name in SHARED_COLLECTIONS if name in view}
+    entry = _StoreCacheEntry(key, blob, view, fps)
+    _store_cache[DATA_STORE_FILE] = entry
+    return d, entry
+
+
+def _store_view():
+    """The cached read-only normalized datastore (refreshed if the file changed). Never mutate it."""
+    with _backend_data_lock:
+        if not os.path.exists(DATA_STORE_FILE):
+            return None
+        try:
+            key = _store_cache_key()
+        except OSError:
+            return None
+        entry = _store_cache.get(DATA_STORE_FILE)
+        if entry is None or entry.key != key:
+            _, entry = _load_normalized_store()
+        return entry.view if entry is not None else None
+
+
+def _refresh_touched_collections(fetched):
+    """Collections a MongoDB refresh may have changed in a request's copy (so they differ from the
+    cached base): the fetched ones, plus what apply_tombstones / payment sanitizing can touch."""
+    if not fetched:
+        return ()
+    names = set(fetched) | set(TOMBSTONED_COLLECTIONS) | {
+        'deleted_documents', 'deleted_scheduled_tasks', 'payment_channels', 'payment_sessions'}
+    if names & {'papers', 'assignments'}:
+        names |= {'papers', 'assignments'}
+    return names
+
+
+class _LazySnapshot(collections.abc.MutableMapping):
+    """A load snapshot ({collection: {doc key: fingerprint}}) built only when a save needs it: the cached
+    base fingerprints, overridden by the collections this request's refresh changed (fingerprinted at load)."""
+
+    def __init__(self, base_fps, eager):
+        self._base, self._eager, self._snap = base_fps, eager, None
+
+    def _m(self):
+        if self._snap is None:
+            snap = {name: dict(fps) for name, fps in self._base.items()}   # never mutate the shared base
+            snap.update(self._eager)
+            self._snap, self._base, self._eager = snap, None, None
+        return self._snap
+
+    def __getitem__(self, k):
+        return self._m()[k]
+
+    def __setitem__(self, k, v):
+        self._m()[k] = v
+
+    def __delitem__(self, k):
+        del self._m()[k]
+
+    def __iter__(self):
+        return iter(self._m())
+
+    def __len__(self):
+        return len(self._m())
+
+
+def _remember_cached_load_snapshot(data, entry, touched):
+    eager = {name: _collection_fingerprints(name, data.get(name)) for name in touched if name in data}
+    with _snapshot_lock:
+        _load_snapshots[id(data)] = (data, _LazySnapshot(entry.fps, eager))
+        _load_snapshots.move_to_end(id(data))
+        while len(_load_snapshots) > _SNAPSHOT_LIMIT:
+            _load_snapshots.popitem(last=False)
+
+
 def load_backend_data(refresh_collections=None, min_interval=10.0):
     with _backend_data_lock:
         if not os.path.exists(DATA_STORE_FILE):
@@ -1626,88 +1837,24 @@ def load_backend_data(refresh_collections=None, min_interval=10.0):
                 print(f"[COLD_START] Cloud seed overall error: {_cloud_seed_err}", flush=True)
 
         if os.path.exists(DATA_STORE_FILE):
-            d = None
-            for attempt in range(5):
-                try:
-                    with open(DATA_STORE_FILE, 'r', encoding='utf-8') as f:
-                        d = json.load(f)
-                    break
-                except Exception as read_err:
-                    time.sleep(0.05)
-                    d = None
+            # Parsed + normalized once per datastore version (instance-local cache); every call gets its
+            # own private copy, so callers may mutate it freely.
+            d, entry = _load_normalized_store()
 
             if d is not None:
-                list_keys = ['tests', 'questions', 'test_attempts', 'submissions', 'papers', 'xp_transactions', 'notifications', 'bookmarks', 'subjects', 'referrals', 'payment_sessions', 'payment_channels', 'admin_audit_logs', 'xp_reset_history', 'ai_source_documents', 'ai_generation_logs', 'ai_scheduled_tasks', 'ai_generation_jobs']
-                if _ai_collections_in_mongo():
-                    # MongoDB is authoritative for these: ignore any (old) copy in the file; requests that
-                    # need them read them from MongoDB (refresh_collections or targeted queries). They still
-                    # default to [] below, as callers (e.g. JobRepository) expect the key.
-                    for key in AI_MONGO_ONLY_COLLECTIONS:
-                        d.pop(key, None)
-                for lk in list_keys:
-                    if lk not in d:
-                        d[lk] = []
-                    elif isinstance(d[lk], dict):
-                        d[lk] = list(d[lk].values())
-                if 'ai_autopilot_config' not in d or not isinstance(d['ai_autopilot_config'], dict):
-                    d['ai_autopilot_config'] = dict(ai_scheduler.DEFAULT_AUTOPILOT_CONFIG)
-                if 'ai_providers' not in d or not isinstance(d['ai_providers'], list):
-                    d['ai_providers'] = [dict(p) for p in ai_provider_manager.DEFAULT_PROVIDERS]
-                if not d.get('subjects'):
-                    d['subjects'] = syllabus_hierarchy.get_all_subjects_flat()
-                else:
-                    existing_sub_ids = {s.get('id') for s in d['subjects'] if isinstance(s, dict)}
-                    for s in syllabus_hierarchy.get_all_subjects_flat():
-                        if s['id'] not in existing_sub_ids:
-                            d['subjects'].append(s)
-                if 'referral_settings' not in d: d['referral_settings'] = {'referrerReward': 100, 'newStudentReward': 100}
-                if 'xp_reset_settings' not in d: d['xp_reset_settings'] = {'enabled': False, 'nextReset': None, 'intervalDays': 90, 'customSeconds': None, 'lastReset': None}
-                # Sync seed users and hashed passwords (skipping any permanently revoked accounts)
-                revoked_set = set(str(x).lower().strip() for x in d.get('revoked_users', []))
-                # sample students are only (re)created when EXCELLENCECA_SAMPLE_DATA=1 (local development)
-                for email, init_u in sample_accounts.without_sample_students(INITIAL_USERS).items():
-                    u_email = str(email or '').lower().strip()
-                    u_id = str(init_u.get('id') or '').lower().strip()
-                    u_uname = str(init_u.get('username') or '').lower().lstrip('@').strip()
-                    if u_email in revoked_set or u_id in revoked_set or u_uname in revoked_set:
-                        continue
-                    if email not in d.get('users', {}):
-                        d.setdefault('users', {})[email] = dict(init_u)
-                    else:
-                        u = d['users'][email]
-                        if not u.get('password'):
-                            u['password'] = init_u['password']
-                        if not u.get('username') and init_u.get('username'):
-                            u['username'] = init_u['username']
-                        if not u.get('token') and init_u.get('token'):
-                            u['token'] = init_u['token']
-                for u in d.get('users', {}).values():
-                    if u.get('role') == 'student':
-                        if 'referralPoints' not in u:
-                            u['referralPoints'] = 0
-                        if 'referralCount' not in u:
-                            u['referralCount'] = 0
-                try:
-                    sync_historical_xp(d)
-                except Exception as xp_err:
-                    print(f"[SYNC_XP_WARNING] {xp_err}", flush=True)
-
-                try:
-                    if sanitize_rtdb_binary_payloads(d):
-                        save_backend_data(d)
-                        sync_to_firebase('payment_channels', d.get('payment_channels', []))
-                        sync_to_firebase('payment_sessions', d.get('payment_sessions', []))
-                except Exception as san_err:
-                    print(f"[SANITIZE_PAYLOAD_WARNING] {san_err}", flush=True)
-
+                fetched = []
                 if refresh_collections:
                     try:
-                        refresh_collections_from_mongo(d, collections=refresh_collections, min_interval=min_interval)
+                        refresh_collections_from_mongo(d, collections=refresh_collections, min_interval=min_interval,
+                                                       fetched_out=fetched)
                     except Exception as refresh_err:
                         print(f"[MONGODB_REFRESH_WARN] {refresh_err}", flush=True)
 
                 apply_tombstones(d)
-                _remember_load_snapshot(d)
+                if entry is None:
+                    _remember_load_snapshot(d)   # not cacheable: fingerprint now, as before
+                else:
+                    _remember_cached_load_snapshot(d, entry, _refresh_touched_collections(fetched))
                 return d
             else:
                 print(f"[DATA_STORE_ERROR] Failed to read {DATA_STORE_FILE} after retries. Preserving existing file contents.", flush=True)
@@ -1849,6 +1996,7 @@ def _write_data_store(obj, carry_ai=True):
     except OSError:
         time.sleep(0.05)
         os.replace(tmp_file, DATA_STORE_FILE)
+    _invalidate_store_cache()   # the next load re-reads and re-normalizes the new file content
     return True
 
 
@@ -2095,24 +2243,32 @@ def scrub_session_tokens(payload, _depth=0):
     return payload
 
 
-def authenticate_token(token):
-    """Authenticated, active user for a session token, or None."""
+def authenticate_token(token, data=None):
+    """Authenticated, active user for a session token, or None.
+    data: an already loaded datastore to check against. Without it, the cached read-only datastore is
+    used (no private copy is made), so a request's own load_backend_data() is its only datastore load;
+    the returned user is then a private copy that callers may modify."""
     if not is_session_token(token):
         return None
     clean = str(token).strip()
     if clean in REVOKED_TOKENS:
         return None
-    data = load_backend_data()
+    shared_view = None
+    if data is None:
+        shared_view = data = _store_view()
+        if data is None:
+            data = load_backend_data()
     u = find_user_by_session_token(data, clean)
     if u is None:
         # the session may have been issued by another instance moments ago
+        shared_view = None
         data = load_backend_data(refresh_collections=['users', 'revoked_users', 'revoked_tokens'])
         u = find_user_by_session_token(data, clean)
     if u is None or is_user_revoked(u, data, clean):
         return None
     if not u.get('isActive', True) or u.get('isDeleted', False):
         return None
-    return u
+    return copy.deepcopy(u) if data is shared_view else u
 
 def extract_text_from_pdf(pdf_bytes):
     text_chunks = []
