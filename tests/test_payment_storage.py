@@ -141,7 +141,7 @@ class Harness(unittest.TestCase):
             patch.object(image_store, 'CACHE_DIR', self.cache),
             patch.object(server, 'sync_historical_xp', lambda d: None),
             patch.object(server, 'check_opportunistic_scheduler_tick', lambda: None),
-            patch.object(server, 'sync_to_firebase', lambda *a, **k: True),
+            patch.object(server, 'sync_to_database', lambda *a, **k: True),
             patch.object(mongodb_manager, 'is_database_connected', return_value=False),
             patch.object(mongodb_manager, 'get_database', return_value=None),
         ]

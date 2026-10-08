@@ -1,12 +1,10 @@
 /**
  * server-sync.js - Server-backed data refresh for ExcellenceCA
  *
- * Replaces the Firebase Realtime Database listeners. All shared data now lives on the server
- * (MongoDB Atlas); the browser refreshes it by polling authenticated API endpoints every
+ * All shared data lives on the server (MongoDB Atlas); the browser refreshes it by polling authenticated API endpoints every
  * POLL_INTERVAL_MS while the tab is visible (the timer is stopped while it is hidden), when the tab
  * becomes visible again, and on demand (serverSync.refreshNow()).
- * The merge functions below are unchanged from the former Firebase listener implementation: they
- * merge a server list into the local store and re-render the affected views.
+ * The merge functions below merge a server list into the local store and re-render the affected views.
  * Session revocation is handled by the auth.js session watchdog (/api/auth/verify); a 401/403 from a
  * sync request triggers an immediate check.
  *

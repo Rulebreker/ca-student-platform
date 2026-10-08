@@ -1167,7 +1167,7 @@ class AdminDashboard {
         throw new Error(data.error || 'Failed to update student password on server.');
       }
 
-      // Update local store without overwriting backend/Firebase session tokens
+      // Update local store without overwriting backend session tokens
       const localUsers = window.store.getUsers();
       const sIdx = localUsers.findIndex(u => u.id === studentId);
       if (sIdx !== -1) {
@@ -2138,7 +2138,7 @@ class AdminDashboard {
       createdAt: (existing && existing.createdAt) ? existing.createdAt : new Date().toISOString()
     };
 
-    // Strict sanitization: ensure no field in paperObj is undefined (Firebase RTDB throws on undefined)
+    // Strict sanitization: ensure no field in paperObj is undefined (undefined fields break the JSON payload)
     Object.keys(paperObj).forEach(k => {
       if (paperObj[k] === undefined) {
         paperObj[k] = null;
@@ -4235,7 +4235,7 @@ class AdminDashboard {
             <!-- Explanation Image Upload (for ICAI diagrams / journal entries / balance sheets) -->
             <div class="bg-amber-50/60 border border-amber-200 rounded-xl p-3 space-y-2">
               <label class="block font-semibold text-amber-900 text-[11px] uppercase tracking-wide">Explanation Diagram / Image (Optional)</label>
-              <p class="text-[11px] text-amber-800">Attach an ICAI diagram, journal entry table, or balance sheet image shown after student submits. Uploaded to Firebase Storage (permanent).</p>
+              <p class="text-[11px] text-amber-800">Attach an ICAI diagram, journal entry table, or balance sheet image shown after student submits. Stored permanently on the server.</p>
               <div class="flex items-center gap-3 flex-wrap">
                 <input 
                   type="file" 
@@ -4384,30 +4384,15 @@ class AdminDashboard {
         return;
       }
 
-      let imageUrl = null;
-
-      // Attempt Firebase Storage upload (permanent, survives Vercel cold starts)
-      if (window.firebaseSync && typeof window.firebaseSync.uploadToFirebaseStorage === 'function') {
-        const questionId = document.getElementById('q-explanation-img-url') ? 'q-' + Date.now() : 'q-unknown';
-        const storagePath = `explanation-images/${questionId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-        try {
-          imageUrl = await window.firebaseSync.uploadToFirebaseStorage(file, storagePath);
-        } catch (fbErr) {
-          console.warn('[ExplanationImg] Firebase Storage upload failed, falling back:', fbErr);
-          imageUrl = null;
-        }
+      // Upload to the server image store (MongoDB `stored_images`, permanent, survives Vercel cold starts)
+      const res = await window.secureBackend.uploadImageFile(file);
+      if (!res.success) {
+        window.app.showToast(res.error || 'Failed to upload image.', 'error');
+        return;   // finally re-enables the input
       }
-
-      // Fallback: base64 data URL (stored in localStorage via question payload)
-      if (!imageUrl) {
-        imageUrl = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = () => reject(new Error('Failed to read file'));
-          reader.readAsDataURL(file);
-        });
-        console.info('[ExplanationImg] Using base64 fallback — consider Firebase Storage for persistence');
-      }
+      // Fallback: base64 data URL embedded in the question payload
+      const imageUrl = res.storedUrl || res.imageUrl;
+      if (!res.storedUrl) console.info('[ExplanationImg] Image store unavailable, using base64 fallback');
 
       const urlInput = document.getElementById('q-explanation-img-url');
       const preview = document.getElementById('q-explanation-img-preview');

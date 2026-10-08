@@ -194,8 +194,6 @@ def sync_to_database(path, data, method='PUT', sync=None):
         print(f"[MONGODB_SYNC_ERROR] {path}: {e}", flush=True)
         return False
 
-# Maintain backward compatibility alias for legacy callers
-sync_to_firebase = sync_to_database
 
 INITIAL_USERS = {
     'adminrulebreker@rulebrekerdothunter.com': {
@@ -897,7 +895,7 @@ def get_user_tier(user_id, data):
     if not user_id:
         return 'free'
     try:
-        ent = subscription_manager.get_user_entitlements(user_id, data, sync_to_firebase)
+        ent = subscription_manager.get_user_entitlements(user_id, data, sync_to_database)
         if ent and ent.get('isSubscribed'):
             tier = str(ent.get('tier', 'free')).lower()
             if tier in TIER_LEVELS:
@@ -951,7 +949,7 @@ def check_scheduled_mcq_tests(data, sync_fn=None):
     """
     Server-side background executor for scheduled MCQ tests.
     Checks all tests with status 'Scheduled'. When scheduledPublishTime arrives,
-    transitions test to 'Live', syncs to Firebase RTDB,
+    transitions test to 'Live', syncs to MongoDB,
     and dispatches idempotent notifications to eligible users based on tier.
     """
     tests = data.get('tests', [])
@@ -1421,8 +1419,8 @@ def refresh_collections_from_mongo(data, collections=None, min_interval=1.0, fet
         try:
             if sanitize_rtdb_binary_payloads(data):
                 try:
-                    sync_to_firebase('payment_channels', data.get('payment_channels', []))
-                    sync_to_firebase('payment_sessions', data.get('payment_sessions', []))
+                    sync_to_database('payment_channels', data.get('payment_channels', []))
+                    sync_to_database('payment_sessions', data.get('payment_sessions', []))
                 except Exception:
                     pass
             _write_data_store(data)   # no-op when the refresh changed nothing
@@ -1432,8 +1430,6 @@ def refresh_collections_from_mongo(data, collections=None, min_interval=1.0, fet
     return data
 
 
-# Legacy name kept until the Firebase naming cleanup (it has always read MongoDB)
-sync_collections_from_firebase = refresh_collections_from_mongo
 
 
 # ---------------------------------------------------------------------------
@@ -1694,8 +1690,8 @@ def _normalize_store(d):
     try:
         if sanitize_rtdb_binary_payloads(d):
             save_backend_data(d)
-            sync_to_firebase('payment_channels', d.get('payment_channels', []))
-            sync_to_firebase('payment_sessions', d.get('payment_sessions', []))
+            sync_to_database('payment_channels', d.get('payment_channels', []))
+            sync_to_database('payment_sessions', d.get('payment_sessions', []))
     except Exception as san_err:
         print(f"[SANITIZE_PAYLOAD_WARNING] {san_err}", flush=True)
     apply_tombstones(d)   # idempotent; also applied after each refresh
@@ -2031,9 +2027,9 @@ def execute_xp_reset(data, triggered_by='scheduled', admin_user=None):
             u['totalXp'] = 0
             if 'baseXp' in u:
                 u['baseXp'] = 0
-            # Sync student XP reset to Firebase RTDB in real time!
+            # Sync student XP reset to MongoDB
             if u.get('id'):
-                sync_to_firebase(f"users/{u['id']}", {'totalXp': 0, 'baseXp': 0}, method='PATCH')
+                sync_to_database(f"users/{u['id']}", {'totalXp': 0, 'baseXp': 0}, method='PATCH')
     
     # Calculate next reset if automatic
     reset_settings = data.get('xp_reset_settings', {})
@@ -2090,9 +2086,9 @@ def execute_xp_reset(data, triggered_by='scheduled', admin_user=None):
     data['xp_reset_history'].insert(0, event)
     save_backend_data(data)
 
-    # Sync settings and history to Firebase Realtime Database
-    sync_to_firebase("xp_reset_settings", reset_settings, method='PUT')
-    sync_to_firebase(f"xp_reset_history/{reset_id}", event, method='PUT')
+    # Sync settings and history to MongoDB
+    sync_to_database("xp_reset_settings", reset_settings, method='PUT')
+    sync_to_database(f"xp_reset_history/{reset_id}", event, method='PUT')
 
     return event
 
@@ -2105,8 +2101,8 @@ def subscription_background_worker():
         try:
             time.sleep(10)
             data = load_backend_data()
-            modified = subscription_manager.auto_expire_worker(data, sync_to_firebase)
-            sched_modified = check_scheduled_mcq_tests(data, sync_to_firebase)
+            modified = subscription_manager.auto_expire_worker(data, sync_to_database)
+            sched_modified = check_scheduled_mcq_tests(data, sync_to_database)
             if modified or sched_modified:
                 save_backend_data(data)
         except Exception as e:
@@ -2149,7 +2145,7 @@ def xp_reset_background_worker():
 
                             data['xp_reset_settings'] = reset_settings
                             save_backend_data(data)
-                            sync_to_firebase("xp_reset_settings", reset_settings, method='PUT')
+                            sync_to_database("xp_reset_settings", reset_settings, method='PUT')
                     except Exception as ex:
                         print(f"[XP Reset Engine] Schedule check parse exception: {ex}")
         except Exception as e:
@@ -2513,7 +2509,7 @@ def run_due_scheduler_tasks(force=False):
     with job_repository.STORE_LOCK:
         data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests', 'ai_worker_status'])
         refresh_relevant_jobs(data)
-        return ai_scheduler.process_due_tasks(data, save_backend_data, sync_to_firebase,
+        return ai_scheduler.process_due_tasks(data, save_backend_data, sync_to_database,
                                               claim_fn=claim_scheduled_task_occurrence,
                                               transition_fn=transition_scheduled_task_state)
 
@@ -2709,24 +2705,24 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
         with job_repository.STORE_LOCK:
             if route == 'heartbeat':
                 data = load_backend_data(refresh_collections=['ai_worker_status'])
-                res = ai_job_manager.update_worker_heartbeat(req_data, data, save_backend_data, sync_to_firebase)
+                res = ai_job_manager.update_worker_heartbeat(req_data, data, save_backend_data, sync_to_database)
                 return 200, dict(res, success=True), f"leaseValid={res.get('jobLeaseValid')}"
             if route == 'claim':
                 data = load_backend_data()
-                job = ai_job_manager.claim_pending_job_for_worker(worker_id, data, save_backend_data, sync_to_firebase)
+                job = ai_job_manager.claim_pending_job_for_worker(worker_id, data, save_backend_data, sync_to_database)
                 return 200, {'success': True, 'job': job}, f"job={(job or {}).get('id') or '-'}"
             data = load_backend_data()
             if route == 'progress':
                 ok, err, code = ai_job_manager.update_job_progress_from_worker(
-                    job_id, worker_id, req_data, data, save_backend_data, sync_to_firebase)
+                    job_id, worker_id, req_data, data, save_backend_data, sync_to_database)
                 return code, {'success': ok, 'error': err, 'code': code}, f"job={job_id}"
             if route == 'complete':
                 ok, err, res, code = ai_job_manager.complete_job_from_worker(
                     job_id, worker_id, req_data.get('questions', []), req_data.get('metrics', {}),
-                    data, save_backend_data, sync_to_firebase)
+                    data, save_backend_data, sync_to_database)
                 return code, {'success': ok, 'error': err, 'result': res, 'code': code}, f"job={job_id}"
             ok, err, code = ai_job_manager.fail_job_from_worker(
-                job_id, worker_id, str(req_data.get('error') or 'Job failed on worker'), data, save_backend_data, sync_to_firebase)
+                job_id, worker_id, str(req_data.get('error') or 'Job failed on worker'), data, save_backend_data, sync_to_database)
             return code, {'success': ok, 'error': err, 'code': code}, f"job={job_id}"
 
     def _worker_route_mongo(self, route, req_data, worker_id, job_id, timer):
@@ -3042,8 +3038,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(401, {'success': False, 'error': 'Authentication required to view subscription details.', 'code': 401})
                 return
             data = load_backend_data(refresh_collections=['subscriptions'])
-            sub = subscription_manager.get_user_subscription(user['id'], data, sync_to_firebase)
-            entitlements = subscription_manager.get_user_entitlements(user['id'], data, sync_to_firebase)
+            sub = subscription_manager.get_user_subscription(user['id'], data, sync_to_database)
+            entitlements = subscription_manager.get_user_entitlements(user['id'], data, sync_to_database)
             user_sessions = [s for s in data.get('payment_sessions', []) if s.get('userId') == user['id']]
             self.send_json(200, {
                 'success': True,
@@ -3513,7 +3509,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             test_id = query.get('testId', [None])[0]
             refresh_nodes = ['tests', 'questions'] if test_id else ['tests']
             data = load_backend_data(refresh_collections=refresh_nodes)
-            if check_scheduled_mcq_tests(data, sync_to_firebase):
+            if check_scheduled_mcq_tests(data, sync_to_database):
                 save_backend_data(data)
             tests = data.get('tests', [])
             user_tier = get_user_tier(user.get('id') if user else None, data) if not is_admin else 'admin'
@@ -3971,7 +3967,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                                     _baseline_documents(data, 'ai_generation_jobs', [remote_job])
                     except Exception:
                         pass
-                job = ai_job_manager.get_job_status(job_id, data, save_backend_data, sync_to_firebase)
+                job = ai_job_manager.get_job_status(job_id, data, save_backend_data, sync_to_database)
             if job:
                 self.send_json(200, {'success': True, 'job': job})
             else:
@@ -3988,7 +3984,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             with job_repository.STORE_LOCK:
                 data = load_backend_data()
                 refresh_relevant_jobs(data)   # active jobs only (targeted), never the whole job history
-                active_job = ai_job_manager.get_active_generation_job(data, save_backend_data, sync_to_firebase)
+                active_job = ai_job_manager.get_active_generation_job(data, save_backend_data, sync_to_database)
             self.send_json(200, {'success': True, 'job': active_job, 'hasActiveJob': bool(active_job)})
             return
 
@@ -4198,7 +4194,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     
                 if not doc_record.get('alreadyProcessed'):
                     save_backend_data(data)
-                    sync_to_firebase(f"ai_source_documents/{doc_record['id']}", doc_record, method='PUT', sync=True)
+                    sync_to_database(f"ai_source_documents/{doc_record['id']}", doc_record, method='PUT', sync=True)
                 self.send_json(200, {
                     'success': True,
                     'document': doc_record,
@@ -4233,7 +4229,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 
                 if len(data['ai_source_documents']) < orig_len:
                     save_backend_data(data)
-                    sync_to_firebase(f"ai_source_documents/{doc_id}", None, method='DELETE', sync=True)
+                    sync_to_database(f"ai_source_documents/{doc_id}", None, method='DELETE', sync=True)
                     self.send_json(200, {'success': True, 'deletedId': doc_id})
                 else:
                     self.send_json(404, {'error': 'Document not found.', 'code': 404})
@@ -4262,7 +4258,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 updated_doc = ai_document_indexer.toggle_document_active(doc_id, is_active, data)
                 if updated_doc:
                     save_backend_data(data)
-                    sync_to_firebase(f"ai_source_documents/{doc_id}", updated_doc, method='PUT', sync=True)
+                    sync_to_database(f"ai_source_documents/{doc_id}", updated_doc, method='PUT', sync=True)
                     self.send_json(200, {'success': True, 'document': updated_doc})
                 else:
                     self.send_json(404, {'error': 'Document not found.', 'code': 404})
@@ -4299,7 +4295,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         return
 
                     # Double-click and concurrent submission guard
-                    active_job = ai_job_manager.get_active_generation_job(data, save_backend_data, sync_to_firebase)
+                    active_job = ai_job_manager.get_active_generation_job(data, save_backend_data, sync_to_database)
                     if active_job:
                         self.send_json(409, {
                             'error': 'A generation job is already in progress. Please wait for it to complete.',
@@ -4309,7 +4305,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         return
 
                     ok, err, job_record = ai_job_manager.create_generation_job(
-                        req_data, data, save_backend_data, sync_to_firebase)
+                        req_data, data, save_backend_data, sync_to_database)
 
                 if not ok or not job_record:
                     self.send_json(400, {'error': err, 'code': 400})
@@ -4336,13 +4332,13 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 with job_repository.STORE_LOCK:
                     data = load_backend_data(refresh_collections=['ai_generation_jobs', 'ai_scheduled_tasks'])
                     if not job_id:
-                        active_job = ai_job_manager.get_active_generation_job(data, save_backend_data, sync_to_firebase)
+                        active_job = ai_job_manager.get_active_generation_job(data, save_backend_data, sync_to_database)
                         if active_job:
                             job_id = active_job.get('id')
                     if not job_id:
                         self.send_json(200, {'success': True, 'message': 'No active job to cancel'})
                         return
-                    ok, err = ai_job_manager.cancel_generation_job(job_id, data, save_backend_data, sync_to_firebase)
+                    ok, err = ai_job_manager.cancel_generation_job(job_id, data, save_backend_data, sync_to_database)
                 if not ok:
                     self.send_json(400, {'error': err, 'code': 400})
                     return
@@ -4360,7 +4356,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 with job_repository.STORE_LOCK:
                     data = load_backend_data(refresh_collections=['ai_generation_jobs', 'ai_scheduled_tasks'])
-                    reset_count = ai_job_manager.reset_all_stuck_jobs(data, save_backend_data, sync_to_firebase)
+                    reset_count = ai_job_manager.reset_all_stuck_jobs(data, save_backend_data, sync_to_database)
                 self.send_json(200, {'success': True, 'resetCount': reset_count, 'message': f'Successfully reset {reset_count} stuck generation jobs.'})
                 return
             except Exception as e:
@@ -4382,7 +4378,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 data = load_backend_data(refresh_collections=['ai_autopilot_config'])
                 updated_cfg = ai_scheduler.update_autopilot_config(req_data, data)
                 save_backend_data(data)
-                sync_to_firebase('ai_autopilot_config', updated_cfg, method='PUT', sync=True)
+                sync_to_database('ai_autopilot_config', updated_cfg, method='PUT', sync=True)
                 self.send_json(200, {'success': True, 'config': updated_cfg})
                 return
             except Exception as e:
@@ -4408,7 +4404,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests'])
                 task = ai_scheduler.save_scheduled_task(task_input, data)
                 save_backend_data(data)
-                sync_to_firebase(f"ai_scheduled_tasks/{task['id']}", task, method='PUT', sync=True)
+                sync_to_database(f"ai_scheduled_tasks/{task['id']}", task, method='PUT', sync=True)
                 self.send_json(200, {'success': True, 'task': task})
                 return
             except ValueError as ve:
@@ -4482,7 +4478,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         self.send_json(404, {'success': False, 'error': f"Task '{task_id}' not found.", 'code': 404})
                         return
                     save_backend_data(data)
-                    sync_to_firebase(f"ai_scheduled_tasks/{new_task['id']}", new_task, method='PUT', sync=True)
+                    sync_to_database(f"ai_scheduled_tasks/{new_task['id']}", new_task, method='PUT', sync=True)
                 print(f"[SCHEDULER_DUPLICATE] {user.get('email')} duplicated {task_id} -> {new_task['id']} (paused)", flush=True)
                 self.send_json(200, {'success': True, 'task': new_task})
                 return
@@ -4514,12 +4510,12 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 data = load_backend_data(refresh_collections=['ai_scheduled_tasks'])
                 task = ai_scheduler.toggle_scheduled_task(task_id, enabled, data)
                 if not task:
-                    sync_collections_from_firebase(data, collections=['ai_scheduled_tasks'], min_interval=0.0)
+                    refresh_collections_from_mongo(data, collections=['ai_scheduled_tasks'], min_interval=0.0)
                     task = ai_scheduler.toggle_scheduled_task(task_id, enabled, data)
 
                 if task:
                     save_backend_data(data)
-                    sync_to_firebase(f"ai_scheduled_tasks/{task_id}", task, method='PUT', sync=True)
+                    sync_to_database(f"ai_scheduled_tasks/{task_id}", task, method='PUT', sync=True)
                     self.send_json(200, {'success': True, 'task': task})
                 else:
                     self.send_json(404, {'error': f"Task '{task_id}' not found.", 'code': 404})
@@ -4548,14 +4544,14 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     data = load_backend_data(refresh_collections=['ai_scheduled_tasks', 'tests', 'ai_generation_jobs', 'ai_worker_status'])
                     task = ai_scheduler.get_scheduled_task_by_id(task_id, data)
                     if not task:
-                        sync_collections_from_firebase(data, collections=['ai_scheduled_tasks'], min_interval=0.0)
+                        refresh_collections_from_mongo(data, collections=['ai_scheduled_tasks'], min_interval=0.0)
                         task = ai_scheduler.get_scheduled_task_by_id(task_id, data)
 
                     if not task:
                         self.send_json(404, {'error': f"Task '{task_id}' not found.", 'code': 404})
                         return
 
-                    ok, err, res = ai_scheduler.dispatch_scheduled_task(task, data, save_backend_data, sync_to_firebase)
+                    ok, err, res = ai_scheduler.dispatch_scheduled_task(task, data, save_backend_data, sync_to_database)
                 if ok:
                     self.send_json(200, {'success': True, 'task': task, 'result': res})
                 else:
@@ -4628,7 +4624,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 plan_id = req_data.get('planId')
                 # always the channels' current QR/UPI settings, even if another instance changed them
                 data = load_backend_data(refresh_collections=['payment_channels'], min_interval=2.0)
-                sync_sync_fn = lambda p, d, method='PUT': sync_to_firebase(p, d, method=method, sync=True)
+                sync_sync_fn = lambda p, d, method='PUT': sync_to_database(p, d, method=method, sync=True)
                 qr_exists = lambda url: bool(image_store.existing_image_ids({image_store.image_id_from_url(url)} - {None}))
                 success, res = subscription_manager.create_payment_session(user, plan_id, data, sync_sync_fn,
                                                                            qr_image_exists=qr_exists)
@@ -4655,7 +4651,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 req_data = json.loads(body.decode('utf-8')) if body else {}
                 session_id = req_data.get('paymentSessionId') or req_data.get('sessionId')
                 data = load_backend_data()
-                sync_sync_fn = lambda p, d, method='PUT': sync_to_firebase(p, d, method=method, sync=True)
+                sync_sync_fn = lambda p, d, method='PUT': sync_to_database(p, d, method=method, sync=True)
                 success, res = subscription_manager.cancel_payment_session(user['id'], session_id, data, sync_sync_fn)
                 save_backend_data(data)
                 self.send_json(200, {'success': success, 'session': res if success else None})
@@ -4712,7 +4708,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     return
                 clean_screenshot_uri = f"/api/images/{img_id}"
                 previous_proof = own_session.get('screenshot')
-                sync_sync_fn = lambda p, d, method='PUT': sync_to_firebase(p, d, method=method, sync=True)
+                sync_sync_fn = lambda p, d, method='PUT': sync_to_database(p, d, method=method, sync=True)
                 success, res = subscription_manager.submit_payment(user['id'], session_id, utr, clean_screenshot_uri, data, sync_sync_fn)
                 if not success:
                     image_store.delete_image(img_id)   # no record refers to it
@@ -4744,7 +4740,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 reason = req_data.get('rejectionReason', '')
                 remarks = req_data.get('remarks') or req_data.get('adminRemarks') or reason
                 data = load_backend_data()
-                success, res = subscription_manager.verify_payment(admin_u, session_id, action, reason, data, sync_to_firebase, remarks=remarks)
+                success, res = subscription_manager.verify_payment(admin_u, session_id, action, reason, data, sync_to_database, remarks=remarks)
                 if not success:
                     self.send_json(400, {'success': False, 'error': res})
                     return
@@ -4788,7 +4784,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 save_backend_data(data)
                 subscription_manager.log_audit_action(
                     admin_u, 'DELETE_PAYMENT_RECORDS', ','.join(result['deletedIds'])[:500], None, None,
-                    details=f"Deleted {len(result['deletedIds'])} payment record(s)", data=data, sync_fn=sync_to_firebase)
+                    details=f"Deleted {len(result['deletedIds'])} payment record(s)", data=data, sync_fn=sync_to_database)
                 save_backend_data(data)
                 print(f"[ADMIN_PAYMENTS] {admin_u.get('email')} deleted {len(result['deletedIds'])} payment record(s); failed: {len(result['failed'])}", flush=True)
                 ok = not result['failed']
@@ -4821,7 +4817,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 if isinstance(user_ids, list) and user_ids:
                     results = []
                     for uid in user_ids:
-                        ok, r = subscription_manager.manage_subscription(admin_u, uid, action, req_data, data, sync_to_firebase)
+                        ok, r = subscription_manager.manage_subscription(admin_u, uid, action, req_data, data, sync_to_database)
                         results.append({'userId': uid, 'success': ok, 'result': r if ok else str(r)})
                     save_backend_data(data)
                     print(f"[ADMIN_SUBSCRIPTIONS] Bulk {action} executed for {len(user_ids)} users by {admin_u.get('email')}", flush=True)
@@ -4829,7 +4825,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     return
                 else:
                     user_id = req_data.get('userId') or req_data.get('studentId')
-                    success, res = subscription_manager.manage_subscription(admin_u, user_id, action, req_data, data, sync_to_firebase)
+                    success, res = subscription_manager.manage_subscription(admin_u, user_id, action, req_data, data, sync_to_database)
                     if not success:
                         self.send_json(400, {'success': False, 'error': res})
                         return
@@ -4868,7 +4864,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 old_qr = next((c.get('qrCodeUrl') for c in data.get('payment_channels', []) if isinstance(c, dict) and c.get('id') == target_id), None)
                 success, res = subscription_manager.manage_payment_channel(
                     admin_u, action, combined_params, data,
-                    lambda path, d, method='PUT': sync_to_firebase(path, d, method=method, sync=True)
+                    lambda path, d, method='PUT': sync_to_database(path, d, method=method, sync=True)
                 )
                 if not success:
                     self.send_json(400, {'success': False, 'error': res})
@@ -4933,7 +4929,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     target['needsReupload'] = False
                     target['updatedAt'] = datetime.now(timezone.utc).isoformat()
                     save_backend_data(data)
-                    persisted = sync_to_firebase(f"payment_channels/{channel_id}",
+                    persisted = sync_to_database(f"payment_channels/{channel_id}",
                                                  {'qrCodeUrl': image_url, 'needsReupload': False, 'updatedAt': target['updatedAt']},
                                                  method='PATCH', sync=True)
                     if persisted is False and mongodb_manager.get_database() is not None:
@@ -4967,7 +4963,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 plan_id = req_data.get('planId')
                 updates = req_data.get('updates') or req_data.get('planData') or {}
                 data = load_backend_data()
-                success, res = subscription_manager.manage_plans_config(admin_u, plan_id, updates, data, sync_to_firebase)
+                success, res = subscription_manager.manage_plans_config(admin_u, plan_id, updates, data, sync_to_database)
                 if not success:
                     self.send_json(400, {'success': False, 'error': res})
                     return
@@ -5074,13 +5070,13 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 # A password reset signs the user out everywhere; they log in with the new password
                 end_all_user_sessions(account, data)
                 save_backend_data(data)
-                sync_to_firebase(f"users/{account.get('id')}", {
+                sync_to_database(f"users/{account.get('id')}", {
                     'password': hashed,
                     'passwordChangedAt': account['passwordChangedAt'],
                     'token': None,
                     'sessionTokens': []
                 }, method='PATCH', sync=True)
-                sync_to_firebase('revoked_tokens', data.get('revoked_tokens', []), sync=True)
+                sync_to_database('revoked_tokens', data.get('revoked_tokens', []), sync=True)
                 print(f"[PASSWORD_RESET] password reset completed for user {account.get('id')}", flush=True)
                 self.send_json(200, {'success': True, 'message': password_reset.RESET_SUCCESS_MESSAGE})
                 return
@@ -5163,12 +5159,12 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     if legacy_level:
                         exam_levels.stamp_user(matched_user, legacy_level)
 
-                # Issue fresh active session token on login and sync to persistent storage and Firebase
+                # Issue fresh active session token on login and sync to persistent storage (MongoDB)
                 # New session for this device; the user's other logged-in devices stay signed in
                 new_session_tok = start_user_session(matched_user)
 
                 save_backend_data(data)
-                sync_to_firebase(f"users/{matched_user['id']}", {'token': new_session_tok, 'sessionTokens': matched_user['sessionTokens']},
+                sync_to_database(f"users/{matched_user['id']}", {'token': new_session_tok, 'sessionTokens': matched_user['sessionTokens']},
                                  method='PATCH', sync=True)
 
                 sanitized = dict(matched_user)
@@ -5353,8 +5349,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                             }
                             xp_txs.insert(0, ref_tx_referrer)
                             xp_txs.insert(0, ref_tx_student)
-                            sync_to_firebase(f"xp_transactions/{ref_tx_referrer['id']}", ref_tx_referrer)
-                            sync_to_firebase(f"xp_transactions/{ref_tx_student['id']}", ref_tx_student)
+                            sync_to_database(f"xp_transactions/{ref_tx_referrer['id']}", ref_tx_referrer)
+                            sync_to_database(f"xp_transactions/{ref_tx_student['id']}", ref_tx_student)
 
                             # 4. Real-time Notifications
                             notifs = data.get('notifications', [])
@@ -5389,16 +5385,16 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 sanitized = dict(new_user)
                 sanitized.pop('password', None)
 
-                # Real-time synchronization to Firebase Realtime Database with secure hashed password
+                # Sync to MongoDB with secure hashed password
                 user_for_fb = dict(new_user)
-                sync_to_firebase(f"users/{user_id}", user_for_fb, method='PUT')
+                sync_to_database(f"users/{user_id}", user_for_fb, method='PUT')
                 if raw_ref and 'referrer' in locals() and referrer:
-                    sync_to_firebase(f"users/{referrer.get('id')}", {
+                    sync_to_database(f"users/{referrer.get('id')}", {
                         'referralPoints': referrer.get('referralPoints', 0),
                         'referralCount': referrer.get('referralCount', 0)
                     }, method='PATCH')
                     if 'ref_record' in locals() and ref_record:
-                        sync_to_firebase(f"referrals/{ref_record['id']}", ref_record, method='PUT')
+                        sync_to_database(f"referrals/{ref_record['id']}", ref_record, method='PUT')
 
                 self.send_json(200, {
                     'success': True,
@@ -5500,8 +5496,10 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 sanitized_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', os.path.basename(file_name))
                 unique_img_id = f'img_{uuid.uuid4().hex[:12]}{safe_ext}'
+                stored_url = None
                 try:
                     image_store.save_image(unique_img_id, binary_data, 'upload', owner_user_id=user.get('id'))
+                    stored_url = f"/api/images/{unique_img_id}"
                 except image_store.StorageUnavailable:
                     pass   # the response carries the image itself as a data URL; the stored copy is optional
 
@@ -5513,6 +5511,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     'imageId': unique_img_id,
                     'fileName': sanitized_name,
                     'imageUrl': data_url,
+                    'storedUrl': stored_url,   # public /api/images/ URL backed by MongoDB, when stored
                     'size': len(binary_data)
                 })
                 return
@@ -5645,10 +5644,10 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 data['notifications'] = notifs[:1000]
                 save_backend_data(data)
 
-                # Sync bulk to Firebase RTDB in one request
+                # Sync bulk to MongoDB in one request
                 if added_notifs:
-                    firebase_payload = {n['id']: n for n in added_notifs}
-                    sync_to_firebase('notifications', firebase_payload, method='PATCH')
+                    db_payload = {n['id']: n for n in added_notifs}
+                    sync_to_database('notifications', db_payload, method='PATCH')
 
                 self.send_json(200, {'success': True, 'count': len(added_notifs)})
                 return
@@ -5837,14 +5836,14 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 save_backend_data(data)
 
-                # Sync to Firebase RTDB synchronously
-                sync_to_firebase(f"users/{target_student.get('id')}", {
+                # Sync to MongoDB synchronously
+                sync_to_database(f"users/{target_student.get('id')}", {
                     'password': hashed,
                     'token': None,
                     'sessionTokens': []
                 }, method='PATCH', sync=True)
-                sync_to_firebase('revoked_tokens', data.get('revoked_tokens', []), sync=True)
-                sync_to_firebase(f"admin_audit_logs/{audit_entry['id']}", audit_entry, method='PUT', sync=True)
+                sync_to_database('revoked_tokens', data.get('revoked_tokens', []), sync=True)
+                sync_to_database(f"admin_audit_logs/{audit_entry['id']}", audit_entry, method='PUT', sync=True)
 
                 print(f"[ADMIN_RESET_PASSWORD] Password reset for {target_student.get('email')} ({target_student.get('id')}) by {user.get('email')}", flush=True)
 
@@ -5966,9 +5965,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 save_backend_data(data)
 
-                # Real-time synchronization to Firebase Realtime Database
-                sync_to_firebase(f"users/{target_student.get('id')}", {'totalXp': new_xp, 'baseXp': target_student.get('baseXp', 0)}, method='PATCH')
-                sync_to_firebase(f"xp_transactions/{tx_id}", tx, method='PUT')
+                # Sync to MongoDB
+                sync_to_database(f"users/{target_student.get('id')}", {'totalXp': new_xp, 'baseXp': target_student.get('baseXp', 0)}, method='PATCH')
+                sync_to_database(f"xp_transactions/{tx_id}", tx, method='PUT')
 
                 sanitized_student = dict(target_student)
                 sanitized_student.pop('password', None)
@@ -6041,8 +6040,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                             'createdAt': now_iso
                         }
                         data['xp_transactions'].insert(0, tx)
-                        sync_to_firebase(f"users/{u.get('id')}", {'totalXp': target_xp, 'baseXp': 0}, method='PATCH')
-                        sync_to_firebase(f"xp_transactions/{tx_id}", tx, method='PUT')
+                        sync_to_database(f"users/{u.get('id')}", {'totalXp': target_xp, 'baseXp': 0}, method='PATCH')
+                        sync_to_database(f"xp_transactions/{tx_id}", tx, method='PUT')
 
                 save_backend_data(data)
                 self.send_json(200, {
@@ -6141,7 +6140,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 save_backend_data(data)
 
                 user_for_fb = dict(new_user)
-                sync_to_firebase(f"users/{user_id}", user_for_fb, method='PUT', sync=True)
+                sync_to_database(f"users/{user_id}", user_for_fb, method='PUT', sync=True)
 
                 sanitized = dict(new_user)
                 sanitized.pop('password', None)
@@ -6157,7 +6156,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(400, {'success': False, 'error': f'Invalid user provisioning payload: {str(e)}'})
                 return
 
-        # Admin: update a student's details or a teacher's privileges (replaces browser -> Firebase writes)
+        # Admin: update a student's details or a teacher's privileges (server-side write)
         if path == '/api/admin/users/update':
             admin_user = authenticate_token(self.get_auth_token())
             if not admin_user or admin_user.get('role') != 'admin':
@@ -6300,15 +6299,15 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 save_backend_data(data)
 
-                # Delete from Firebase Realtime Database synchronously
+                # Delete from MongoDB synchronously
                 if st_id:
-                    sync_to_firebase(f"users/{st_id}", {'isDeleted': True, 'isActive': False}, method='PATCH', sync=True)
-                    sync_to_firebase(f"users/{st_id}", None, method='DELETE', sync=True)
-                    sync_to_firebase(f"revoked_users/{st_id}", True, sync=True)
+                    sync_to_database(f"users/{st_id}", {'isDeleted': True, 'isActive': False}, method='PATCH', sync=True)
+                    sync_to_database(f"users/{st_id}", None, method='DELETE', sync=True)
+                    sync_to_database(f"revoked_users/{st_id}", True, sync=True)
                 if st_uname:
-                    sync_to_firebase(f"revoked_users/{st_uname}", True, sync=True)
+                    sync_to_database(f"revoked_users/{st_uname}", True, sync=True)
                 if st_token:
-                    sync_to_firebase(f"revoked_tokens/{st_token}", True, sync=True)
+                    sync_to_database(f"revoked_tokens/{st_token}", True, sync=True)
 
                 # Calculate remaining counts directly from fresh database state
                 revoked_set = set(str(x).lower().strip() for x in data.get('revoked_users', []))
@@ -6370,8 +6369,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 data['xp_reset_settings'] = current_settings
                 save_backend_data(data)
 
-                # Sync to Firebase Realtime Database
-                sync_to_firebase("xp_reset_settings", current_settings, method='PUT')
+                # Sync to MongoDB
+                sync_to_database("xp_reset_settings", current_settings, method='PUT')
 
                 self.send_json(200, {'success': True, 'settings': current_settings})
                 return
@@ -6542,8 +6541,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 data['assignments'] = assignments
 
                 save_backend_data(data)
-                sync_to_firebase(f"papers/{paper_data['id']}", paper_data, method='PUT')
-                sync_to_firebase(f"assignments/{paper_data['id']}", paper_data, method='PUT')
+                sync_to_database(f"papers/{paper_data['id']}", paper_data, method='PUT')
+                sync_to_database(f"assignments/{paper_data['id']}", paper_data, method='PUT')
                 self.send_json(200, {'success': True, 'paper': paper_data})
                 return
             except Exception as e:
@@ -6594,8 +6593,8 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 data['assignments'] = [p for p in data.get('assignments', []) if p.get('id') != target_id]
                 data['submissions'] = [s for s in data.get('submissions', []) if s.get('assignmentId') != target_id and s.get('paperId') != target_id]
                 save_backend_data(data)
-                sync_to_firebase(f"papers/{target_id}", None, method='DELETE')
-                sync_to_firebase(f"assignments/{target_id}", None, method='DELETE')
+                sync_to_database(f"papers/{target_id}", None, method='DELETE')
+                sync_to_database(f"assignments/{target_id}", None, method='DELETE')
                 self.send_json(200, {'success': True, 'deletedId': target_id})
                 return
             except Exception as e:
@@ -6793,7 +6792,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
 
                 data['tests'] = tests
                 save_backend_data(data)
-                sync_to_firebase(f"tests/{test_data['id']}", test_data, method='PUT', sync=True)
+                sync_to_database(f"tests/{test_data['id']}", test_data, method='PUT', sync=True)
                 self.send_json(200, {'success': True, 'test': test_data})
                 return
             except Exception as e:
@@ -6832,7 +6831,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     target['liveEndTime'] = req_data.get('liveEndTime')
 
                 save_backend_data(data)
-                sync_to_firebase(f"tests/{target['id']}", target, method='PUT', sync=True)
+                sync_to_database(f"tests/{target['id']}", target, method='PUT', sync=True)
                 self.send_json(200, {'success': True, 'test': target})
                 return
             except Exception as e:
@@ -6907,9 +6906,9 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                             dup_test = t
 
                     save_backend_data(data)
-                    sync_to_firebase(f"questions/{dup['id']}", dup, method='PUT', sync=True)
+                    sync_to_database(f"questions/{dup['id']}", dup, method='PUT', sync=True)
                     if dup_test:
-                        sync_to_firebase(f"tests/{dup_test['id']}", dup_test, method='PUT', sync=True)
+                        sync_to_database(f"tests/{dup_test['id']}", dup_test, method='PUT', sync=True)
                     self.send_json(200, {'success': True, 'question': dup})
                     return
 
@@ -6920,7 +6919,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                         for q in questions:
                             if q.get('id') == qid:
                                 q['number'] = idx + 1
-                                sync_to_firebase(f"questions/{q['id']}", q, method='PUT', sync=True)
+                                sync_to_database(f"questions/{q['id']}", q, method='PUT', sync=True)
                     save_backend_data(data)
                     self.send_json(200, {'success': True, 'order': order_ids})
                     return
@@ -7010,12 +7009,12 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                             t['totalQuestions'] = len(test_questions)
                             t['updatedAt'] = now_iso
                     save_backend_data(data)
-                    # Sync question and updated test to Firebase RTDB (prevents data loss on Vercel cold start)
-                    sync_to_firebase(f"questions/{target_q['id']}", target_q, method='PUT', sync=True)
+                    # Sync question and updated test to MongoDB (prevents data loss on Vercel cold start)
+                    sync_to_database(f"questions/{target_q['id']}", target_q, method='PUT', sync=True)
                     if test_id:
                         updated_test = next((t for t in tests if t.get('id') == test_id), None)
                         if updated_test:
-                            sync_to_firebase(f"tests/{test_id}", updated_test, method='PUT', sync=True)
+                            sync_to_database(f"tests/{test_id}", updated_test, method='PUT', sync=True)
                     self.send_json(200, {'success': True, 'question': target_q})
                     return
             except Exception as e:
@@ -7076,7 +7075,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(500, {'error': f'Question delete error: {str(e)}', 'code': 500})
                 return
 
-        # 8b. Bulk Import MCQs (Save to database and Firebase)
+        # 8b. Bulk Import MCQs (Save to MongoDB)
         if path == '/api/tests/questions/bulk':
             token = self.get_auth_token()
             user = authenticate_token(token)
@@ -7149,7 +7148,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                     }
                     data['questions'].append(q_obj)
                     saved_questions.append(q_obj)
-                    sync_to_firebase(f"questions/{q_id}", q_obj, method='PUT')
+                    sync_to_database(f"questions/{q_id}", q_obj, method='PUT')
                     next_number += 1
 
                 # Update target test question count (strictly preserve admin-configured maximumMarks)
@@ -7158,7 +7157,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 if publish_immediately:
                     target_test['isPublished'] = True
                 save_backend_data(data)
-                sync_to_firebase(f"tests/{test_id}", target_test, method='PUT')
+                sync_to_database(f"tests/{test_id}", target_test, method='PUT')
 
                 self.send_json(200, {
                     'success': True,
@@ -7240,7 +7239,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                 sanitized = dict(target_u)
                 sanitized.pop('password', None)
                 sanitized.pop('token', None)  # the caller keeps its own session token
-                sync_to_firebase(f"users/{target_u.get('id')}", sanitized, method='PATCH')
+                sync_to_database(f"users/{target_u.get('id')}", sanitized, method='PATCH')
 
                 self.send_json(200, {'success': True, 'user': sanitized})
                 return
@@ -7338,7 +7337,7 @@ class ExcellenceCAHandler(http.server.SimpleHTTPRequestHandler):
                             'allowedPlans': target.get('allowedPlans') or [target.get('requiredTier') or 'core']
                         })
                         return
-                    entitlements = subscription_manager.get_user_entitlements(user['id'], data, sync_to_firebase)
+                    entitlements = subscription_manager.get_user_entitlements(user['id'], data, sync_to_database)
                     if target.get('isPremium') and not entitlements['permissions'].get('premium_mcq_access'):
                         self.send_json(403, {
                             'error': 'Access Denied: This is a premium test requiring an active Core, Plus, or Elite Pass.',
@@ -7634,7 +7633,7 @@ def run_server(port=PORT):
         ai_scheduler.start_autopilot_scheduler(
             load_backend_data,
             save_backend_data,
-            lambda p, d, **kw: sync_to_firebase(p, d, **kw),
+            lambda p, d, **kw: sync_to_database(p, d, **kw),
             tick_fn=run_due_scheduler_tasks   # cheap due check + atomic claims, like every other trigger
         )
         try:

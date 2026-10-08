@@ -6315,7 +6315,7 @@
     {
       "correctOption": "A",
       "explanation": "Detailed explanation for question 1.",
-      "explanationImage": "https://firebasestorage.googleapis.com/v0/b/excellenceca-45a9d.firebasestorage.app/o/explanation-images%2Fq1_variance_table.png?alt=media",
+      "explanationImage": null,
       "id": "q-1789392081635",
       "marks": 3.0,
       "number": 1,
@@ -6386,7 +6386,7 @@
     {
       "correctOption": "A",
       "explanation": "Detailed explanation for question 1.",
-      "explanationImage": "https://firebasestorage.googleapis.com/v0/b/excellenceca-45a9d.firebasestorage.app/o/explanation-images%2Fq1_variance_table.png?alt=media",
+      "explanationImage": null,
       "id": "q-1789392101340",
       "marks": 3.0,
       "number": 6,

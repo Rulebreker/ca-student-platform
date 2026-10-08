@@ -170,11 +170,10 @@ const LEGAL_PAGES = {
           <p>We rely on the following service providers to run the platform. They process data only as needed to provide their service:</p>
           <ul>
             <li><strong>Vercel</strong> - website and API hosting.</li>
-            <li><strong>MongoDB</strong> - database storage for accounts, activity, submissions and pass records.</li>
-            <li><strong>Google Firebase Storage</strong> - storage for images used in question explanations.</li>
+            <li><strong>MongoDB</strong> - database storage for accounts, activity, submissions, pass records and uploaded images.</li>
             <li><strong>Brevo</strong> - delivery of password reset emails.</li>
             <li><strong>QR Server (api.qrserver.com)</strong> - generating UPI payment QR codes; the payee UPI ID, amount and plan name are sent to create the QR image.</li>
-            <li><strong>Content delivery networks</strong> - Google Fonts, the Tailwind CSS CDN, unpkg (icons), cdnjs (PDF.js) and gstatic (Firebase SDK) deliver fonts, styles and scripts to your browser. Unsplash may serve the default profile image. These providers receive your IP address and browser information when your browser downloads these files.</li>
+            <li><strong>Content delivery networks</strong> - Google Fonts, the Tailwind CSS CDN, unpkg (icons) and cdnjs (PDF.js) deliver fonts, styles and scripts to your browser. Unsplash may serve the default profile image. These providers receive your IP address and browser information when your browser downloads these files.</li>
           </ul>
           <p>Your UPI payment itself is handled by your own UPI app, bank and the payment network, under their own terms and privacy policies.</p>
         `
@@ -468,7 +467,7 @@ const LEGAL_PAGES = {
         id: 'third-party-requests',
         heading: 'Third-party content',
         html: `
-          <p>The site loads fonts, styles, icons and scripts from third-party providers (Google Fonts, the Tailwind CSS CDN, unpkg, cdnjs and gstatic), and may load images from Firebase Storage, Unsplash and QR Server. These providers receive your IP address and browser information as part of a normal web request. Their handling of that data is governed by their own policies. See the <a href="#privacy-policy">Privacy Policy</a> for more on the services we use.</p>
+          <p>The site loads fonts, styles, icons and scripts from third-party providers (Google Fonts, the Tailwind CSS CDN, unpkg and cdnjs), and may load images from Unsplash and QR Server. These providers receive your IP address and browser information as part of a normal web request. Their handling of that data is governed by their own policies. See the <a href="#privacy-policy">Privacy Policy</a> for more on the services we use.</p>
         `
       },
       {

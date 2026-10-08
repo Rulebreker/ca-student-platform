@@ -10,7 +10,6 @@ import admin_session
 
 BASE_URL = 'http://127.0.0.1:8000'
 ADMIN_TOKEN = admin_session.admin_token()
-FIREBASE_URL = 'https://excellenceca-45a9d-default-rtdb.firebaseio.com'
 
 def http_request(url, data=None, headers=None, method='GET'):
     h = {'Content-Type': 'application/json'}
@@ -221,21 +220,6 @@ class TestProductionCriticalGate(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(res.get('success'))
         self.assertIn('hierarchy', res)
-
-    # TEST 12: frontend -> backend -> Firebase works
-    def test_12_backend_to_firebase_sync(self):
-        status, data = http_request(f"{FIREBASE_URL}/users/usr-admin-1.json")
-        self.assertEqual(status, 200)
-        self.assertIsInstance(data, dict)
-        self.assertEqual(data.get('email'), 'adminrulebreker@rulebrekerdothunter.com')
-        self.assertTrue(data.get('password', '').startswith('sha256:'))
-
-    # TEST 13: production frontend -> production backend -> Firebase works
-    def test_13_production_firebase_reachability(self):
-        status, data = http_request(f"{FIREBASE_URL}/ai_providers.json")
-        self.assertEqual(status, 200)
-        self.assertIsInstance(data, list)
-        self.assertGreaterEqual(len(data), 6)
 
     # TEST 16: Refresh browser / reload data verifies persistent data remains correct
     def test_16_browser_refresh_data_persistence(self):

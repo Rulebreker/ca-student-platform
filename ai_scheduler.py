@@ -466,7 +466,7 @@ def delete_scheduled_task(
     task_id: str,
     data: Dict[str, Any],
     save_callback: Any = None,
-    firebase_sync_callback: Any = None
+    db_sync_callback: Any = None
 ) -> bool:
     """
     Authoritatively delete a scheduled task from the collection and mark tombstone.
@@ -497,9 +497,9 @@ def delete_scheduled_task(
         except Exception:
             pass
 
-    if deleted and firebase_sync_callback:
+    if deleted and db_sync_callback:
         try:
-            firebase_sync_callback(f"ai_scheduled_tasks/{task_id}", None, method='DELETE', sync=True)
+            db_sync_callback(f"ai_scheduled_tasks/{task_id}", None, method='DELETE', sync=True)
         except Exception:
             pass
 
@@ -604,7 +604,7 @@ def attempt_claim_task(
     data: Dict[str, Any],
     worker_id: Optional[str] = None,
     save_callback: Any = None,
-    firebase_sync_callback: Any = None,
+    db_sync_callback: Any = None,
     claim_fn: Any = None
 ) -> Tuple[bool, Optional[str]]:
     """
@@ -672,19 +672,19 @@ def attempt_claim_task(
         except Exception:
             pass
 
-    if firebase_sync_callback:
+    if db_sync_callback:
         try:
-            firebase_sync_callback(f"ai_scheduled_tasks/{task_id}", task, method='PUT', sync=True)
+            db_sync_callback(f"ai_scheduled_tasks/{task_id}", task, method='PUT', sync=True)
         except Exception:
             pass
 
     return True, execution_id
 
-def _persist_task(task: Dict[str, Any], data: Dict[str, Any], save_callback: Any, firebase_sync_callback: Any):
+def _persist_task(task: Dict[str, Any], data: Dict[str, Any], save_callback: Any, db_sync_callback: Any):
     if save_callback:
         save_callback(data)
-    if firebase_sync_callback:
-        firebase_sync_callback(f"ai_scheduled_tasks/{task.get('id')}", task, method='PUT', sync=True)
+    if db_sync_callback:
+        db_sync_callback(f"ai_scheduled_tasks/{task.get('id')}", task, method='PUT', sync=True)
 
 
 def record_task_failure(task: Dict[str, Any], err_msg: str, now_utc: datetime) -> None:
@@ -711,9 +711,9 @@ def record_task_failure(task: Dict[str, Any], err_msg: str, now_utc: datetime) -
     task['status'] = 'failed'
 
 
-def _fail_task(task: Dict[str, Any], err_msg: str, data: Dict[str, Any], save_callback: Any, firebase_sync_callback: Any):
+def _fail_task(task: Dict[str, Any], err_msg: str, data: Dict[str, Any], save_callback: Any, db_sync_callback: Any):
     record_task_failure(task, err_msg, get_now_utc())
-    _persist_task(task, data, save_callback, firebase_sync_callback)
+    _persist_task(task, data, save_callback, db_sync_callback)
 
 
 def build_task_job_params(task: Dict[str, Any]) -> Dict[str, Any]:
@@ -755,7 +755,7 @@ def dispatch_scheduled_task(
     task: Dict[str, Any],
     data: Dict[str, Any],
     save_callback: Any,
-    firebase_sync_callback: Any
+    db_sync_callback: Any
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """
     Start a scheduled task by queuing a generation job for the Local Qwen Worker - the same
@@ -765,7 +765,7 @@ def dispatch_scheduled_task(
     task_id = task.get('id')
     now_iso = format_iso_utc(get_now_utc())
     if task.get('testSource') == 'existing_test':
-        return host_existing_test(task, data, save_callback, firebase_sync_callback)
+        return host_existing_test(task, data, save_callback, db_sync_callback)
     print(f"[SCHEDULER_DISPATCH] Queuing job for scheduled task '{task.get('name')}' (ID: {task_id})...", flush=True)
 
     worker_status = ai_job_manager.get_worker_status(data)
@@ -773,14 +773,14 @@ def dispatch_scheduled_task(
         err_msg = ("Local Qwen Worker is offline. Start `python local_qwen_worker.py` on the administrator machine; "
                    "the task will run at its next scheduled time.")
         print(f"[SCHEDULER_FAILED_WORKER_OFFLINE] Task '{task.get('name')}': {err_msg}", flush=True)
-        _fail_task(task, err_msg, data, save_callback, firebase_sync_callback)
+        _fail_task(task, err_msg, data, save_callback, db_sync_callback)
         return False, err_msg, None
 
     ok, err, job_record = ai_job_manager.create_generation_job(
-        build_task_job_params(task), data, save_callback, firebase_sync_callback, scheduled_task_id=task_id)
+        build_task_job_params(task), data, save_callback, db_sync_callback, scheduled_task_id=task_id)
     if not ok or not job_record:
         err_msg = f"Failed to queue generation job: {err}"
-        _fail_task(task, err_msg, data, save_callback, firebase_sync_callback)
+        _fail_task(task, err_msg, data, save_callback, db_sync_callback)
         return False, err_msg, None
 
     task['status'] = 'processing'
@@ -788,7 +788,7 @@ def dispatch_scheduled_task(
     task['activeJobId'] = job_record['id']
     task['claimedAt'] = task.get('claimedAt') or now_iso
     task['updatedAt'] = now_iso
-    _persist_task(task, data, save_callback, firebase_sync_callback)
+    _persist_task(task, data, save_callback, db_sync_callback)
     return True, None, {'job': job_record, 'queuedForWorker': True}
 
 
@@ -796,19 +796,19 @@ def host_existing_test(
     task: Dict[str, Any],
     data: Dict[str, Any],
     save_callback: Any,
-    firebase_sync_callback: Any
+    db_sync_callback: Any
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
     """Make an already-created MCQ test live for this occurrence (no generation, no worker needed)."""
     test_id = task.get('existingTestId')
     test = next((t for t in data.get('tests', []) if isinstance(t, dict) and t.get('id') == test_id), None)
     if not test:
         err_msg = "The selected test no longer exists. Edit the schedule and choose another test."
-        _fail_task(task, err_msg, data, save_callback, firebase_sync_callback)
+        _fail_task(task, err_msg, data, save_callback, db_sync_callback)
         return False, err_msg, None
     q_count = sum(1 for q in data.get('questions', []) if isinstance(q, dict) and q.get('testId') == test_id)
     if q_count == 0 and not int(test.get('totalQuestions') or 0):
         err_msg = f"Test '{test.get('title')}' has no questions; it was not made live."
-        _fail_task(task, err_msg, data, save_callback, firebase_sync_callback)
+        _fail_task(task, err_msg, data, save_callback, db_sync_callback)
         return False, err_msg, None
 
     now_utc = get_now_utc()
@@ -837,9 +837,9 @@ def host_existing_test(
         test['status'] = 'Published'
         task['status'] = 'scheduled' if is_recurring(task) else 'completed'
         task['nextRunAt'] = calculate_next_run(task, now_utc) if is_recurring(task) else None
-    if firebase_sync_callback:
-        firebase_sync_callback(f"tests/{test_id}", test, method='PUT', sync=True)
-    _persist_task(task, data, save_callback, firebase_sync_callback)
+    if db_sync_callback:
+        db_sync_callback(f"tests/{test_id}", test, method='PUT', sync=True)
+    _persist_task(task, data, save_callback, db_sync_callback)
     print(f"[SCHEDULER_HOST_EXISTING] Task '{task.get('name')}' hosted test '{test.get('title')}' ({test_id}) -> {task['status']}.", flush=True)
     return True, None, {'test': {'id': test_id, 'title': test.get('title')}, 'hostedExistingTest': True}
 
@@ -848,7 +848,7 @@ def apply_job_outcome_to_task(
     job: Dict[str, Any],
     test_record: Optional[Dict[str, Any]],
     data: Dict[str, Any],
-    firebase_sync_callback: Any = None
+    db_sync_callback: Any = None
 ) -> None:
     """Called by ai_job_manager when a job linked to a scheduled task finishes (any terminal status)."""
     task = get_scheduled_task_by_id(job.get('scheduledTaskId'), data)
@@ -885,8 +885,8 @@ def apply_job_outcome_to_task(
             test_record['status'] = 'Live'
             test_record['liveStartsAt'] = starts_at
             test_record['liveExpiresAt'] = expires_at
-            if firebase_sync_callback:
-                firebase_sync_callback(f"tests/{test_id}", test_record, method='PUT', sync=True)
+            if db_sync_callback:
+                db_sync_callback(f"tests/{test_id}", test_record, method='PUT', sync=True)
             task['status'] = 'live'
             task['startsAt'] = starts_at
             task['expiresAt'] = expires_at
@@ -898,8 +898,8 @@ def apply_job_outcome_to_task(
             task['status'] = 'completed'
             task['nextRunAt'] = None
 
-    if firebase_sync_callback:
-        firebase_sync_callback(f"ai_scheduled_tasks/{task.get('id')}", task, method='PUT', sync=True)
+    if db_sync_callback:
+        db_sync_callback(f"ai_scheduled_tasks/{task.get('id')}", task, method='PUT', sync=True)
     print(f"[SCHEDULER_JOB_OUTCOME] Task '{task.get('name')}' -> {task['status']} (job {job.get('id')} {job.get('status')}).", flush=True)
 
 PROCESSING_STATUSES = ('processing', 'PROCESSING')
@@ -943,7 +943,7 @@ def _job_test_record(job: Dict[str, Any], data: Dict[str, Any]) -> Optional[Dict
 def reconcile_processing_tasks(
     data: Dict[str, Any],
     save_callback: Any,
-    firebase_sync_callback: Any,
+    db_sync_callback: Any,
     transition_fn: Any = None,
     now_utc: Optional[datetime] = None
 ) -> List[Dict[str, Any]]:
@@ -966,7 +966,7 @@ def reconcile_processing_tasks(
     candidates = [t for t in get_scheduled_tasks(data) if needs_processing_check(t, now_utc)]
     if not candidates:
         return []
-    ai_job_manager.expire_stale_jobs(data, save_callback, firebase_sync_callback)   # may finish jobs -> tasks updated
+    ai_job_manager.expire_stale_jobs(data, save_callback, db_sync_callback)   # may finish jobs -> tasks updated
     jobs = {j.get('id'): j for j in job_repository.JobRepository(data).list_jobs()}
     results = []
     for task in candidates:
@@ -1001,12 +1001,12 @@ def reconcile_processing_tasks(
         if action == 'cancelled_overdue_job':
             print(f"[SCHEDULER_RECOVERY] Task '{task.get('name')}': job {job.get('id')} running {int(age)}s > limit; cancelling.", flush=True)
             reason = f"Cancelled by scheduler recovery: no result after {int(age // 60)} minutes."
-            ai_job_manager.fail_overdue_job(job.get('id'), reason, data, save_callback, firebase_sync_callback)
+            ai_job_manager.fail_overdue_job(job.get('id'), reason, data, save_callback, db_sync_callback)
             if task.get('status') == 'RECOVERING':   # outcome not applied (e.g. job was not linked)
                 record_task_failure(task, reason, now_utc)
         elif action == 'applied_missed_outcome':
             print(f"[SCHEDULER_RECOVERY] Task '{task.get('name')}': applying missed outcome of job {job.get('id')} ({job.get('status')}).", flush=True)
-            apply_job_outcome_to_task(job, _job_test_record(job, data), data, firebase_sync_callback)
+            apply_job_outcome_to_task(job, _job_test_record(job, data), data, db_sync_callback)
         else:
             record_task_failure(task, (f"Generation job {task.get('activeJobId')} was lost" if task.get('activeJobId')
                                        else "The run never started a generation job") +
@@ -1014,7 +1014,7 @@ def reconcile_processing_tasks(
         if task.get('status') == 'RECOVERING':   # safety net: never leave a task in the transient state
             record_task_failure(task, 'Recovery could not determine the run outcome.', now_utc)
         task['activeJobId'] = None
-        _persist_task(task, data, save_callback, firebase_sync_callback)
+        _persist_task(task, data, save_callback, db_sync_callback)
         results.append({'taskId': task.get('id'), 'taskName': task.get('name'), 'action': action, 'success': True,
                         'status': task.get('status'), 'nextRunAt': task.get('nextRunAt')})
     return results
@@ -1023,7 +1023,7 @@ def reconcile_processing_tasks(
 def process_due_tasks(
     data: Dict[str, Any],
     save_callback: Any,
-    firebase_sync_callback: Any,
+    db_sync_callback: Any,
     claim_fn: Any = None,
     transition_fn: Any = None
 ) -> Dict[str, Any]:
@@ -1048,12 +1048,12 @@ def process_due_tasks(
             if not next_run or next_run <= now_iso:
                 t['nextRunAt'] = calculate_next_run(t, now_utc)
             t['updatedAt'] = now_iso
-            _persist_task(t, data, save_callback, firebase_sync_callback)
+            _persist_task(t, data, save_callback, db_sync_callback)
             executed_results.append({'taskId': t.get('id'), 'taskName': t.get('name'), 'action': 'recovered_schedule',
                                      'success': True, 'nextRunAt': t.get('nextRunAt')})
 
     # Phase 0b: tasks stuck in 'processing' (lost worker / job / result)
-    executed_results.extend(reconcile_processing_tasks(data, save_callback, firebase_sync_callback,
+    executed_results.extend(reconcile_processing_tasks(data, save_callback, db_sync_callback,
                                                        transition_fn=transition_fn, now_utc=now_utc))
 
     # Phase 1: Due Start Events (scheduled -> live / completed); one instance per occurrence
@@ -1061,10 +1061,10 @@ def process_due_tasks(
 
     for t in due_to_start:
         claimed, claim_id = attempt_claim_task(t, data, save_callback=save_callback,
-                                               firebase_sync_callback=firebase_sync_callback, claim_fn=claim_fn)
+                                               db_sync_callback=db_sync_callback, claim_fn=claim_fn)
         if not claimed:
             continue
-        ok, err, res = dispatch_scheduled_task(t, data, save_callback, firebase_sync_callback)
+        ok, err, res = dispatch_scheduled_task(t, data, save_callback, db_sync_callback)
         executed_results.append({
             'taskId': t.get('id'),
             'taskName': t.get('name'),
@@ -1093,8 +1093,8 @@ def process_due_tasks(
                     t_item['isLive'] = False
                     t_item['status'] = 'Expired'
                     t_item['expiredAt'] = now_iso
-                    if firebase_sync_callback:
-                        firebase_sync_callback(f"tests/{test_id}", t_item, method='PUT', sync=True)
+                    if db_sync_callback:
+                        db_sync_callback(f"tests/{test_id}", t_item, method='PUT', sync=True)
                     print(f"[SCHEDULER_EXPIRE] Test '{test_id}' marked EXPIRED.", flush=True)
                     break
 
@@ -1114,8 +1114,8 @@ def process_due_tasks(
         t['updatedAt'] = now_iso
         if save_callback:
             save_callback(data)
-        if firebase_sync_callback:
-            firebase_sync_callback(f"ai_scheduled_tasks/{t['id']}", t, method='PUT', sync=True)
+        if db_sync_callback:
+            db_sync_callback(f"ai_scheduled_tasks/{t['id']}", t, method='PUT', sync=True)
 
         executed_results.append({
             'taskId': t.get('id'),
@@ -1135,8 +1135,8 @@ def process_due_tasks(
                 test['expiredAt'] = now_iso
                 if save_callback:
                     save_callback(data)
-                if firebase_sync_callback:
-                    firebase_sync_callback(f"tests/{test['id']}", test, method='PUT', sync=True)
+                if db_sync_callback:
+                    db_sync_callback(f"tests/{test['id']}", test, method='PUT', sync=True)
 
     # Legacy autopilot backward compatibility
     legacy_cfg = data.get('ai_autopilot_config')
@@ -1180,14 +1180,14 @@ def process_due_tasks(
             if not ai_job_manager.get_worker_status(data).get('isOnline'):
                 ok, err, job_record = False, 'Local Qwen Worker is offline', None
             else:
-                ok, err, job_record = ai_job_manager.create_generation_job(params, data, save_callback, firebase_sync_callback)
+                ok, err, job_record = ai_job_manager.create_generation_job(params, data, save_callback, db_sync_callback)
             if ok and job_record:
                 legacy_cfg['lastRunDate'] = today_str
                 legacy_cfg['lastRunJobId'] = job_record.get('id')
                 if save_callback:
                     save_callback(data)
-                if firebase_sync_callback:
-                    firebase_sync_callback('ai_autopilot_config', legacy_cfg, method='PUT', sync=True)
+                if db_sync_callback:
+                    db_sync_callback('ai_autopilot_config', legacy_cfg, method='PUT', sync=True)
                 executed_results.append({
                     'taskId': 'legacy_autopilot',
                     'taskName': 'Legacy Auto-Pilot',
@@ -1208,7 +1208,7 @@ def process_due_tasks(
 # DAEMON WORKER (FOR LOCAL / PERSISTENT SERVER ENVIRONMENTS)
 # ======================================================================
 
-def start_autopilot_scheduler(load_data_fn, save_data_fn, firebase_sync_fn, tick_fn=None):
+def start_autopilot_scheduler(load_data_fn, save_data_fn, db_sync_fn, tick_fn=None):
     """Start background scheduler thread for persistent server environments. tick_fn (the server's
     run_due_scheduler_tasks) is preferred: it uses the cheap due check and atomic claims."""
     global _scheduler_running, _scheduler_thread
@@ -1218,13 +1218,13 @@ def start_autopilot_scheduler(load_data_fn, save_data_fn, firebase_sync_fn, tick
     _scheduler_running = True
     _scheduler_thread = threading.Thread(
         target=_autopilot_worker_loop,
-        args=(load_data_fn, save_data_fn, firebase_sync_fn, tick_fn),
+        args=(load_data_fn, save_data_fn, db_sync_fn, tick_fn),
         daemon=True
     )
     _scheduler_thread.start()
     print("[AI_SCHEDULER] Persistent Auto-Pilot worker thread active.", flush=True)
 
-def _autopilot_worker_loop(load_data_fn, save_data_fn, firebase_sync_fn, tick_fn=None):
+def _autopilot_worker_loop(load_data_fn, save_data_fn, db_sync_fn, tick_fn=None):
     while _scheduler_running:
         try:
             time.sleep(30) # Poll every 30 seconds
@@ -1233,7 +1233,7 @@ def _autopilot_worker_loop(load_data_fn, save_data_fn, firebase_sync_fn, tick_fn
                 continue
             with job_repository.STORE_LOCK:
                 data = load_data_fn()
-                process_due_tasks(data, save_data_fn, firebase_sync_fn)
+                process_due_tasks(data, save_data_fn, db_sync_fn)
         except Exception as e:
             print(f"[AI_SCHEDULER_LOOP_ERROR] Worker encountered error: {e}", flush=True)
             time.sleep(10)

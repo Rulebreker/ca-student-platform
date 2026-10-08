@@ -2,7 +2,7 @@
 mongodb_manager.py
 ==================
 Centralized MongoDB Atlas Manager for ExcellenceCA.
-Replaces slow legacy Firebase RTDB REST calls with fast native MongoDB driver,
+Native MongoDB driver for all application data,
 maintaining a resilient local JSON fallback mirror (backend_data.json).
 
 Features:
@@ -136,7 +136,7 @@ def _mongo_id_for(collection_name: str, dict_key: Any, doc: Dict[str, Any]) -> s
 
 def sync_document_to_mongo(path: str, data: Any, method: str = 'PUT', sync: bool = False) -> Optional[bool]:
     """
-    Write an update to MongoDB Atlas. Signature matches the legacy sync_to_firebase(path, data, method, sync).
+    Write an update to MongoDB Atlas. Signature: (path, data, method, sync).
 
     Path patterns:
       - 'questions/q-123' PUT   -> replace_one({_id: 'q-123'}, doc, upsert)

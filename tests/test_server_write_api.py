@@ -1,5 +1,5 @@
 """
-Server endpoints that replaced browser -> Firebase writes (requires the local server on :8000).
+Server-side write endpoints for users and papers (requires the local server on :8000).
 Creates uniquely named throwaway users/papers in the LOCAL dev store only.
 """
 import json

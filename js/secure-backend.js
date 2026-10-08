@@ -516,6 +516,7 @@ startxref
         return {
           success: true,
           imageUrl: data.imageUrl || base64Data,
+          storedUrl: data.storedUrl || null,
           fileName: data.fileName || file.name,
           imageId: data.imageId || `img_${Date.now()}`
         };

@@ -7,7 +7,6 @@ import admin_session
 
 LOCAL_BASE = 'http://127.0.0.1:8000'
 PROD_BASE = 'https://excellenceca.vercel.app'
-FIREBASE_RTDB_URL = 'https://excellenceca-45a9d-default-rtdb.firebaseio.com'
 ADMIN_TOKEN = admin_session.admin_token()
 
 def attempt_login(base_url, identifier, password):
@@ -39,26 +38,7 @@ def main():
     print("1.1 backend_data.json revoked_users for test22:", revoked_local)
     assert len(revoked_local) > 0, "test22 NOT recorded in revoked_users!"
 
-    # 1.2 Firebase Realtime Database
-    req_fb_user = urllib.request.Request(f'{FIREBASE_RTDB_URL}/users/usr-student-1789308526406.json')
-    with urllib.request.urlopen(req_fb_user) as resp:
-        fb_user = json.loads(resp.read().decode())
-    print("1.2 Firebase RTDB users/usr-student-1789308526406:", fb_user)
-    assert fb_user is None, "test22 STILL FOUND in Firebase RTDB users/!"
-
-    req_fb_rev = urllib.request.Request(f'{FIREBASE_RTDB_URL}/revoked_users/usr-student-1789308526406.json')
-    with urllib.request.urlopen(req_fb_rev) as resp:
-        fb_rev_id = json.loads(resp.read().decode())
-    print("1.2 Firebase RTDB revoked_users/usr-student-1789308526406:", fb_rev_id)
-    assert fb_rev_id is True, "usr-student-1789308526406 NOT in Firebase revoked_users!"
-
-    req_fb_rev_uname = urllib.request.Request(f'{FIREBASE_RTDB_URL}/revoked_users/test22.json')
-    with urllib.request.urlopen(req_fb_rev_uname) as resp:
-        fb_rev_uname = json.loads(resp.read().decode())
-    print("1.2 Firebase RTDB revoked_users/test22:", fb_rev_uname)
-    assert fb_rev_uname is True, "test22 NOT in Firebase revoked_users!"
-
-    print("\n>>> DATABASE DELETION VERIFIED: test22@gmail.com is 100% PURGED from both DBs <<<\n")
+    print("\n>>> DATABASE DELETION VERIFIED: test22@gmail.com is 100% PURGED from the database <<<\n")
 
     print("=====================================================")
     print("VERIFICATION 2: LOCALHOST LOGIN ATTEMPT")

@@ -7,7 +7,7 @@
  * - Unique immutable plan IDs (core_monthly, core_4_month, plus_monthly, plus_4_month, elite_monthly, elite_4_month, elite_trial)
  * - 5-minute server-enforced countdown timer
  * - Strict UTR format validation & screenshot capture
- * - Realtime UI updates via Firebase RTDB listeners
+ * - UI updates via server polling (js/server-sync.js)
  */
 
 class SubscriptionManager {
@@ -151,9 +151,7 @@ class SubscriptionManager {
           this.userEntitlements = data.entitlements || null;
           if (window.store) {
             if (data.subscription) {
-              // Use saveSubscriptions (plural) to avoid circular loop:
-              // saveSubscription (singular) → firebaseSync.saveSubscription → Firebase .set()
-              // → listener .on('value') → onSubscriptionUpdate → renderPassesPage → syncMySubscription → ∞
+              // Use saveSubscriptions (plural): update the local store only, without a server write
               const subs = window.store.getSubscriptions();
               subs[data.subscription.userId] = data.subscription;
               window.store.saveSubscriptions(subs);
